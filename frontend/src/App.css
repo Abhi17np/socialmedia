@@ -1,0 +1,16 @@
+/* Minimal layout shell + auth screens — the social/* components bring
+   their own styling from index.css (ported from admin-panel). */
+
+.app-shell { display: flex; min-height: 100vh; }
+.app-sidebar { width: 220px; flex-shrink: 0; display: flex; flex-direction: column; border-right: 1px solid #e5e7eb; }
+.app-main { flex: 1; overflow-y: auto; }
+.logout-link { margin: 16px; padding: 8px 12px; background: none; border: 1px solid #e5e7eb; border-radius: 6px; cursor: pointer; }
+
+.auth-screen { min-height: 100vh; display: flex; align-items: center; justify-content: center; background: #f9fafb; }
+.auth-card { width: 360px; display: flex; flex-direction: column; gap: 14px; padding: 32px; background: #fff; border-radius: 12px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+.auth-card label { display: flex; flex-direction: column; gap: 4px; font-size: 14px; }
+.auth-card input { padding: 8px 10px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 14px; }
+.auth-card button { padding: 10px; background: #111827; color: #fff; border: none; border-radius: 6px; cursor: pointer; font-size: 14px; }
+.auth-card button:disabled { opacity: 0.6; cursor: not-allowed; }
+.auth-card a { color: #2563eb; cursor: pointer; }
+.auth-error { background: #fee2e2; color: #991b1b; padding: 8px 10px; border-radius: 6px; font-size: 13px; }

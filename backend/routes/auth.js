@@ -1,0 +1,80 @@
+const express = require('express');
+const { getSocialClient } = require('../social/db');
+const { hashPassword, verifyPassword, signToken } = require('../lib/auth');
+
+const router = express.Router();
+
+function slugify(name) {
+  return name.toLowerCase().trim().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '') || 'workspace';
+}
+
+// Signup creates a brand-new tenant and its first user (role: owner) in
+// one atomic call — see create_tenant_with_owner() in
+// migrations/001_tenants_users.sql for why this can't be two separate
+// .insert() calls from here.
+router.post('/auth/signup', async (req, res) => {
+  const { tenantName, email, password } = req.body || {};
+  if (!tenantName || !email || !password) {
+    return res.status(400).json({ error: 'tenantName, email and password are all required.' });
+  }
+  if (password.length < 8) {
+    return res.status(400).json({ error: 'Password must be at least 8 characters.' });
+  }
+
+  const client = getSocialClient();
+  if (!client) return res.status(503).json({ error: 'Database not configured.' });
+
+  try {
+    const passwordHash = await hashPassword(password);
+    const slug = `${slugify(tenantName)}-${Date.now().toString(36)}`; // cheap uniqueness without a retry loop
+
+    const { data, error } = await client.rpc('create_tenant_with_owner', {
+      p_tenant_name: tenantName,
+      p_tenant_slug: slug,
+      p_email: email.toLowerCase().trim(),
+      p_password_hash: passwordHash
+    });
+    if (error) {
+      if (error.code === '23505') return res.status(409).json({ error: 'An account with that email already exists.' });
+      throw error;
+    }
+
+    const { tenant_id: tenantId, user_id: userId } = data[0];
+    const token = signToken({ userId, tenantId, role: 'owner' });
+    res.status(201).json({ token, tenant: { id: tenantId, name: tenantName, plan: 'free' } });
+  } catch (err) {
+    console.error('[auth] Signup failed:', err.message);
+    res.status(500).json({ error: 'Could not create account.' });
+  }
+});
+
+router.post('/auth/login', async (req, res) => {
+  const { email, password } = req.body || {};
+  if (!email || !password) return res.status(400).json({ error: 'email and password are required.' });
+
+  const client = getSocialClient();
+  if (!client) return res.status(503).json({ error: 'Database not configured.' });
+
+  try {
+    const { data: user, error } = await client
+      .from('users')
+      .select('id, tenant_id, email, password_hash, role')
+      .eq('email', email.toLowerCase().trim())
+      .maybeSingle();
+    if (error) throw error;
+
+    // Same error for "no such user" and "wrong password" — don't leak
+    // which one it was.
+    if (!user || !(await verifyPassword(password, user.password_hash))) {
+      return res.status(401).json({ error: 'Invalid email or password.' });
+    }
+
+    const token = signToken({ userId: user.id, tenantId: user.tenant_id, role: user.role });
+    res.json({ token });
+  } catch (err) {
+    console.error('[auth] Login failed:', err.message);
+    res.status(500).json({ error: 'Could not log in.' });
+  }
+});
+
+module.exports = router;
