@@ -31,12 +31,20 @@ backend/
                      account row, not on tenant_id directly
   server.js
 
-frontend/
+frontend/              Next.js (App Router) — real per-page URLs, not a single-page view switch
+  app/
+    (app)/             Authenticated shell (sidebar + auth check) wrapping dashboard,
+                       compose, posts, inbox, analytics, connect-accounts, team, billing
+    login/, signup/    Public auth pages
+    platform/          Infopace's own internal console — separate login/token from
+                       the tenant app entirely (see backend/middleware/platform.js)
   src/
-    auth/            Login, Signup
-    social/          Dashboard, Composer, Posts, Inbox, Analytics, ConnectAccounts —
-                     ported as-is; they already took an authFetch prop
-    App.jsx          Auth state, authFetch, view routing
+    auth/              Login, Signup (the actual components; app/login etc. just mount them)
+    social/            Dashboard, Composer, Posts, Inbox, Analytics, ConnectAccounts,
+                       Team, Billing, ContactTimeline — ported close to as-is, each
+                       still takes an authFetch prop
+    platform/          PlatformLogin, PlatformDashboard
+    AuthContext.js     authFetch/role, provided by app/(app)/layout.jsx, consumed via useAuth()
 ```
 
 ## Getting started
@@ -44,7 +52,8 @@ frontend/
 1. Create one Supabase (Postgres) project. Run `backend/migrations/*.sql` against it, in order.
 2. `cp backend/.env.example backend/.env` and fill in: `SUPABASE_URL_SOCIAL`/`SUPABASE_KEY_SOCIAL`, `JWT_SECRET` (generate, don't reuse a default), `SOCIAL_TOKEN_ENCRYPTION_KEY`, Redis, and the platform OAuth credentials for whichever channels you're connecting first.
 3. `npm run install:all`
-4. `npm run dev` — backend on :5000, frontend on :5174 (set `VITE_API_BASE` in `frontend/.env` if the backend isn't on localhost).
+4. `npm run dev` — backend on :5000, frontend on :5174 (set `NEXT_PUBLIC_API_BASE` in `frontend/.env.local` if the backend isn't on localhost — Next.js only inlines `NEXT_PUBLIC_`-prefixed env vars into the client bundle).
+5. Platform admin console (Infopace-internal, not customer-facing): seed a row in `platform_admins` (migrations/006) with a bcrypt password hash, then visit `/platform`.
 
 ## What's deliberately not here yet
 

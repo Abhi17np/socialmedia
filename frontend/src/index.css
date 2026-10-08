@@ -1,7 +1,8 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
-
+/* Inter is loaded via next/font/google in app/layout.jsx — self-hosted
+   at build time (no render-blocking request to fonts.googleapis.com, no
+   layout shift while it loads), exposed here as --font-inter. */
 :root {
-  --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  --font-sans: var(--font-inter), -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
 
   /* Flat product-UI surface — page and card are two distinct tones
      (card is white, page is a soft neutral gray) so separation comes

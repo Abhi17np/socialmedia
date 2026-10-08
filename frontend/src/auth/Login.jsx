@@ -1,8 +1,10 @@
-import React, { useState } from 'react';
-import { Share2, Mail, Lock, AlertCircle, RefreshCw, Check } from 'lucide-react';
-import { SOCIAL_API_BASE } from '../social/api';
+'use client';
 
-const API_BASE = SOCIAL_API_BASE.replace(/\/social$/, '');
+import { useState } from 'react';
+import { useRouter } from 'next/navigation';
+import Link from 'next/link';
+import { Share2, Mail, Lock, AlertCircle, RefreshCw, Check } from 'lucide-react';
+import { API_BASE } from '../apiBase';
 
 const FEATURES = [
   'One inbox for WhatsApp, Instagram and Facebook',
@@ -10,7 +12,8 @@ const FEATURES = [
   'Schedule once, publish to every connected channel'
 ];
 
-export default function Login({ onLoggedIn, onSwitchToSignup }) {
+export default function Login() {
+  const router = useRouter();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState(null);
@@ -28,7 +31,8 @@ export default function Login({ onLoggedIn, onSwitchToSignup }) {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Login failed.');
-      onLoggedIn(data.token);
+      localStorage.setItem('token', data.token);
+      router.push('/dashboard');
     } catch (err) {
       setError(err.message);
     } finally {
@@ -116,7 +120,7 @@ export default function Login({ onLoggedIn, onSwitchToSignup }) {
             <div className="auth-footer">
               <span>
                 No account yet?{' '}
-                <span className="auth-toggle-link" onClick={onSwitchToSignup}>Create a workspace</span>
+                <Link href="/signup" className="auth-toggle-link">Create a workspace</Link>
               </span>
             </div>
           </div>

@@ -1,7 +1,8 @@
-import React, { useEffect, useState } from 'react';
-import { RefreshCw } from 'lucide-react';
+'use client';
 
-const API_BASE = (import.meta.env.VITE_API_BASE || 'http://localhost:5000/api/v1');
+import { useEffect, useState } from 'react';
+import { RefreshCw } from 'lucide-react';
+import { API_BASE } from '../apiBase';
 
 function UsageBar({ label, used, limit }) {
   const unlimited = limit === null || limit === undefined || !Number.isFinite(limit);

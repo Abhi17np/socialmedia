@@ -1,68 +1,9 @@
-import React, { useState, useCallback } from 'react';
+'use client';
+
+import { useState, useCallback, useEffect } from 'react';
+import { useRouter } from 'next/navigation';
 import { Shield, LogOut, RefreshCw, Search } from 'lucide-react';
-
-const API_BASE = (import.meta.env.VITE_API_BASE || 'http://localhost:5000/api/v1');
-
-// Infopace's own internal ops console — visually and structurally
-// separate from the tenant-facing app (different token, different
-// backend gate: requirePlatformAdmin, not requireAuth — see
-// backend/middleware/platform.js), reachable at /platform so a tenant
-// user can never stumble into it and a platform admin's token is never
-// confused for a tenant's. This is the "I'm giving my product to a
-// client, I need to see what they're doing" view: every tenant, their
-// plan, and their usage against it, in one list.
-function PlatformLogin({ onLoggedIn }) {
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const [error, setError] = useState(null);
-  const [loading, setLoading] = useState(false);
-
-  const submit = async (e) => {
-    e.preventDefault();
-    setLoading(true);
-    setError(null);
-    try {
-      const res = await fetch(`${API_BASE}/platform/login`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email, password })
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Login failed.');
-      onLoggedIn(data.token);
-    } catch (err) {
-      setError(err.message);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  return (
-    <div className="auth-container" style={{ background: '#0b0c14' }}>
-      <div className="auth-card">
-        <div className="auth-header">
-          <div className="auth-logo" style={{ background: '#16161f' }}><Shield size={22} /></div>
-          <h1 className="auth-title">Platform Admin</h1>
-          <p className="auth-subtitle">Infopace internal — not a customer login</p>
-        </div>
-        <div className="auth-body">
-          {error && <div className="alert-auth"><span>{error}</span></div>}
-          <form onSubmit={submit}>
-            <div className="form-group">
-              <label className="form-label">Email</label>
-              <input className="form-control" style={{ paddingLeft: '0.85rem' }} type="email" value={email} onChange={(e) => setEmail(e.target.value)} required autoFocus />
-            </div>
-            <div className="form-group">
-              <label className="form-label">Password</label>
-              <input className="form-control" style={{ paddingLeft: '0.85rem' }} type="password" value={password} onChange={(e) => setPassword(e.target.value)} required />
-            </div>
-            <button type="submit" className="btn btn-primary auth-btn" disabled={loading}>
-              {loading ? <RefreshCw size={18} style={{ animation: 'spin 1s linear infinite' }} /> : 'Log in'}
-            </button>
-          </form>
-        </div>
-      </div>
-    </div>
-  );
-}
+import { API_BASE } from '../apiBase';
 
 function UsageCell({ used, limit }) {
   const unlimited = limit === null || limit === undefined || !Number.isFinite(limit);
@@ -77,7 +18,12 @@ function UsageCell({ used, limit }) {
 
 const STATUS_COLOR = { active: 'var(--accent-success)', past_due: 'var(--accent-warning)', canceled: 'var(--accent-danger)' };
 
-function PlatformDashboard({ token, onLogout }) {
+// The "I'm giving my product to a client, I need to see what they're
+// doing" view: every tenant, their plan, and their usage against it, in
+// one list. app/platform/page.jsx owns the auth check (redirects to
+// /platform/login if there's no platform_token) before this ever mounts.
+export default function PlatformDashboard({ token }) {
+  const router = useRouter();
   const [tenants, setTenants] = useState(null);
   const [error, setError] = useState(null);
   const [query, setQuery] = useState('');
@@ -91,7 +37,12 @@ function PlatformDashboard({ token, onLogout }) {
       .catch(err => setError(err.message));
   }, [authFetch]);
 
-  React.useEffect(load, [load]);
+  useEffect(load, [load]);
+
+  const handleLogout = () => {
+    localStorage.removeItem('platform_token');
+    router.push('/platform/login');
+  };
 
   const filtered = (tenants || []).filter(t => t.name.toLowerCase().includes(query.toLowerCase()));
 
@@ -113,7 +64,7 @@ function PlatformDashboard({ token, onLogout }) {
           </ul>
         </div>
         <div className="sidebar-user-profile">
-          <button className="btn btn-secondary btn-sm" onClick={onLogout} style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem' }}>
+          <button className="btn btn-secondary btn-sm" onClick={handleLogout} style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem' }}>
             <LogOut size={14} /> Log out
           </button>
         </div>
@@ -183,14 +134,4 @@ function PlatformDashboard({ token, onLogout }) {
       </main>
     </div>
   );
-}
-
-export default function PlatformApp() {
-  const [token, setToken] = useState(() => localStorage.getItem('platform_token'));
-
-  const handleLoggedIn = (t) => { localStorage.setItem('platform_token', t); setToken(t); };
-  const handleLogout = () => { localStorage.removeItem('platform_token'); setToken(null); };
-
-  if (!token) return <PlatformLogin onLoggedIn={handleLoggedIn} />;
-  return <PlatformDashboard token={token} onLogout={handleLogout} />;
 }

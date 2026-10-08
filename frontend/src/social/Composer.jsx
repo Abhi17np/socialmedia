@@ -1,3 +1,5 @@
+'use client';
+
 import React, { useEffect, useRef, useState } from 'react';
 import {
   Send, AlertTriangle, UploadCloud, Film, X, Link2, Check, Globe,

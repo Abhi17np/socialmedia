@@ -17,3 +17,5 @@ npm-debug.log*
 .DS_Store
 
 frontend/dist/
+frontend/.next/
+frontend/AGENTS.md

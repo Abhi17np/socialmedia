@@ -1,7 +1,9 @@
-import React, { useEffect, useState } from 'react';
-import { RefreshCw, UserPlus, Trash2 } from 'lucide-react';
+'use client';
 
-const API_BASE = (import.meta.env.VITE_API_BASE || 'http://localhost:5000/api/v1');
+import { useEffect, useState } from 'react';
+import { RefreshCw, UserPlus, Trash2 } from 'lucide-react';
+import { API_BASE } from '../apiBase';
+
 const ROLES = ['viewer', 'member', 'admin', 'owner'];
 
 // Role management is admin+ only on the backend (middleware/tenant.js's

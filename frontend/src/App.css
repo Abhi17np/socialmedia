@@ -9,6 +9,19 @@
   to { transform: rotate(360deg); }
 }
 
+/* app/(app)/loading.jsx's skeleton, shown during route transitions */
+@keyframes shimmer {
+  from { background-position: -200px 0; }
+  to { background-position: calc(200px + 100%) 0; }
+}
+
+.skeleton-block {
+  background: linear-gradient(90deg, var(--bg-surface) 25%, var(--bg-surface-hover) 37%, var(--bg-surface) 63%);
+  background-size: 400px 100%;
+  animation: shimmer 1.4s ease infinite;
+  border-radius: var(--radius-sm);
+}
+
 /* Contact Timeline — the slide-over panel showing one contact's history
    across every connected channel (social/ContactTimeline.jsx). Built on
    the same tokens as the rest of the app so it reads as part of it, not

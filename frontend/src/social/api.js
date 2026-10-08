@@ -1,4 +1,6 @@
-export const SOCIAL_API_BASE = `${import.meta.env.VITE_API_BASE || 'http://localhost:5000/api/v1'}/social`;
+import { API_BASE } from '../apiBase';
+
+export const SOCIAL_API_BASE = `${API_BASE}/social`;
 
 export const PLATFORM_LABELS = {
   youtube: 'YouTube',

@@ -1,8 +1,10 @@
-import React, { useState } from 'react';
-import { Share2, Building2, Mail, Lock, AlertCircle, RefreshCw, Check } from 'lucide-react';
-import { SOCIAL_API_BASE } from '../social/api';
+'use client';
 
-const API_BASE = SOCIAL_API_BASE.replace(/\/social$/, '');
+import { useState } from 'react';
+import { useRouter } from 'next/navigation';
+import Link from 'next/link';
+import { Share2, Building2, Mail, Lock, AlertCircle, RefreshCw, Check } from 'lucide-react';
+import { API_BASE } from '../apiBase';
 
 const FEATURES = [
   'Free plan: 2 connected accounts, no card required',
@@ -10,7 +12,8 @@ const FEATURES = [
   'Upgrade only when you outgrow a limit'
 ];
 
-export default function Signup({ onLoggedIn, onSwitchToLogin }) {
+export default function Signup() {
+  const router = useRouter();
   const [tenantName, setTenantName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -29,7 +32,8 @@ export default function Signup({ onLoggedIn, onSwitchToLogin }) {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || data.issues?.[0]?.message || 'Signup failed.');
-      onLoggedIn(data.token);
+      localStorage.setItem('token', data.token);
+      router.push('/dashboard');
     } catch (err) {
       setError(err.message);
     } finally {
@@ -133,7 +137,7 @@ export default function Signup({ onLoggedIn, onSwitchToLogin }) {
             <div className="auth-footer">
               <span>
                 Already have an account?{' '}
-                <span className="auth-toggle-link" onClick={onSwitchToLogin}>Log in</span>
+                <Link href="/login" className="auth-toggle-link">Log in</Link>
               </span>
             </div>
           </div>
