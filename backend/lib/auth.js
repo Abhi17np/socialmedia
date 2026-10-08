@@ -29,8 +29,17 @@ function signToken({ userId, tenantId, role }) {
   return jwt.sign({ userId, tenantId, role }, JWT_SECRET, { expiresIn: TOKEN_EXPIRY });
 }
 
+// A platform admin's token carries no tenantId at all and a distinct
+// `scope` claim — not a role string a bug could confuse with a tenant
+// role. requireAuth (middleware/tenant.js) and requirePlatformAdmin
+// (middleware/platform.js) each check for the claim shape they expect
+// and reject the other's token outright (see both files).
+function signPlatformToken({ adminId }) {
+  return jwt.sign({ adminId, scope: 'platform' }, JWT_SECRET, { expiresIn: TOKEN_EXPIRY });
+}
+
 function verifyToken(token) {
   return jwt.verify(token, JWT_SECRET); // throws on invalid/expired — callers catch
 }
 
-module.exports = { hashPassword, verifyPassword, signToken, verifyToken };
+module.exports = { hashPassword, verifyPassword, signToken, signPlatformToken, verifyToken };

@@ -9,20 +9,28 @@ import Posts from './social/Posts';
 import Inbox from './social/Inbox';
 import Analytics from './social/Analytics';
 import ConnectAccounts from './social/ConnectAccounts';
+import Team from './social/Team';
+import Billing from './social/Billing';
 import { SOCIAL_API_BASE } from './social/api';
 
 const API_BASE = SOCIAL_API_BASE.replace(/\/social$/, '');
 
 // Keys must match SocialNav.jsx's own `view` identifiers exactly — it
 // owns the canonical list (what shows in the sidebar, in what order);
-// this just maps each one to the component that renders it.
+// this just maps each one to the component that renders it. SocialNav
+// also owns which role can see each item at all — a role that can't see
+// an item in the nav still can't reach its component this way either,
+// since setCurrentView only ever gets called from a link SocialNav chose
+// to render.
 const VIEWS = {
   'social-dashboard': Dashboard,
   'social-compose': Composer,
   'social-posts': Posts,
   'social-inbox': Inbox,
   'social-analytics': Analytics,
-  'social-accounts': ConnectAccounts
+  'social-accounts': ConnectAccounts,
+  'social-team': Team,
+  'social-billing': Billing
 };
 
 export default function App() {
@@ -67,6 +75,7 @@ export default function App() {
       : <Signup onLoggedIn={handleLoggedIn} onSwitchToLogin={() => setAuthScreen('login')} />;
   }
 
+  const role = me?.user?.role || 'viewer'; // safest default while /auth/me is still loading
   const CurrentViewComponent = VIEWS[currentView] || Dashboard;
   const email = me?.user?.email;
 
@@ -80,7 +89,7 @@ export default function App() {
           <span className="logo-text">Social Hub</span>
         </div>
 
-        <SocialNav currentView={currentView} setCurrentView={setCurrentView} />
+        <SocialNav currentView={currentView} setCurrentView={setCurrentView} role={role} />
 
         <div className="sidebar-user-profile">
           <div className="user-profile-details">
@@ -96,7 +105,7 @@ export default function App() {
         </div>
       </aside>
       <main className="main-content">
-        <CurrentViewComponent authFetch={authFetch} setCurrentView={setCurrentView} />
+        <CurrentViewComponent authFetch={authFetch} setCurrentView={setCurrentView} role={role} />
       </main>
     </div>
   );

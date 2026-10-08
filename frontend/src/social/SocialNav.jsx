@@ -1,31 +1,33 @@
 import React from 'react';
-import { LayoutGrid, PenSquare, Layers, Inbox as InboxIcon, LineChart, Link2 } from 'lucide-react';
+import { LayoutGrid, PenSquare, Layers, Inbox as InboxIcon, LineChart, Link2, Users, CreditCard } from 'lucide-react';
 
-// Sidebar sub-section for the Social module — same menu-section/menu-list/
-// menu-link markup as every other sidebar section in App.jsx (see
-// "Main Dashboard" just above this in the sidebar), so it reads as one
-// more section of the same shell, not a bolted-on second nav. Phase 3
-// added Inbox — one unified view over mentions + inbox_messages (see
-// social/Inbox.jsx). Phase 4 adds Analytics — the "Brand Health"
-// followers/reach/engagement summary (see social/Analytics.jsx). Phase 5
-// adds Dashboard — the rolled-up KPI landing page (see social/Dashboard.jsx).
-// "Calendar" was renamed "Posts" (social/Posts.jsx) — matches Zoho/HubSpot's
-// own naming, with Scheduled/Published as in-page sub-tabs.
-function SocialNav({ currentView, setCurrentView }) {
+const ROLE_RANK = { viewer: 0, member: 1, admin: 2, owner: 3 };
+const atLeast = (role, min) => (ROLE_RANK[role] ?? 0) >= ROLE_RANK[min];
+
+// Sidebar sub-section for the Social module. Every item declares the
+// minimum role that can see it at all — this isn't decoration: every one
+// of these maps to a backend route gated the same way (requireRole in
+// middleware/tenant.js), so a viewer who edited localStorage to force
+// the UI open would still get a 403 from the API. The UI gate exists so
+// a viewer isn't shown a button that always fails, not as the actual
+// security boundary.
+function SocialNav({ currentView, setCurrentView, role }) {
   const items = [
-    { view: 'social-dashboard', icon: LayoutGrid, label: 'Dashboard' },
-    { view: 'social-compose', icon: PenSquare, label: 'Compose' },
-    { view: 'social-posts', icon: Layers, label: 'Posts' },
-    { view: 'social-inbox', icon: InboxIcon, label: 'Inbox' },
-    { view: 'social-analytics', icon: LineChart, label: 'Analytics' },
-    { view: 'social-accounts', icon: Link2, label: 'Connect Accounts' }
+    { view: 'social-dashboard', icon: LayoutGrid, label: 'Dashboard', minRole: 'viewer' },
+    { view: 'social-compose', icon: PenSquare, label: 'Compose', minRole: 'member' },
+    { view: 'social-posts', icon: Layers, label: 'Posts', minRole: 'viewer' },
+    { view: 'social-inbox', icon: InboxIcon, label: 'Inbox', minRole: 'viewer' },
+    { view: 'social-analytics', icon: LineChart, label: 'Analytics', minRole: 'viewer' },
+    { view: 'social-accounts', icon: Link2, label: 'Connect Accounts', minRole: 'admin' },
+    { view: 'social-team', icon: Users, label: 'Team', minRole: 'admin' },
+    { view: 'social-billing', icon: CreditCard, label: 'Billing', minRole: 'owner' }
   ];
 
   return (
     <div className="menu-section">
       <div className="menu-title">Social</div>
       <ul className="menu-list">
-        {items.map(({ view, icon: Icon, label }) => (
+        {items.filter(i => atLeast(role, i.minRole)).map(({ view, icon: Icon, label }) => (
           <li className="menu-item" key={view}>
             <div
               className={`menu-link ${currentView === view ? 'active' : ''}`}

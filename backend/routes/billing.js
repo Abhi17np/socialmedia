@@ -16,6 +16,7 @@ const { getSocialClient } = require('../social/db');
 const { limitsFor } = require('../lib/plans');
 const { getTenantPlan, currentUsage } = require('../lib/entitlements');
 const { validate } = require('../middleware/validate');
+const { requireRole } = require('../middleware/tenant');
 const { checkoutSchema } = require('../lib/schemas');
 
 const PLAN_IDS = {
@@ -63,7 +64,7 @@ protectedRouter.get('/billing/usage', async (req, res) => {
   }
 });
 
-protectedRouter.post('/billing/checkout', validate(checkoutSchema), async (req, res) => {
+protectedRouter.post('/billing/checkout', requireRole('owner'), validate(checkoutSchema), async (req, res) => {
   const { plan } = req.body;
   const planId = PLAN_IDS[plan];
   // zod already confirmed `plan` is 'starter' or 'pro' — this check is a

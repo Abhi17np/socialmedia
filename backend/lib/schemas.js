@@ -29,4 +29,16 @@ const checkoutSchema = z.object({
   plan: z.enum(['starter', 'pro'])
 });
 
-module.exports = { signupSchema, loginSchema, createPostSchema, checkoutSchema };
+const ROLES = ['viewer', 'member', 'admin', 'owner'];
+
+const addMemberSchema = z.object({
+  email: z.string().trim().email(),
+  password: z.string().min(8).max(200),
+  role: z.enum(ROLES)
+});
+
+const updateMemberSchema = z.object({
+  role: z.enum(ROLES)
+});
+
+module.exports = { signupSchema, loginSchema, createPostSchema, checkoutSchema, addMemberSchema, updateMemberSchema };

@@ -22,6 +22,7 @@ const { resolveContact } = require('../lib/contacts');
 const { scoped } = require('../lib/query');
 const { assertWithinLimit, recordUsage } = require('../lib/entitlements');
 const { validate } = require('../middleware/validate');
+const { requireRole } = require('../middleware/tenant');
 const { createPostSchema } = require('../lib/schemas');
 const socialQueue = require('../social/queue');
 
@@ -256,7 +257,7 @@ protectedRouter.get('/social/accounts/:id/posts', async (req, res) => {
   }
 });
 
-protectedRouter.get('/social/connect/:platform', async (req, res) => {
+protectedRouter.get('/social/connect/:platform', requireRole('admin'), async (req, res) => {
   const { platform } = req.params;
   const adapter = ADAPTERS[platform];
   if (!adapter) return res.status(404).json({ error: `No adapter registered for platform "${platform}" yet.` });
@@ -283,7 +284,7 @@ protectedRouter.get('/social/whatsapp/embedded-signup-config', (req, res) => {
   res.json({ appId: process.env.META_APP_ID, configId: process.env.WHATSAPP_SIGNUP_CONFIG_ID });
 });
 
-protectedRouter.post('/social/whatsapp/embedded-signup', async (req, res) => {
+protectedRouter.post('/social/whatsapp/embedded-signup', requireRole('admin'), async (req, res) => {
   const client = requireSocialClient(res);
   if (!client) return;
 
@@ -311,7 +312,7 @@ protectedRouter.post('/social/whatsapp/embedded-signup', async (req, res) => {
   }
 });
 
-protectedRouter.post('/social/accounts/:id/disconnect', async (req, res) => {
+protectedRouter.post('/social/accounts/:id/disconnect', requireRole('admin'), async (req, res) => {
   const client = requireSocialClient(res);
   if (!client) return;
   const { error } = await scoped(client, req.tenantId, 'social_accounts').update({ status: 'revoked' }).eq('id', req.params.id);

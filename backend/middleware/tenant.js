@@ -13,6 +13,11 @@ function requireAuth(req, res, next) {
 
   try {
     const payload = verifyToken(token);
+    // A platform-admin token (lib/auth.js's signPlatformToken) carries no
+    // tenantId at all — reject it explicitly rather than letting it
+    // through with req.tenantId undefined, which scoped() would then
+    // reject anyway but with a confusing 500 instead of a clear 401.
+    if (payload.scope === 'platform') return res.status(401).json({ error: 'This endpoint is for tenant users, not platform admins.' });
     req.tenantId = payload.tenantId;
     req.userId = payload.userId;
     req.role = payload.role;

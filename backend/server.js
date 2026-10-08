@@ -7,9 +7,12 @@ dotenv.config();
 
 const { logger } = require('./lib/logger');
 const { requireAuth } = require('./middleware/tenant');
+const { requirePlatformAdmin } = require('./middleware/platform');
 const authRoutes = require('./routes/auth');
 const socialRoutes = require('./routes/social');
 const billingRoutes = require('./routes/billing');
+const teamRoutes = require('./routes/team');
+const platformRoutes = require('./routes/platform');
 const socialScheduler = require('./social/scheduler');
 const socialPollers = require('./social/pollers');
 
@@ -48,13 +51,34 @@ app.get(`${API_PREFIX}/health`, (req, res) => res.json({ status: 'ok' }));
 // prefix, regardless of path — health and these public routes have to
 // come first.
 app.use(API_PREFIX, authLimiter, authRoutes.router);
+app.use(API_PREFIX, authLimiter, platformRoutes.publicRouter);
 app.use(API_PREFIX, socialRoutes.publicRouter);
 app.use(API_PREFIX, billingRoutes.publicRouter);
 
-app.use(API_PREFIX, requireAuth, apiLimiter);
-app.use(API_PREFIX, authRoutes.protectedRouter);
-app.use(API_PREFIX, socialRoutes.protectedRouter);
-app.use(API_PREFIX, billingRoutes.protectedRouter);
+// requirePlatformAdmin is mounted at the more specific `${API_PREFIX}/platform`
+// path, and registered BEFORE the broader tenant mount below — Express
+// tries app.use() blocks in registration order and only enters one whose
+// path prefix actually matches, so a request to /api/v1/social/... never
+// touches this block at all, and one to /api/v1/platform/... is fully
+// handled here and never reaches requireAuth. (The earlier attempt at
+// this — two routers both mounted at the bare API_PREFIX — was broken:
+// a blanket `.use(requireAuth)` on one runs for every request matching
+// that prefix regardless of which router's own routes would have
+// handled it, since Express can't know that in advance.)
+app.use(
+  `${API_PREFIX}/platform`,
+  requirePlatformAdmin,
+  rateLimit({ windowMs: 15 * 60 * 1000, limit: 600, standardHeaders: true, legacyHeaders: false }),
+  platformRoutes.protectedRouter
+);
+
+const tenantRouter = express.Router();
+tenantRouter.use(requireAuth, apiLimiter);
+tenantRouter.use(authRoutes.protectedRouter);
+tenantRouter.use(socialRoutes.protectedRouter);
+tenantRouter.use(billingRoutes.protectedRouter);
+tenantRouter.use(teamRoutes);
+app.use(API_PREFIX, tenantRouter);
 
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
