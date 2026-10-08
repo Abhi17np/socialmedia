@@ -70,4 +70,26 @@ router.post('/auth/login', validate(loginSchema), async (req, res) => {
   }
 });
 
-module.exports = router;
+const protectedRouter = express.Router();
+
+// What the sidebar's user-profile footer reads — the JWT carries
+// userId/tenantId/role but not email or the tenant's display name, so
+// the frontend needs a real lookup rather than decoding the token.
+protectedRouter.get('/auth/me', async (req, res) => {
+  const client = getSocialClient();
+  if (!client) return res.status(503).json({ error: 'Database not configured.' });
+
+  try {
+    const [{ data: user, error: userError }, { data: tenant, error: tenantError }] = await Promise.all([
+      client.from('users').select('id, email, role').eq('id', req.userId).single(),
+      client.from('tenants').select('id, name, plan').eq('id', req.tenantId).single()
+    ]);
+    if (userError || tenantError) throw userError || tenantError;
+    res.json({ user, tenant });
+  } catch (err) {
+    req.log.error({ err }, 'Could not load current user');
+    res.status(500).json({ error: 'Could not load account.' });
+  }
+});
+
+module.exports = { router, protectedRouter };

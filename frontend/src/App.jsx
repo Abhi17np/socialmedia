@@ -1,5 +1,5 @@
-import React, { useState, useCallback } from 'react';
-import './App.css';
+import React, { useState, useCallback, useEffect } from 'react';
+import { Share2, LogOut } from 'lucide-react';
 import Login from './auth/Login';
 import Signup from './auth/Signup';
 import SocialNav from './social/SocialNav';
@@ -9,6 +9,9 @@ import Posts from './social/Posts';
 import Inbox from './social/Inbox';
 import Analytics from './social/Analytics';
 import ConnectAccounts from './social/ConnectAccounts';
+import { SOCIAL_API_BASE } from './social/api';
+
+const API_BASE = SOCIAL_API_BASE.replace(/\/social$/, '');
 
 const VIEWS = {
   dashboard: Dashboard,
@@ -23,6 +26,7 @@ export default function App() {
   const [token, setToken] = useState(() => localStorage.getItem('token'));
   const [authScreen, setAuthScreen] = useState('login'); // 'login' | 'signup'
   const [currentView, setCurrentView] = useState('dashboard');
+  const [me, setMe] = useState(null);
 
   const handleLoggedIn = (newToken) => {
     localStorage.setItem('token', newToken);
@@ -32,6 +36,7 @@ export default function App() {
   const handleLogout = () => {
     localStorage.removeItem('token');
     setToken(null);
+    setMe(null);
   };
 
   // Every component below calls the API through this, never a bare
@@ -47,6 +52,12 @@ export default function App() {
     return res;
   }, [token]);
 
+  useEffect(() => {
+    if (!token) return;
+    authFetch(`${API_BASE}/auth/me`).then(res => res.json()).then(data => { if (data.user) setMe(data); }).catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [token]);
+
   if (!token) {
     return authScreen === 'login'
       ? <Login onLoggedIn={handleLoggedIn} onSwitchToSignup={() => setAuthScreen('signup')} />
@@ -54,14 +65,34 @@ export default function App() {
   }
 
   const CurrentViewComponent = VIEWS[currentView] || Dashboard;
+  const email = me?.user?.email;
 
   return (
-    <div className="app-shell">
-      <aside className="app-sidebar">
+    <div className="dashboard-container">
+      <aside className="sidebar">
+        <div className="logo-container">
+          <div className="auth-logo" style={{ width: 36, height: 36 }}>
+            <Share2 size={18} />
+          </div>
+          <span className="logo-text">Social Hub</span>
+        </div>
+
         <SocialNav currentView={currentView} setCurrentView={setCurrentView} />
-        <button className="logout-link" onClick={handleLogout}>Log out</button>
+
+        <div className="sidebar-user-profile">
+          <div className="user-profile-details">
+            <div className="user-profile-avatar">{email ? email[0].toUpperCase() : '…'}</div>
+            <div>
+              <div className="user-profile-email" title={email}>{email || 'Loading…'}</div>
+              {me?.tenant && <div style={{ fontSize: '0.75rem', color: 'var(--sidebar-text-muted)' }}>{me.tenant.name} · {me.tenant.plan}</div>}
+            </div>
+          </div>
+          <button className="btn btn-secondary btn-sm" onClick={handleLogout} style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem', marginTop: '0.5rem' }}>
+            <LogOut size={14} /> Log out
+          </button>
+        </div>
       </aside>
-      <main className="app-main">
+      <main className="main-content">
         <CurrentViewComponent authFetch={authFetch} setCurrentView={setCurrentView} />
       </main>
     </div>

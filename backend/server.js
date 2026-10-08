@@ -47,11 +47,12 @@ app.get(`${API_PREFIX}/health`, (req, res) => res.json({ status: 'ok' }));
 // otherwise applies to every route registered after it under this
 // prefix, regardless of path — health and these public routes have to
 // come first.
-app.use(API_PREFIX, authLimiter, authRoutes);
+app.use(API_PREFIX, authLimiter, authRoutes.router);
 app.use(API_PREFIX, socialRoutes.publicRouter);
 app.use(API_PREFIX, billingRoutes.publicRouter);
 
 app.use(API_PREFIX, requireAuth, apiLimiter);
+app.use(API_PREFIX, authRoutes.protectedRouter);
 app.use(API_PREFIX, socialRoutes.protectedRouter);
 app.use(API_PREFIX, billingRoutes.protectedRouter);
 
