@@ -1,0 +1,127 @@
+/*
+ * Social Hub's own design language — replaces the inherited admin-panel
+ * palette (flat blue, dark-navy sidebar) rather than reskinning it.
+ * Loaded after index.css in main.jsx, so every :root redeclaration here
+ * wins; since nearly every component already consumes these tokens
+ * instead of hardcoded colors, redefining them re-themes the whole app
+ * in one pass. The handful of rules in index.css that hardcoded a color
+ * instead of using a token (because they assumed a dark sidebar) are
+ * overridden explicitly below.
+ */
+
+:root {
+  /* Canvas: a light, airy neutral instead of flat white or dark navy */
+  --bg-primary: #f7f7fb;
+  --bg-secondary: #ffffff;
+  --bg-surface: #f3f3f9;
+  --bg-surface-hover: #ebebf5;
+
+  --border-color: #e7e7f1;
+  --border-focus: #5b5fef;
+
+  --text-primary: #16161f;
+  --text-secondary: #5d5d72;
+  --text-muted: #9c9cb0;
+
+  /* Brand: an indigo-violet, not the old flat blue — the one color that
+     should read as "this product," used sparingly against the neutral
+     canvas rather than painting the whole sidebar in it. */
+  --accent-primary: #5b5fef;
+  --accent-primary-hover: #4c50e0;
+  --accent-primary-active: #3f43c9;
+  --accent-secondary: #0d9488;
+  --accent-success: #16a34a;
+  --accent-warning: #d97706;
+  --accent-danger: #dc2626;
+
+  /* Sidebar is now light, matching the canvas with a hairline border —
+     the headline structural change from the inherited dark-slate theme. */
+  --sidebar-bg: #ffffff;
+  --sidebar-border: #ececf5;
+  --sidebar-text-primary: #16161f;
+  --sidebar-text-secondary: #5d5d72;
+  --sidebar-text-muted: #a3a3b8;
+  --sidebar-hover-bg: #f4f4fb;
+
+  --shadow-sm: 0 1px 2px rgba(22, 22, 31, 0.04);
+  --shadow-md: 0 2px 10px rgba(22, 22, 31, 0.06), 0 1px 2px rgba(22, 22, 31, 0.04);
+  --shadow-lg: 0 16px 40px rgba(22, 22, 31, 0.12), 0 2px 8px rgba(22, 22, 31, 0.05);
+
+  --radius-sm: 0.6rem;
+  --radius-md: 0.85rem;
+  --radius-lg: 1.1rem;
+}
+
+body { background: var(--bg-primary); }
+
+/* --- Overrides for rules in index.css that hardcoded a color instead of
+   a token, because they assumed the old dark sidebar/blue accent --- */
+
+.sidebar { box-shadow: var(--shadow-sm); }
+
+.logo-text { color: var(--sidebar-text-primary); }
+
+.menu-link.active {
+  color: var(--accent-primary);
+  background-color: rgba(91, 95, 239, 0.08);
+  border-left-color: var(--accent-primary);
+}
+
+.btn-primary { background-color: var(--accent-primary); border-color: var(--accent-primary); }
+.btn-primary:hover { background-color: var(--accent-primary-hover); border-color: var(--accent-primary-hover); }
+.btn-primary:active { background-color: var(--accent-primary-active); border-color: var(--accent-primary-active); }
+.btn-secondary:hover { border-color: #c7c7e6; }
+
+.auth-body .form-control:focus { box-shadow: 0 0 0 3px rgba(91, 95, 239, 0.14); }
+
+/* --- A split-screen auth layout, replacing the single centered card:
+   a brand panel carrying the pitch, a plain panel carrying the form.
+   See auth/Login.jsx and auth/Signup.jsx. --- */
+
+.auth-split { display: flex; min-height: 100vh; }
+
+.auth-brand-panel {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  padding: 3rem;
+  background: linear-gradient(155deg, #5b5fef 0%, #4338ca 100%);
+  color: #ffffff;
+  position: relative;
+  overflow: hidden;
+}
+
+.auth-brand-panel::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background-image: radial-gradient(circle at 15% 20%, rgba(255, 255, 255, 0.10) 0, transparent 40%),
+                     radial-gradient(circle at 85% 80%, rgba(255, 255, 255, 0.08) 0, transparent 45%);
+  pointer-events: none;
+}
+
+.auth-brand-mark { display: flex; align-items: center; gap: 0.65rem; font-weight: 700; font-size: 1.05rem; z-index: 1; }
+.auth-brand-mark-icon { width: 32px; height: 32px; border-radius: var(--radius-sm); background: rgba(255, 255, 255, 0.16); display: flex; align-items: center; justify-content: center; }
+
+.auth-brand-copy { max-width: 400px; z-index: 1; }
+.auth-brand-copy h2 { font-size: 1.9rem; font-weight: 700; letter-spacing: -0.02em; line-height: 1.25; margin-bottom: 1rem; }
+.auth-brand-copy p { font-size: 0.95rem; color: rgba(255, 255, 255, 0.82); line-height: 1.55; }
+
+.auth-brand-feature-list { display: flex; flex-direction: column; gap: 0.9rem; margin-top: 1.75rem; z-index: 1; }
+.auth-brand-feature { display: flex; align-items: center; gap: 0.65rem; font-size: 0.88rem; color: rgba(255, 255, 255, 0.92); }
+.auth-brand-feature-icon { width: 22px; height: 22px; border-radius: 50%; background: rgba(255, 255, 255, 0.16); display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+
+.auth-brand-footer { font-size: 0.78rem; color: rgba(255, 255, 255, 0.55); z-index: 1; }
+
+.auth-form-panel { flex: 1; display: flex; align-items: center; justify-content: center; padding: 2rem; background: var(--bg-secondary); }
+.auth-form-inner { width: 100%; max-width: 360px; }
+.auth-form-inner .auth-header { padding: 0 0 1.75rem; text-align: left; }
+.auth-form-inner .auth-logo { display: none; } /* the brand panel already carries the mark */
+.auth-form-inner .auth-body { padding: 0; }
+
+@media (max-width: 860px) {
+  .auth-brand-panel { display: none; }
+  .auth-form-inner .auth-header { text-align: center; }
+  .auth-form-inner .auth-logo { display: inline-flex; }
+}

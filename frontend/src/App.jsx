@@ -13,19 +13,22 @@ import { SOCIAL_API_BASE } from './social/api';
 
 const API_BASE = SOCIAL_API_BASE.replace(/\/social$/, '');
 
+// Keys must match SocialNav.jsx's own `view` identifiers exactly — it
+// owns the canonical list (what shows in the sidebar, in what order);
+// this just maps each one to the component that renders it.
 const VIEWS = {
-  dashboard: Dashboard,
-  composer: Composer,
-  posts: Posts,
-  inbox: Inbox,
-  analytics: Analytics,
-  connect: ConnectAccounts
+  'social-dashboard': Dashboard,
+  'social-compose': Composer,
+  'social-posts': Posts,
+  'social-inbox': Inbox,
+  'social-analytics': Analytics,
+  'social-accounts': ConnectAccounts
 };
 
 export default function App() {
   const [token, setToken] = useState(() => localStorage.getItem('token'));
   const [authScreen, setAuthScreen] = useState('login'); // 'login' | 'signup'
-  const [currentView, setCurrentView] = useState('dashboard');
+  const [currentView, setCurrentView] = useState('social-dashboard');
   const [me, setMe] = useState(null);
 
   const handleLoggedIn = (newToken) => {
@@ -71,7 +74,7 @@ export default function App() {
     <div className="dashboard-container">
       <aside className="sidebar">
         <div className="logo-container">
-          <div className="auth-logo" style={{ width: 36, height: 36 }}>
+          <div className="logo-icon">
             <Share2 size={18} />
           </div>
           <span className="logo-text">Social Hub</span>
