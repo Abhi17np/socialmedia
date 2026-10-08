@@ -13,6 +13,8 @@ const express = require('express');
 const crypto = require('crypto');
 const Razorpay = require('razorpay');
 const { getSocialClient } = require('../social/db');
+const { limitsFor } = require('../lib/plans');
+const { getTenantPlan, currentUsage } = require('../lib/entitlements');
 
 const PLAN_IDS = {
   starter: process.env.RAZORPAY_PLAN_STARTER,
@@ -27,6 +29,37 @@ function getRazorpay() {
 
 const publicRouter = express.Router();
 const protectedRouter = express.Router();
+
+// What the frontend needs to render "12 / 30 posts used this month" and
+// to gray out "Connect account" before the backend rejects it — the
+// actual enforcement is lib/entitlements.js's assertWithinLimit(),
+// called from the routes that create something; this is read-only.
+protectedRouter.get('/billing/usage', async (req, res) => {
+  const client = getSocialClient();
+  if (!client) return res.status(503).json({ error: 'Database not configured.' });
+
+  try {
+    const plan = await getTenantPlan(client, req.tenantId);
+    const limits = limitsFor(plan);
+    const [socialAccounts, postsPerMonth, whatsappMessagesPerMonth] = await Promise.all([
+      currentUsage(client, req.tenantId, 'socialAccounts'),
+      currentUsage(client, req.tenantId, 'postsPerMonth'),
+      currentUsage(client, req.tenantId, 'whatsappMessagesPerMonth')
+    ]);
+
+    res.json({
+      plan,
+      usage: {
+        socialAccounts: { used: socialAccounts, limit: limits.socialAccounts },
+        postsPerMonth: { used: postsPerMonth, limit: limits.postsPerMonth },
+        whatsappMessagesPerMonth: { used: whatsappMessagesPerMonth, limit: limits.whatsappMessagesPerMonth }
+      }
+    });
+  } catch (err) {
+    console.error('[billing] Could not load usage:', err.message);
+    res.status(500).json({ error: 'Could not load usage.' });
+  }
+});
 
 protectedRouter.post('/billing/checkout', async (req, res) => {
   const { plan } = req.body || {};

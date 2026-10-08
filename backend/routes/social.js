@@ -20,6 +20,7 @@ const { getSocialClient } = require('../social/db');
 const { getUsableAccount } = require('../social/accounts');
 const { resolveContact } = require('../lib/contacts');
 const { scoped } = require('../lib/query');
+const { assertWithinLimit, recordUsage } = require('../lib/entitlements');
 const socialQueue = require('../social/queue');
 
 const STATE_MAX_AGE_MS = 15 * 60 * 1000; // OAuth round trip has 15 min to complete
@@ -89,9 +90,16 @@ publicRouter.get('/social/callback/:platform', async (req, res) => {
   }
 
   try {
-    const result = await adapter.connect.exchangeCode(code);
     const client = getSocialClient();
     if (!client) return res.status(503).send('Database not configured.');
+
+    // Re-checked here, not just at /social/connect below, in case two
+    // connect flows for the same tenant were started back to back — the
+    // account doesn't exist yet at /social/connect time, so that earlier
+    // check can't see it.
+    await assertWithinLimit(client, statePayload.tenantId, 'socialAccounts');
+
+    const result = await adapter.connect.exchangeCode(code);
 
     const { error: insertError } = await client.from('social_accounts').insert({
       tenant_id: statePayload.tenantId,
@@ -246,12 +254,20 @@ protectedRouter.get('/social/accounts/:id/posts', async (req, res) => {
   }
 });
 
-protectedRouter.get('/social/connect/:platform', (req, res) => {
+protectedRouter.get('/social/connect/:platform', async (req, res) => {
   const { platform } = req.params;
   const adapter = ADAPTERS[platform];
   if (!adapter) return res.status(404).json({ error: `No adapter registered for platform "${platform}" yet.` });
   if (!adapter.isConfigured()) {
     return res.status(400).json({ error: `${platform} OAuth is not configured — set its client id/secret in backend/.env.` });
+  }
+
+  const client = requireSocialClient(res);
+  if (!client) return;
+  try {
+    await assertWithinLimit(client, req.tenantId, 'socialAccounts');
+  } catch (err) {
+    return res.status(err.statusCode || 500).json({ error: err.message, code: err.code });
   }
 
   const state = signState({ platform, tenantId: req.tenantId, ts: Date.now() });
@@ -273,6 +289,7 @@ protectedRouter.post('/social/whatsapp/embedded-signup', async (req, res) => {
   if (!code || !wabaId) return res.status(400).json({ error: 'code and wabaId are required.' });
 
   try {
+    await assertWithinLimit(client, req.tenantId, 'socialAccounts');
     const result = await ADAPTERS.whatsapp.completeEmbeddedSignup({ code, wabaId, phoneNumberId });
     const { error: insertError } = await client.from('social_accounts').insert({
       tenant_id: req.tenantId,
@@ -288,7 +305,7 @@ protectedRouter.post('/social/whatsapp/embedded-signup', async (req, res) => {
     res.json({ success: true, accountLabel: result.accountLabel });
   } catch (err) {
     console.error('[social] WhatsApp Embedded Signup failed:', err.message);
-    res.status(500).json({ error: err.message });
+    res.status(err.statusCode || 500).json({ error: err.message, code: err.code });
   }
 });
 
@@ -366,6 +383,12 @@ protectedRouter.post('/social/posts', async (req, res) => {
     return res.status(400).json({ error: 'targetPlatforms, targetAccountIds and scheduledAt are required.' });
   }
 
+  try {
+    await assertWithinLimit(client, req.tenantId, 'postsPerMonth');
+  } catch (err) {
+    return res.status(err.statusCode || 500).json({ error: err.message, code: err.code });
+  }
+
   const { data, error } = await client.from('scheduled_posts').insert({
     tenant_id: req.tenantId,
     content: content || '',
@@ -377,6 +400,13 @@ protectedRouter.post('/social/posts', async (req, res) => {
   }).select().single();
 
   if (error) return res.status(500).json({ error: error.message });
+
+  // Metered on creation, not on actual publish — a scheduled post counts
+  // against the quota the moment it's created, same as every competitor's
+  // "scheduled posts" limit. Not refunded on cancel (see DELETE below):
+  // the quota is "posts you scheduled this month," not "posts currently live."
+  await recordUsage(client, req.tenantId, 'postsPerMonth').catch(err =>
+    console.error(`[social] Could not record usage for post ${data.id}:`, err.message));
 
   try {
     await socialQueue.enqueuePost(data);
