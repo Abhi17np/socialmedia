@@ -19,10 +19,14 @@ app.use(cors());
 // parsed JSON.
 app.use(express.json({ verify: (req, res, buf) => { req.rawBody = buf; } }));
 
+app.get('/api/health', (req, res) => res.json({ status: 'ok' }));
+
 // Unauthenticated by necessity: OAuth providers and payment/messaging
 // webhooks call these directly and can't carry a Bearer header. Each
 // authenticates itself its own way (signed state, HMAC signature) — see
-// their own files for why.
+// their own files for why. Mounted before requireAuth below, which
+// otherwise applies to every /api/* route registered after it,
+// regardless of path — health and these public routes have to come first.
 app.use('/api', authRoutes);
 app.use('/api', socialRoutes.publicRouter);
 app.use('/api', billingRoutes.publicRouter);
@@ -30,8 +34,6 @@ app.use('/api', billingRoutes.publicRouter);
 app.use('/api', requireAuth);
 app.use('/api', socialRoutes.protectedRouter);
 app.use('/api', billingRoutes.protectedRouter);
-
-app.get('/api/health', (req, res) => res.json({ status: 'ok' }));
 
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
