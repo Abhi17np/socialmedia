@@ -15,6 +15,8 @@ const Razorpay = require('razorpay');
 const { getSocialClient } = require('../social/db');
 const { limitsFor } = require('../lib/plans');
 const { getTenantPlan, currentUsage } = require('../lib/entitlements');
+const { validate } = require('../middleware/validate');
+const { checkoutSchema } = require('../lib/schemas');
 
 const PLAN_IDS = {
   starter: process.env.RAZORPAY_PLAN_STARTER,
@@ -56,15 +58,18 @@ protectedRouter.get('/billing/usage', async (req, res) => {
       }
     });
   } catch (err) {
-    console.error('[billing] Could not load usage:', err.message);
+    req.log.error({ err }, 'Could not load usage');
     res.status(500).json({ error: 'Could not load usage.' });
   }
 });
 
-protectedRouter.post('/billing/checkout', async (req, res) => {
-  const { plan } = req.body || {};
+protectedRouter.post('/billing/checkout', validate(checkoutSchema), async (req, res) => {
+  const { plan } = req.body;
   const planId = PLAN_IDS[plan];
-  if (!planId) return res.status(400).json({ error: `Unknown or unconfigured plan "${plan}". Valid: ${Object.keys(PLAN_IDS).join(', ')}.` });
+  // zod already confirmed `plan` is 'starter' or 'pro' — this check is a
+  // separate failure mode: a valid plan name whose Razorpay plan id was
+  // never configured in env (ops issue, not a bad request).
+  if (!planId) return res.status(503).json({ error: `Plan "${plan}" has no Razorpay plan id configured (RAZORPAY_PLAN_${plan.toUpperCase()}).` });
 
   const razorpay = getRazorpay();
   if (!razorpay) return res.status(503).json({ error: 'Razorpay is not configured (RAZORPAY_KEY_ID / RAZORPAY_KEY_SECRET).' });
@@ -87,7 +92,7 @@ protectedRouter.post('/billing/checkout', async (req, res) => {
 
     res.json({ subscriptionId: subscription.id, shortUrl: subscription.short_url });
   } catch (err) {
-    console.error('[billing] Could not create Razorpay subscription:', err.message);
+    req.log.error({ err }, 'Could not create Razorpay subscription');
     res.status(500).json({ error: 'Could not start checkout.' });
   }
 });
@@ -108,7 +113,7 @@ publicRouter.post('/billing/webhook', async (req, res) => {
   res.sendStatus(200);
 
   if (!verifyRazorpaySignature(req)) {
-    console.error('[billing] Webhook payload failed signature verification — dropped.');
+    req.log.warn('Webhook payload failed signature verification — dropped');
     return;
   }
 
@@ -122,7 +127,7 @@ publicRouter.post('/billing/webhook', async (req, res) => {
   try {
     const { data: tenant } = await client.from('tenants').select('id').eq('razorpay_subscription_id', subscriptionId).maybeSingle();
     if (!tenant) {
-      console.error(`[billing] Webhook event "${event}" for unknown subscription ${subscriptionId} — dropped.`);
+      req.log.warn({ event, subscriptionId }, "Webhook event for unknown subscription — dropped");
       return;
     }
 
@@ -140,7 +145,7 @@ publicRouter.post('/billing/webhook', async (req, res) => {
       await client.from('tenants').update({ subscription_status: status }).eq('id', tenant.id);
     }
   } catch (err) {
-    console.error('[billing] Webhook processing failed:', err.message);
+    req.log.error({ err }, 'Webhook processing failed');
   }
 });
 

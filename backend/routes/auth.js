@@ -1,6 +1,8 @@
 const express = require('express');
 const { getSocialClient } = require('../social/db');
 const { hashPassword, verifyPassword, signToken } = require('../lib/auth');
+const { validate } = require('../middleware/validate');
+const { signupSchema, loginSchema } = require('../lib/schemas');
 
 const router = express.Router();
 
@@ -12,15 +14,8 @@ function slugify(name) {
 // one atomic call — see create_tenant_with_owner() in
 // migrations/001_tenants_users.sql for why this can't be two separate
 // .insert() calls from here.
-router.post('/auth/signup', async (req, res) => {
-  const { tenantName, email, password } = req.body || {};
-  if (!tenantName || !email || !password) {
-    return res.status(400).json({ error: 'tenantName, email and password are all required.' });
-  }
-  if (password.length < 8) {
-    return res.status(400).json({ error: 'Password must be at least 8 characters.' });
-  }
-
+router.post('/auth/signup', validate(signupSchema), async (req, res) => {
+  const { tenantName, email, password } = req.body;
   const client = getSocialClient();
   if (!client) return res.status(503).json({ error: 'Database not configured.' });
 
@@ -43,15 +38,13 @@ router.post('/auth/signup', async (req, res) => {
     const token = signToken({ userId, tenantId, role: 'owner' });
     res.status(201).json({ token, tenant: { id: tenantId, name: tenantName, plan: 'free' } });
   } catch (err) {
-    console.error('[auth] Signup failed:', err.message);
+    req.log.error({ err }, 'Signup failed');
     res.status(500).json({ error: 'Could not create account.' });
   }
 });
 
-router.post('/auth/login', async (req, res) => {
-  const { email, password } = req.body || {};
-  if (!email || !password) return res.status(400).json({ error: 'email and password are required.' });
-
+router.post('/auth/login', validate(loginSchema), async (req, res) => {
+  const { email, password } = req.body;
   const client = getSocialClient();
   if (!client) return res.status(503).json({ error: 'Database not configured.' });
 
@@ -72,7 +65,7 @@ router.post('/auth/login', async (req, res) => {
     const token = signToken({ userId: user.id, tenantId: user.tenant_id, role: user.role });
     res.json({ token });
   } catch (err) {
-    console.error('[auth] Login failed:', err.message);
+    req.log.error({ err }, 'Login failed');
     res.status(500).json({ error: 'Could not log in.' });
   }
 });

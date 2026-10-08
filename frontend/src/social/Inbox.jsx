@@ -1,7 +1,8 @@
 import React, { useEffect, useState } from 'react';
-import { RefreshCw, AtSign, MessageSquare, ExternalLink } from 'lucide-react';
+import { RefreshCw, AtSign, MessageSquare, ExternalLink, UserCircle2 } from 'lucide-react';
 import { SOCIAL_API_BASE, PLATFORM_LABELS, PLATFORM_COLORS, AVAILABLE_PLATFORMS } from './api';
 import { PlatformFilterTabs } from './PlatformIcon';
+import ContactTimeline from './ContactTimeline';
 
 // Unified "all queries and leads in one place" view — mentions (comments,
 // reviews) and inbox_messages (DMs) merged server-side into one list by
@@ -45,6 +46,7 @@ function Inbox({ authFetch }) {
   const [error, setError] = useState(null);
   const [filters, setFilters] = useState({ platform: '', type: '', priority: '', status: '', assignedTo: '' });
   const [savingId, setSavingId] = useState(null);
+  const [timelineContactId, setTimelineContactId] = useState(null);
 
   const load = async () => {
     try {
@@ -158,16 +160,25 @@ function Inbox({ authFetch }) {
                   </div>
                 </div>
 
-                <div className="inbox-body">
+                <div
+                  className="inbox-body"
+                  onClick={() => item.contactId && setTimelineContactId(item.contactId)}
+                  style={item.contactId ? { cursor: 'pointer' } : undefined}
+                  title={item.contactId ? 'View this contact’s full history across every channel' : 'Not yet linked to a contact'}
+                >
                   <div className="inbox-body-top">
                     <span className="inbox-author">{item.author || 'Unknown'}</span>
-                    {item.brand && <span className="inbox-meta">{item.brand}</span>}
+                    {item.contactId && (
+                      <span className="inbox-meta" style={{ display: 'inline-flex', alignItems: 'center', gap: '0.25rem', color: 'var(--accent-primary)' }}>
+                        <UserCircle2 size={12} /> Full history
+                      </span>
+                    )}
                   </div>
                   <p className="inbox-text">{item.text}</p>
                   <div className="inbox-footer">
                     <span>{new Date(item.date).toLocaleDateString()} · {new Date(item.date).toLocaleTimeString()}</span>
                     {item.url && (
-                      <a href={item.url} target="_blank" rel="noreferrer" style={{ color: 'var(--accent-primary)', display: 'inline-flex', alignItems: 'center', gap: '0.25rem' }}>
+                      <a href={item.url} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()} style={{ color: 'var(--accent-primary)', display: 'inline-flex', alignItems: 'center', gap: '0.25rem' }}>
                         <ExternalLink size={12} /> View
                       </a>
                     )}
@@ -216,6 +227,8 @@ function Inbox({ authFetch }) {
           </div>
         )}
       </div>
+
+      <ContactTimeline contactId={timelineContactId} authFetch={authFetch} onClose={() => setTimelineContactId(null)} />
     </div>
   );
 }

@@ -21,6 +21,8 @@ const { getUsableAccount } = require('../social/accounts');
 const { resolveContact } = require('../lib/contacts');
 const { scoped } = require('../lib/query');
 const { assertWithinLimit, recordUsage } = require('../lib/entitlements');
+const { validate } = require('../middleware/validate');
+const { createPostSchema } = require('../lib/schemas');
 const socialQueue = require('../social/queue');
 
 const STATE_MAX_AGE_MS = 15 * 60 * 1000; // OAuth round trip has 15 min to complete
@@ -374,14 +376,10 @@ protectedRouter.post('/social/media/upload', (req, res) => {
   });
 });
 
-protectedRouter.post('/social/posts', async (req, res) => {
+protectedRouter.post('/social/posts', validate(createPostSchema), async (req, res) => {
   const client = requireSocialClient(res);
   if (!client) return;
-  const { content, mediaUrls, targetPlatforms, targetAccountIds, scheduledAt } = req.body;
-
-  if (!targetPlatforms || !targetPlatforms.length || !targetAccountIds || !targetAccountIds.length || !scheduledAt) {
-    return res.status(400).json({ error: 'targetPlatforms, targetAccountIds and scheduledAt are required.' });
-  }
+  const { content, mediaUrls, targetPlatforms, targetAccountIds, scheduledAt, idempotencyKey } = req.body;
 
   try {
     await assertWithinLimit(client, req.tenantId, 'postsPerMonth');
@@ -391,13 +389,23 @@ protectedRouter.post('/social/posts', async (req, res) => {
 
   const { data, error } = await client.from('scheduled_posts').insert({
     tenant_id: req.tenantId,
-    content: content || '',
-    media_urls: mediaUrls || [],
+    content,
+    media_urls: mediaUrls,
     target_platforms: targetPlatforms,
     target_account_ids: targetAccountIds,
     scheduled_at: scheduledAt,
+    idempotency_key: idempotencyKey || null,
     status: 'pending'
   }).select().single();
+
+  // A retried request with the same idempotencyKey hits
+  // idx_scheduled_posts_tenant_idempotency (migrations/005) and is
+  // refused here as a conflict, not silently scheduled twice — the
+  // caller's retry logic treats 409 as "already done, move on."
+  if (error && error.code === '23505') {
+    const { data: existing } = await scoped(client, req.tenantId, 'scheduled_posts').select('*').eq('idempotency_key', idempotencyKey).maybeSingle();
+    return res.status(409).json({ error: 'A post with this idempotency key was already created.', post: existing || null });
+  }
 
   if (error) return res.status(500).json({ error: error.message });
 
@@ -443,15 +451,28 @@ protectedRouter.delete('/social/posts/:id', async (req, res) => {
   res.json({ success: true });
 });
 
+// page/pageSize instead of a hardcoded limit(200) — that cap silently
+// hid anything past the 200th row once a tenant had real volume, with no
+// way for the frontend to even know more existed.
+const DEFAULT_PAGE_SIZE = 50;
+const MAX_PAGE_SIZE = 200;
+
+function pageParams(req) {
+  const page = Math.max(1, parseInt(req.query.page, 10) || 1);
+  const pageSize = Math.min(MAX_PAGE_SIZE, Math.max(1, parseInt(req.query.pageSize, 10) || DEFAULT_PAGE_SIZE));
+  return { page, pageSize, from: (page - 1) * pageSize, to: (page - 1) * pageSize + pageSize - 1 };
+}
+
 protectedRouter.get('/social/mentions', async (req, res) => {
   const client = requireSocialClient(res);
   if (!client) return;
   try {
-    let query = scoped(client, req.tenantId, 'mentions').select('*').order('captured_at', { ascending: false }).limit(200);
+    const { page, pageSize, from, to } = pageParams(req);
+    let query = scoped(client, req.tenantId, 'mentions').select('*', { count: 'exact' }).order('captured_at', { ascending: false }).range(from, to);
     if (req.query.platform) query = query.eq('platform', req.query.platform);
-    const { data, error } = await query;
+    const { data, error, count } = await query;
     if (error) throw error;
-    res.json({ mentions: data });
+    res.json({ mentions: data, page, pageSize, total: count });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -461,11 +482,12 @@ protectedRouter.get('/social/inbox', async (req, res) => {
   const client = requireSocialClient(res);
   if (!client) return;
   try {
-    let query = scoped(client, req.tenantId, 'inbox_messages').select('*').order('received_at', { ascending: false }).limit(200);
+    const { page, pageSize, from, to } = pageParams(req);
+    let query = scoped(client, req.tenantId, 'inbox_messages').select('*', { count: 'exact' }).order('received_at', { ascending: false }).range(from, to);
     if (req.query.platform) query = query.eq('platform', req.query.platform);
-    const { data, error } = await query;
+    const { data, error, count } = await query;
     if (error) throw error;
-    res.json({ messages: data });
+    res.json({ messages: data, page, pageSize, total: count });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
