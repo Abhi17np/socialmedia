@@ -23,7 +23,7 @@ const { scoped } = require('../lib/query');
 const { assertWithinLimit, recordUsage } = require('../lib/entitlements');
 const { validate } = require('../middleware/validate');
 const { requireRole } = require('../middleware/tenant');
-const { createPostSchema } = require('../lib/schemas');
+const { createPostSchema, savedReplySchema } = require('../lib/schemas');
 const socialQueue = require('../social/queue');
 
 const STATE_MAX_AGE_MS = 15 * 60 * 1000; // OAuth round trip has 15 min to complete
@@ -737,6 +737,49 @@ protectedRouter.get('/social/team', async (req, res) => {
   const { data, error } = await scoped(client, req.tenantId, 'users').select('id, email, role');
   if (error) return res.status(500).json({ error: error.message });
   res.json({ users: data });
+});
+
+// Canned responses, shared tenant-wide so a team builds one library
+// instead of each person typing the same reply from scratch. Anyone who
+// can see the Inbox can use them; only member+ can curate the set, same
+// bar as the rest of the app's write actions.
+protectedRouter.get('/social/saved-replies', async (req, res) => {
+  const client = requireSocialClient(res);
+  if (!client) return;
+  const { data, error } = await scoped(client, req.tenantId, 'saved_replies').select('*').order('title', { ascending: true });
+  if (error) return res.status(500).json({ error: error.message });
+  res.json({ savedReplies: data });
+});
+
+protectedRouter.post('/social/saved-replies', requireRole('member'), validate(savedReplySchema), async (req, res) => {
+  const client = requireSocialClient(res);
+  if (!client) return;
+  const { title, body } = req.body;
+  const { data, error } = await client.from('saved_replies')
+    .insert({ tenant_id: req.tenantId, title, body, created_by: req.userId })
+    .select().single();
+  if (error) return res.status(500).json({ error: error.message });
+  res.status(201).json({ savedReply: data });
+});
+
+protectedRouter.patch('/social/saved-replies/:id', requireRole('member'), validate(savedReplySchema), async (req, res) => {
+  const client = requireSocialClient(res);
+  if (!client) return;
+  const { title, body } = req.body;
+  const { data, error } = await scoped(client, req.tenantId, 'saved_replies')
+    .update({ title, body, updated_at: new Date().toISOString() })
+    .eq('id', req.params.id).select().single();
+  if (error) return res.status(500).json({ error: error.message });
+  if (!data) return res.status(404).json({ error: 'Saved reply not found.' });
+  res.json({ savedReply: data });
+});
+
+protectedRouter.delete('/social/saved-replies/:id', requireRole('member'), async (req, res) => {
+  const client = requireSocialClient(res);
+  if (!client) return;
+  const { error } = await scoped(client, req.tenantId, 'saved_replies').delete().eq('id', req.params.id);
+  if (error) return res.status(500).json({ error: error.message });
+  res.status(204).end();
 });
 
 module.exports = { publicRouter, protectedRouter };

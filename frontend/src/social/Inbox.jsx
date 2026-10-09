@@ -1,10 +1,14 @@
 'use client';
 
 import React, { useEffect, useState } from 'react';
-import { RefreshCw, AtSign, MessageSquare, ExternalLink, UserCircle2 } from 'lucide-react';
+import { RefreshCw, AtSign, MessageSquare, ExternalLink, UserCircle2, Reply, MessageSquareText } from 'lucide-react';
 import { SOCIAL_API_BASE, PLATFORM_LABELS, PLATFORM_COLORS, AVAILABLE_PLATFORMS } from './api';
 import { PlatformFilterTabs } from './PlatformIcon';
 import ContactTimeline from './ContactTimeline';
+import SavedReplies from './SavedReplies';
+
+const ROLE_RANK = { viewer: 0, member: 1, admin: 2, owner: 3 };
+const atLeast = (role, min) => (ROLE_RANK[role] ?? 0) >= ROLE_RANK[min];
 
 // Unified "all queries and leads in one place" view — mentions (comments,
 // reviews) and inbox_messages (DMs) merged server-side into one list by
@@ -42,13 +46,18 @@ function avatarColor(name) {
   return AVATAR_PALETTE[hash % AVATAR_PALETTE.length];
 }
 
-function Inbox({ authFetch }) {
+function Inbox({ authFetch, role }) {
   const [interactions, setInteractions] = useState(null);
   const [users, setUsers] = useState([]);
   const [error, setError] = useState(null);
   const [filters, setFilters] = useState({ platform: '', type: '', priority: '', status: '', assignedTo: '' });
   const [savingId, setSavingId] = useState(null);
   const [timelineContactId, setTimelineContactId] = useState(null);
+  const [savedReplies, setSavedReplies] = useState([]);
+  const [managingReplies, setManagingReplies] = useState(false);
+  const [replyingKey, setReplyingKey] = useState(null);
+  const [replyText, setReplyText] = useState('');
+  const [sendingReply, setSendingReply] = useState(false);
 
   const load = async () => {
     try {
@@ -69,10 +78,38 @@ function Inbox({ authFetch }) {
       .then(res => res.json())
       .then(data => setUsers(data.users || []))
       .catch(() => {});
+    authFetch(`${SOCIAL_API_BASE}/saved-replies`)
+      .then(res => res.json())
+      .then(data => setSavedReplies(data.savedReplies || []))
+      .catch(() => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => { load(); }, [filters]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const openReply = (item) => {
+    setReplyingKey(`${item.source}-${item.id}`);
+    setReplyText('');
+  };
+  const cancelReply = () => { setReplyingKey(null); setReplyText(''); };
+
+  const sendReply = async (item) => {
+    if (!replyText.trim()) return;
+    setSendingReply(true);
+    try {
+      const res = await authFetch(`${SOCIAL_API_BASE}/inbox/${item.id}/reply`, {
+        method: 'POST',
+        body: JSON.stringify({ message: replyText.trim() })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Could not send this reply.');
+      cancelReply();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setSendingReply(false);
+    }
+  };
 
   const patch = async (item, body) => {
     setSavingId(item.id);
@@ -100,9 +137,14 @@ function Inbox({ authFetch }) {
           <h1>Inbox</h1>
           <p>Every comment, review, and message from every connected account, in one place.</p>
         </div>
-        <button className="btn btn-secondary btn-sm" onClick={load}>
-          <RefreshCw size={14} /> Refresh
-        </button>
+        <div style={{ display: 'flex', gap: '0.6rem' }}>
+          <button className="btn btn-secondary btn-sm" onClick={() => setManagingReplies(true)}>
+            <MessageSquareText size={14} /> Canned responses
+          </button>
+          <button className="btn btn-secondary btn-sm" onClick={load}>
+            <RefreshCw size={14} /> Refresh
+          </button>
+        </div>
       </div>
 
       {error && <p style={{ color: 'var(--accent-danger)', marginBottom: '1rem' }}>{error}</p>}
@@ -151,8 +193,11 @@ function Inbox({ authFetch }) {
               <span>Status</span>
               <span>Assignee</span>
             </div>
-            {interactions.map(item => (
-              <div className="inbox-row inbox-grid-cols" key={`${item.source}-${item.id}`}>
+            {interactions.map(item => {
+              const key = `${item.source}-${item.id}`;
+              return (
+              <React.Fragment key={key}>
+              <div className="inbox-row inbox-grid-cols">
                 <div className="inbox-avatar-wrap">
                   <div className="inbox-avatar" style={{ background: avatarColor(item.author) }}>
                     {initials(item.author)}
@@ -183,6 +228,14 @@ function Inbox({ authFetch }) {
                       <a href={item.url} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()} style={{ color: 'var(--accent-primary)', display: 'inline-flex', alignItems: 'center', gap: '0.25rem' }}>
                         <ExternalLink size={12} /> View
                       </a>
+                    )}
+                    {item.source === 'message' && (
+                      <button
+                        className="inbox-reply-trigger"
+                        onClick={(e) => { e.stopPropagation(); replyingKey === key ? cancelReply() : openReply(item); }}
+                      >
+                        <Reply size={12} /> {replyingKey === key ? 'Cancel' : 'Reply'}
+                      </button>
                     )}
                   </div>
                 </div>
@@ -225,12 +278,55 @@ function Inbox({ authFetch }) {
                   {users.map(u => <option key={u.id} value={u.id}>{u.email}</option>)}
                 </select>
               </div>
-            ))}
+
+              {replyingKey === key && (
+                <div className="inbox-reply-box">
+                  {savedReplies.length > 0 && (
+                    <select
+                      className="tool-select"
+                      value=""
+                      onChange={(e) => {
+                        const picked = savedReplies.find(r => r.id === e.target.value);
+                        if (picked) setReplyText(picked.body);
+                      }}
+                    >
+                      <option value="">Insert a canned response…</option>
+                      {savedReplies.map(r => <option key={r.id} value={r.id}>{r.title}</option>)}
+                    </select>
+                  )}
+                  <textarea
+                    className="form-control"
+                    rows={3}
+                    value={replyText}
+                    onChange={(e) => setReplyText(e.target.value)}
+                    placeholder={`Reply to ${item.author || 'this contact'} on ${PLATFORM_LABELS[item.platform] || item.platform}…`}
+                    autoFocus
+                  />
+                  <div className="inbox-reply-actions">
+                    <button className="btn btn-secondary btn-sm" onClick={cancelReply} disabled={sendingReply}>Cancel</button>
+                    <button className="btn btn-primary btn-sm" onClick={() => sendReply(item)} disabled={sendingReply || !replyText.trim()}>
+                      {sendingReply ? 'Sending…' : 'Send reply'}
+                    </button>
+                  </div>
+                </div>
+              )}
+              </React.Fragment>
+              );
+            })}
           </div>
         )}
       </div>
 
       <ContactTimeline contactId={timelineContactId} authFetch={authFetch} onClose={() => setTimelineContactId(null)} />
+      {managingReplies && (
+        <SavedReplies
+          savedReplies={savedReplies}
+          onChange={setSavedReplies}
+          authFetch={authFetch}
+          canManage={atLeast(role, 'member')}
+          onClose={() => setManagingReplies(false)}
+        />
+      )}
     </div>
   );
 }

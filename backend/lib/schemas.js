@@ -41,4 +41,9 @@ const updateMemberSchema = z.object({
   role: z.enum(ROLES)
 });
 
-module.exports = { signupSchema, loginSchema, createPostSchema, checkoutSchema, addMemberSchema, updateMemberSchema };
+const savedReplySchema = z.object({
+  title: z.string().trim().min(1).max(100),
+  body: z.string().trim().min(1).max(2000)
+});
+
+module.exports = { signupSchema, loginSchema, createPostSchema, checkoutSchema, addMemberSchema, updateMemberSchema, savedReplySchema };

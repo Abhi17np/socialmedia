@@ -131,3 +131,83 @@
   color: var(--text-primary);
   word-wrap: break-word;
 }
+
+/* Inbox reply — the "Reply" link on a message row (Inbox.jsx) and the
+   composer it expands into, right under that row so the context (who
+   you're replying to) never scrolls out of view. */
+.inbox-reply-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  background: none;
+  border: none;
+  padding: 0;
+  margin-left: auto;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--accent-primary);
+  cursor: pointer;
+}
+
+.inbox-reply-box {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  padding: 0 1.5rem 1.25rem 4.9rem;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.inbox-reply-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.6rem;
+}
+
+/* Canned responses manager (SavedReplies.jsx) — reuses the Contact
+   Timeline's slide-over shell, just with a form instead of a feed. */
+.saved-reply-form {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  padding: 1rem;
+}
+
+.saved-reply-form-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.6rem;
+}
+
+.saved-reply-item {
+  display: flex;
+  gap: 0.75rem;
+  align-items: flex-start;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  padding: 0.75rem 0.9rem;
+}
+
+.saved-reply-item-body {
+  flex: 1;
+  min-width: 0;
+}
+
+.saved-reply-item-title {
+  font-weight: 700;
+  font-size: 0.88rem;
+  color: var(--text-primary);
+}
+
+.saved-reply-item-text {
+  margin: 0.2rem 0 0;
+  font-size: 0.82rem;
+  color: var(--text-secondary);
+  line-height: 1.4;
+}
+
+.saved-reply-item-actions {
+  display: flex;
+  gap: 0.4rem;
+  flex-shrink: 0;
+}
