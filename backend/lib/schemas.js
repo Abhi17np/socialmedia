@@ -143,10 +143,17 @@ const companySchema = z.object({
   ownerId: z.string().uuid().optional()
 });
 
+// A form field left blank arrives as "" (not absent) — plain .optional()
+// only tolerates the key being missing, so an empty string still failed
+// .email()'s format check on every "no email given" submission from the
+// New Lead form. Coercing "" to undefined first is what .optional() is
+// actually meant to cover here.
+const optionalEmail = () => z.preprocess((v) => (v === '' ? undefined : v), z.string().trim().email().optional());
+
 const contactSchema = z.object({
   displayName: z.string().trim().min(1).max(200),
   phone: z.string().trim().max(50).optional(),
-  email: z.string().trim().email().optional(),
+  email: optionalEmail(),
   companyId: z.string().uuid().optional(),
   jobTitle: z.string().trim().max(150).optional(),
   leadStatus: z.enum(['new', 'contacted', 'qualified', 'unqualified', 'customer']).optional(),
@@ -157,7 +164,7 @@ const contactSchema = z.object({
 const updateContactSchema = z.object({
   displayName: z.string().trim().min(1).max(200).optional(),
   phone: z.string().trim().max(50).optional(),
-  email: z.string().trim().email().optional(),
+  email: optionalEmail(),
   companyId: z.string().uuid().nullable().optional(),
   jobTitle: z.string().trim().max(150).optional(),
   leadStatus: z.enum(['new', 'contacted', 'qualified', 'unqualified', 'customer']).optional(),

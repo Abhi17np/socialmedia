@@ -207,7 +207,7 @@ export default function AppShellLayout({ children }) {
           </div>
 
           <div className="overflow-y-auto min-h-0">
-            <SocialNav role={role} openCount={openCount} />
+            <SocialNav role={role} openCount={openCount} hubsEnabled={me?.tenant?.hubs_enabled} />
           </div>
         </div>
 

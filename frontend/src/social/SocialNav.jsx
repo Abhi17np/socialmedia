@@ -11,7 +11,9 @@ import {
   Users,
   SlidersHorizontal,
   UserCircle,
-  Megaphone
+  Megaphone,
+  KanbanSquare,
+  Rocket
 } from 'lucide-react';
 import { atLeast } from '../roleRank';
 
@@ -37,6 +39,17 @@ const GROUPS = [
     ]
   },
   {
+    // Sales/Marketing Hub items only render once hubsEnabled says so
+    // (tenants.hubs_enabled, flipped only by a platform admin — see
+    // middleware/hubs.js) — this is the UI reflection of the same
+    // commercial gate the backend enforces on every route underneath.
+    label: 'Growth',
+    items: [
+      { href: '/sales', icon: KanbanSquare, label: 'Sales Hub', minRole: 'viewer', requiresHub: 'sales' },
+      { href: '/marketing', icon: Rocket, label: 'Marketing Hub', minRole: 'viewer', requiresHub: 'marketing' }
+    ]
+  },
+  {
     label: 'Settings',
     items: [
       { href: '/connect-accounts', icon: Share2, label: 'Channels', minRole: 'admin' },
@@ -47,13 +60,13 @@ const GROUPS = [
   }
 ];
 
-function SocialNav({ role, openCount }) {
+function SocialNav({ role, openCount, hubsEnabled }) {
   const pathname = usePathname();
 
   return (
     <nav className="px-2 py-1 flex flex-col gap-0.5">
       {GROUPS.map((group) => {
-        const items = group.items.filter((i) => atLeast(role, i.minRole));
+        const items = group.items.filter((i) => atLeast(role, i.minRole) && (!i.requiresHub || (hubsEnabled && hubsEnabled[i.requiresHub])));
         if (items.length === 0) return null;
         return (
           <div key={group.label} className="flex flex-col gap-0.5">
