@@ -104,7 +104,6 @@ app.use(API_PREFIX, tenantRouter);
 // handler mounted that single bad call killed the server outright —
 // `node --watch` then sat at "Waiting for file changes" and the whole
 // API stayed down until someone noticed.
-// eslint-disable-next-line no-unused-vars -- Express needs the 4-arg shape
 app.use((err, req, res, next) => {
   (req.log || logger).error({ err }, 'Unhandled error in request');
   if (res.headersSent) return next(err);

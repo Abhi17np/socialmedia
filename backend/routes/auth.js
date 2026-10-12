@@ -228,7 +228,7 @@ protectedRouter.delete('/auth/me', asyncHandler(async (req, res) => {
   const client = getSocialClient();
   if (!client) return res.status(503).json({ error: 'Database not configured.' });
 
-  const { data: existing, error: fetchError } = await scoped(client, req.tenantId, 'users').select('id, role, email').eq('id', req.userId).maybeSingle();
+  const { data: existing } = await scoped(client, req.tenantId, 'users').select('id, role, email').eq('id', req.userId).maybeSingle();
   if (!existing) return res.status(404).json({ error: 'Account not found.' });
 
   if (existing.role === 'owner') {

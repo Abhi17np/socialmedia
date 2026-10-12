@@ -55,6 +55,8 @@ frontend/              Next.js (App Router) — real per-page URLs, not a single
 4. `npm run dev` — backend on :5001, frontend on :3000 (Next.js's own default; set `NEXT_PUBLIC_API_BASE` in `frontend/.env.local` if the backend isn't on localhost — Next.js only inlines `NEXT_PUBLIC_`-prefixed env vars into the client bundle).
 5. Platform admin console (Infopace-internal, not customer-facing): seed a row in `platform_admins` (migrations/006) with a bcrypt password hash, then visit `/platform`.
 
+Running it in Docker instead, or deploying it somewhere real? See [DEPLOYMENT.md](./DEPLOYMENT.md).
+
 ## What's deliberately not here yet
 
-WhatsApp outbound template/broadcast sending (needs Meta template approval — regulatory lead time, not a code gap), SMS, the visual workflow builder, an integrations marketplace, and the AI layer. These are Sales Hub and Marketing Hub territory — not built until this Hub has a paying customer. See the strategy doc's MVP vs. Roadmap section for why, and the Scalability Risks section for the Meta App Review dependency this Hub needs started early regardless.
+WhatsApp outbound template/broadcast sending (needs Meta template approval — regulatory lead time, not a code gap), SMS, the visual workflow builder, and an integrations marketplace. These are Sales Hub and Marketing Hub territory — not built until this Hub has a paying customer. See the strategy doc's MVP vs. Roadmap section for why, and the Scalability Risks section for the Meta App Review dependency this Hub needs started early regardless. (AI Assist — Compose/Inbox drafting backed by Claude — is built and lives inside Social Hub itself; see `backend/lib/ai.js`. The *cross-Hub* AI layer the roadmap describes is still Phase 3, gated the same way.)

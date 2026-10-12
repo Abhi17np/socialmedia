@@ -1,0 +1,39 @@
+# Local/self-hosted orchestration — not what you'd point a managed
+# platform (Railway, Render, Fly, etc.) at, but a real "docker compose
+# up" story where there was none before. Supabase (Postgres) stays
+# external/managed either way — this only containerizes what this repo
+# owns: the backend, the frontend, and Redis.
+services:
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    volumes:
+      - redis-data:/data
+
+  backend:
+    build: ./backend
+    restart: unless-stopped
+    env_file: ./backend/.env
+    environment:
+      - REDIS_URL=redis://redis:6379
+      - PORT=5001
+    ports:
+      - '5001:5001'
+    depends_on:
+      - redis
+
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        # Browser-facing, so it must be the externally reachable backend
+        # URL, not the internal "backend:5001" Docker DNS name.
+        NEXT_PUBLIC_API_BASE: ${NEXT_PUBLIC_API_BASE:-http://localhost:5001/api/v1}
+    restart: unless-stopped
+    ports:
+      - '3000:3000'
+    depends_on:
+      - backend
+
+volumes:
+  redis-data:

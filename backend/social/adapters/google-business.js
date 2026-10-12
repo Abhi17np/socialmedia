@@ -150,7 +150,6 @@ async function fetchAnalytics(account) {
   const locationPart = account.externalAccountId.split('/').slice(-2).join('/'); // "locations/456"
   const end = new Date();
   const start = new Date(end.getTime() - 7 * 24 * 60 * 60 * 1000);
-  const dateRange = (d) => `${d.getUTCFullYear()}-${d.getUTCMonth() + 1}-${d.getUTCDate()}`;
 
   const metrics = ['BUSINESS_IMPRESSIONS_DESKTOP_MAPS', 'BUSINESS_IMPRESSIONS_MOBILE_SEARCH', 'CALL_CLICKS'];
   const params = new URLSearchParams();

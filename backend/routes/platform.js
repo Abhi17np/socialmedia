@@ -6,7 +6,7 @@
 
 const express = require('express');
 const { getSocialClient } = require('../social/db');
-const { hashPassword, verifyPassword, signPlatformToken } = require('../lib/auth');
+const { verifyPassword, signPlatformToken } = require('../lib/auth');
 const { validate } = require('../middleware/validate');
 const { loginSchema } = require('../lib/schemas');
 const { limitsFor } = require('../lib/plans');
