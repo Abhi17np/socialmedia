@@ -211,3 +211,68 @@
   gap: 0.4rem;
   flex-shrink: 0;
 }
+
+/* Manual / AI Assist — the segmented toggle in Composer.jsx, and the
+   matching "AI Suggest" button + panel it unlocks. Inbox.jsx's reply box
+   reuses .inbox-reply-tools for its own AI Suggest button rather than a
+   full toggle, since that composer already has one quick-fill control
+   (the saved-reply picker) and a second toggle would be one control too
+   many in that small a space. */
+.mode-toggle {
+  display: inline-flex;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  margin-bottom: 0.75rem;
+}
+
+.mode-toggle-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  background: var(--bg-secondary);
+  border: none;
+  padding: 0.45rem 0.9rem;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.mode-toggle-btn + .mode-toggle-btn {
+  border-left: 1px solid var(--border-color);
+}
+
+.mode-toggle-btn.active {
+  background: var(--accent-primary);
+  color: #fff;
+}
+
+.ai-assist-panel {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  padding: 0.9rem;
+  margin-bottom: 0.9rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.ai-assist-row {
+  display: flex;
+  gap: 0.6rem;
+  align-items: center;
+}
+
+.ai-assist-hint {
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  margin: 0;
+}
+
+.inbox-reply-tools {
+  display: flex;
+  gap: 0.6rem;
+  align-items: center;
+}

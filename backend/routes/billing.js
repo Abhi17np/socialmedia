@@ -44,10 +44,11 @@ protectedRouter.get('/billing/usage', async (req, res) => {
   try {
     const plan = await getTenantPlan(client, req.tenantId);
     const limits = limitsFor(plan);
-    const [socialAccounts, postsPerMonth, whatsappMessagesPerMonth] = await Promise.all([
+    const [socialAccounts, postsPerMonth, whatsappMessagesPerMonth, aiGenerationsPerMonth] = await Promise.all([
       currentUsage(client, req.tenantId, 'socialAccounts'),
       currentUsage(client, req.tenantId, 'postsPerMonth'),
-      currentUsage(client, req.tenantId, 'whatsappMessagesPerMonth')
+      currentUsage(client, req.tenantId, 'whatsappMessagesPerMonth'),
+      currentUsage(client, req.tenantId, 'aiGenerationsPerMonth')
     ]);
 
     res.json({
@@ -55,7 +56,8 @@ protectedRouter.get('/billing/usage', async (req, res) => {
       usage: {
         socialAccounts: { used: socialAccounts, limit: limits.socialAccounts },
         postsPerMonth: { used: postsPerMonth, limit: limits.postsPerMonth },
-        whatsappMessagesPerMonth: { used: whatsappMessagesPerMonth, limit: limits.whatsappMessagesPerMonth }
+        whatsappMessagesPerMonth: { used: whatsappMessagesPerMonth, limit: limits.whatsappMessagesPerMonth },
+        aiGenerationsPerMonth: { used: aiGenerationsPerMonth, limit: limits.aiGenerationsPerMonth }
       }
     });
   } catch (err) {

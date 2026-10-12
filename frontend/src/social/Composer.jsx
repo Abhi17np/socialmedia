@@ -4,9 +4,10 @@ import React, { useEffect, useRef, useState } from 'react';
 import {
   Send, AlertTriangle, UploadCloud, Film, X, Link2, Check, Globe,
   ThumbsUp, MessageCircle, Repeat2, Share2, Heart, Bookmark,
-  PlayCircle, Image as ImageIcon
+  PlayCircle, Image as ImageIcon, Sparkles
 } from 'lucide-react';
 import { SOCIAL_API_BASE, PLATFORM_LABELS, PLATFORM_COLORS } from './api';
+import { API_BASE } from '../apiBase';
 import { PlatformIcon, PlatformIconButton } from './PlatformIcon';
 
 // Per-platform limits this composer actually warns about — kept to what
@@ -186,6 +187,17 @@ function Composer({ authFetch }) {
   const [previewPlatform, setPreviewPlatform] = useState(null);
   const fileInputRef = useRef(null);
 
+  // AI Assist — a drafting aid, not an autonomous poster. Generating a
+  // draft only fills the same `content` textarea Manual mode uses; the
+  // human still reviews/edits it and still presses Publish/Schedule
+  // themselves below. See backend/lib/ai.js for why this stays a single
+  // drafting call rather than an agent that posts on its own.
+  const [composeMode, setComposeMode] = useState('manual'); // 'manual' | 'ai'
+  const [brief, setBrief] = useState('');
+  const [tone, setTone] = useState('');
+  const [generating, setGenerating] = useState(false);
+  const [aiError, setAiError] = useState(null);
+
   useEffect(() => {
     authFetch(`${SOCIAL_API_BASE}/accounts`)
       .then(async res => {
@@ -207,6 +219,25 @@ function Composer({ authFetch }) {
 
   const selectedAccounts = (accounts || []).filter(a => selectedAccountIds.includes(a.id));
   const selectedPlatforms = Array.from(new Set(selectedAccounts.map(a => a.platform)));
+
+  const generateDraft = async () => {
+    if (!brief.trim() || selectedPlatforms.length === 0) return;
+    setGenerating(true);
+    setAiError(null);
+    try {
+      const res = await authFetch(`${API_BASE}/ai/compose/draft`, {
+        method: 'POST',
+        body: JSON.stringify({ brief: brief.trim(), platforms: selectedPlatforms, tone: tone.trim() || undefined })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Could not generate a draft.');
+      setContent(data.draft);
+    } catch (err) {
+      setAiError(err.message);
+    } finally {
+      setGenerating(false);
+    }
+  };
 
   // Keep the active preview tab valid as selections change — defaults to
   // the first selected platform, and follows along if that one gets
@@ -354,6 +385,49 @@ function Composer({ authFetch }) {
                 );
               })}
             </div>
+
+            <div className="mode-toggle">
+              <button type="button" className={`mode-toggle-btn ${composeMode === 'manual' ? 'active' : ''}`} onClick={() => setComposeMode('manual')}>
+                Manual
+              </button>
+              <button type="button" className={`mode-toggle-btn ${composeMode === 'ai' ? 'active' : ''}`} onClick={() => setComposeMode('ai')}>
+                <Sparkles size={13} /> AI Assist
+              </button>
+            </div>
+
+            {composeMode === 'ai' && (
+              <div className="ai-assist-panel">
+                <textarea
+                  className="form-control"
+                  rows={2}
+                  placeholder="What do you want to post about? e.g. “Announce our Diwali sale — 20% off, ends Sunday”"
+                  value={brief}
+                  onChange={(e) => setBrief(e.target.value)}
+                />
+                <div className="ai-assist-row">
+                  <input
+                    type="text"
+                    className="form-control"
+                    style={{ maxWidth: 220 }}
+                    placeholder="Tone (optional) — e.g. playful"
+                    value={tone}
+                    onChange={(e) => setTone(e.target.value)}
+                  />
+                  <button
+                    type="button"
+                    className="btn btn-primary btn-sm"
+                    onClick={generateDraft}
+                    disabled={generating || !brief.trim() || selectedPlatforms.length === 0}
+                  >
+                    <Sparkles size={14} /> {generating ? 'Generating…' : 'Generate draft'}
+                  </button>
+                </div>
+                {selectedPlatforms.length === 0 && (
+                  <p className="ai-assist-hint">Select an account above first, so the draft fits the right platform.</p>
+                )}
+                {aiError && <p style={{ color: 'var(--accent-danger)', fontSize: '0.82rem', margin: 0 }}>{aiError}</p>}
+              </div>
+            )}
 
             <textarea
               className="form-control composer-textarea"

@@ -7,11 +7,13 @@
  * tenant's current plan and usage) lives in lib/entitlements.js.
  */
 
+// aiGenerationsPerMonth counts AI Assist drafts (lib/ai.js) — a post
+// draft and an inbox reply draft each cost one, regardless of length.
 const PLAN_LIMITS = {
-  free: { socialAccounts: 2, postsPerMonth: 30, whatsappMessagesPerMonth: 200 },
-  starter: { socialAccounts: 5, postsPerMonth: 150, whatsappMessagesPerMonth: 2000 },
-  pro: { socialAccounts: 15, postsPerMonth: 1000, whatsappMessagesPerMonth: 10000 },
-  enterprise: { socialAccounts: Infinity, postsPerMonth: Infinity, whatsappMessagesPerMonth: Infinity }
+  free: { socialAccounts: 2, postsPerMonth: 30, whatsappMessagesPerMonth: 200, aiGenerationsPerMonth: 20 },
+  starter: { socialAccounts: 5, postsPerMonth: 150, whatsappMessagesPerMonth: 2000, aiGenerationsPerMonth: 200 },
+  pro: { socialAccounts: 15, postsPerMonth: 1000, whatsappMessagesPerMonth: 10000, aiGenerationsPerMonth: 1000 },
+  enterprise: { socialAccounts: Infinity, postsPerMonth: Infinity, whatsappMessagesPerMonth: Infinity, aiGenerationsPerMonth: Infinity }
 };
 
 // Unknown/unset plan fails closed to the lowest tier, never to unlimited.

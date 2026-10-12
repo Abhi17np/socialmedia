@@ -84,6 +84,7 @@ function Billing({ authFetch }) {
           <UsageBar label="Connected accounts" used={data.usage.socialAccounts.used} limit={data.usage.socialAccounts.limit} />
           <UsageBar label="Posts this month" used={data.usage.postsPerMonth.used} limit={data.usage.postsPerMonth.limit} />
           <UsageBar label="WhatsApp messages this month" used={data.usage.whatsappMessagesPerMonth.used} limit={data.usage.whatsappMessagesPerMonth.limit} />
+          <UsageBar label="AI Assist drafts this month" used={data.usage.aiGenerationsPerMonth.used} limit={data.usage.aiGenerationsPerMonth.limit} />
 
           {data.plan !== 'pro' && data.plan !== 'enterprise' && (
             <div style={{ display: 'flex', gap: '0.75rem', marginTop: '1.5rem' }}>

@@ -13,6 +13,7 @@ const socialRoutes = require('./routes/social');
 const billingRoutes = require('./routes/billing');
 const teamRoutes = require('./routes/team');
 const platformRoutes = require('./routes/platform');
+const aiRoutes = require('./routes/ai');
 const socialScheduler = require('./social/scheduler');
 const socialPollers = require('./social/pollers');
 
@@ -40,6 +41,11 @@ const authLimiter = rateLimit({ windowMs: 15 * 60 * 1000, limit: 20, standardHea
 // retry their own webhooks on failure, and rate-limiting a payment
 // provider's retries would make their outages worse, not better.
 const apiLimiter = rateLimit({ windowMs: 15 * 60 * 1000, limit: 600, standardHeaders: true, legacyHeaders: false });
+// AI Assist calls real, metered Anthropic spend per request — the
+// monthly plan cap (lib/plans.js) catches sustained overuse, but a burst
+// within a single month shouldn't be free to run up; much tighter than
+// apiLimiter on purpose.
+const aiLimiter = rateLimit({ windowMs: 15 * 60 * 1000, limit: 30, standardHeaders: true, legacyHeaders: false });
 
 app.get(`${API_PREFIX}/health`, (req, res) => res.json({ status: 'ok' }));
 
@@ -78,6 +84,11 @@ tenantRouter.use(authRoutes.protectedRouter);
 tenantRouter.use(socialRoutes.protectedRouter);
 tenantRouter.use(billingRoutes.protectedRouter);
 tenantRouter.use(teamRoutes);
+// Scoped to '/ai' specifically (not a blanket tenantRouter.use()) so
+// aiLimiter's much tighter cap only governs AI Assist calls, not every
+// route registered after it — the same mounting-order lesson server.js
+// already learned once with requireAuth/requirePlatformAdmin above.
+tenantRouter.use('/ai', aiLimiter, aiRoutes);
 app.use(API_PREFIX, tenantRouter);
 
 const PORT = process.env.PORT || 5000;

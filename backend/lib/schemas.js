@@ -46,4 +46,10 @@ const savedReplySchema = z.object({
   body: z.string().trim().min(1).max(2000)
 });
 
-module.exports = { signupSchema, loginSchema, createPostSchema, checkoutSchema, addMemberSchema, updateMemberSchema, savedReplySchema };
+const draftPostSchema = z.object({
+  brief: z.string().trim().min(1).max(2000),
+  platforms: z.array(z.string()).min(1),
+  tone: z.string().trim().max(100).optional()
+});
+
+module.exports = { signupSchema, loginSchema, createPostSchema, checkoutSchema, addMemberSchema, updateMemberSchema, savedReplySchema, draftPostSchema };

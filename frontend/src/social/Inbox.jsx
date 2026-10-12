@@ -1,8 +1,9 @@
 'use client';
 
 import React, { useEffect, useState } from 'react';
-import { RefreshCw, AtSign, MessageSquare, ExternalLink, UserCircle2, Reply, MessageSquareText } from 'lucide-react';
+import { RefreshCw, AtSign, MessageSquare, ExternalLink, UserCircle2, Reply, MessageSquareText, Sparkles } from 'lucide-react';
 import { SOCIAL_API_BASE, PLATFORM_LABELS, PLATFORM_COLORS, AVAILABLE_PLATFORMS } from './api';
+import { API_BASE } from '../apiBase';
 import { PlatformFilterTabs } from './PlatformIcon';
 import ContactTimeline from './ContactTimeline';
 import SavedReplies from './SavedReplies';
@@ -58,6 +59,8 @@ function Inbox({ authFetch, role }) {
   const [replyingKey, setReplyingKey] = useState(null);
   const [replyText, setReplyText] = useState('');
   const [sendingReply, setSendingReply] = useState(false);
+  const [suggestingKey, setSuggestingKey] = useState(null);
+  const [suggestError, setSuggestError] = useState(null);
 
   const load = async () => {
     try {
@@ -90,8 +93,29 @@ function Inbox({ authFetch, role }) {
   const openReply = (item) => {
     setReplyingKey(`${item.source}-${item.id}`);
     setReplyText('');
+    setSuggestError(null);
   };
-  const cancelReply = () => { setReplyingKey(null); setReplyText(''); };
+  const cancelReply = () => { setReplyingKey(null); setReplyText(''); setSuggestError(null); };
+
+  // AI Suggest — drafts into the same textarea Manual typing uses; the
+  // human still reviews/edits and still presses Send reply below. See
+  // backend/lib/ai.js for why this stays a single drafting call rather
+  // than an agent that replies on its own.
+  const suggestReply = async (item) => {
+    const key = `${item.source}-${item.id}`;
+    setSuggestingKey(key);
+    setSuggestError(null);
+    try {
+      const res = await authFetch(`${API_BASE}/ai/inbox/${item.id}/draft-reply`, { method: 'POST' });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Could not generate a suggested reply.');
+      setReplyText(data.draft);
+    } catch (err) {
+      setSuggestError(err.message);
+    } finally {
+      setSuggestingKey(null);
+    }
+  };
 
   const sendReply = async (item) => {
     if (!replyText.trim()) return;
@@ -281,19 +305,31 @@ function Inbox({ authFetch, role }) {
 
               {replyingKey === key && (
                 <div className="inbox-reply-box">
-                  {savedReplies.length > 0 && (
-                    <select
-                      className="tool-select"
-                      value=""
-                      onChange={(e) => {
-                        const picked = savedReplies.find(r => r.id === e.target.value);
-                        if (picked) setReplyText(picked.body);
-                      }}
+                  <div className="inbox-reply-tools">
+                    {savedReplies.length > 0 && (
+                      <select
+                        className="tool-select"
+                        style={{ flex: 1 }}
+                        value=""
+                        onChange={(e) => {
+                          const picked = savedReplies.find(r => r.id === e.target.value);
+                          if (picked) setReplyText(picked.body);
+                        }}
+                      >
+                        <option value="">Insert a canned response…</option>
+                        {savedReplies.map(r => <option key={r.id} value={r.id}>{r.title}</option>)}
+                      </select>
+                    )}
+                    <button
+                      type="button"
+                      className="btn btn-secondary btn-sm"
+                      onClick={() => suggestReply(item)}
+                      disabled={suggestingKey === key}
                     >
-                      <option value="">Insert a canned response…</option>
-                      {savedReplies.map(r => <option key={r.id} value={r.id}>{r.title}</option>)}
-                    </select>
-                  )}
+                      <Sparkles size={13} /> {suggestingKey === key ? 'Thinking…' : 'AI Suggest'}
+                    </button>
+                  </div>
+                  {suggestError && <p style={{ color: 'var(--accent-danger)', fontSize: '0.78rem', margin: 0 }}>{suggestError}</p>}
                   <textarea
                     className="form-control"
                     rows={3}
