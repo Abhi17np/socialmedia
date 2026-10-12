@@ -33,19 +33,29 @@ app.use(pinoHttp({ logger })); // attaches req.log + req.id to every request, pu
 // parsed JSON.
 app.use(express.json({ verify: (req, res, buf) => { req.rawBody = buf; } }));
 
+// express-rate-limit's own default is a plain-text body ("Too many
+// requests, please try again later."), not JSON — every frontend page
+// does `const data = await res.json()` unconditionally, so a 429 with a
+// text/html body crashed with a raw "Unexpected token 'T' ... is not
+// valid JSON" instead of surfacing a real error message. Passing an
+// object as `message` makes express-rate-limit call res.send() with it,
+// which sends real JSON — matching the { error } shape every other
+// failure path in this API already uses.
+const rateLimited = { error: 'Too many requests — please slow down and try again in a few minutes.' };
+
 // Auth endpoints get their own, much stricter limit — the thing being
 // protected here is credential brute-forcing, not general API abuse.
-const authLimiter = rateLimit({ windowMs: 15 * 60 * 1000, limit: 20, standardHeaders: true, legacyHeaders: false });
+const authLimiter = rateLimit({ windowMs: 15 * 60 * 1000, limit: 20, standardHeaders: true, legacyHeaders: false, message: rateLimited });
 // Everything else an authenticated tenant calls. Deliberately NOT applied
 // to the public webhook/OAuth-callback routes below — Meta and Razorpay
 // retry their own webhooks on failure, and rate-limiting a payment
 // provider's retries would make their outages worse, not better.
-const apiLimiter = rateLimit({ windowMs: 15 * 60 * 1000, limit: 600, standardHeaders: true, legacyHeaders: false });
+const apiLimiter = rateLimit({ windowMs: 15 * 60 * 1000, limit: 600, standardHeaders: true, legacyHeaders: false, message: rateLimited });
 // AI Assist calls real, metered Anthropic spend per request — the
 // monthly plan cap (lib/plans.js) catches sustained overuse, but a burst
 // within a single month shouldn't be free to run up; much tighter than
 // apiLimiter on purpose.
-const aiLimiter = rateLimit({ windowMs: 15 * 60 * 1000, limit: 30, standardHeaders: true, legacyHeaders: false });
+const aiLimiter = rateLimit({ windowMs: 15 * 60 * 1000, limit: 30, standardHeaders: true, legacyHeaders: false, message: rateLimited });
 
 app.get(`${API_PREFIX}/health`, (req, res) => res.json({ status: 'ok' }));
 
@@ -74,7 +84,7 @@ app.use(API_PREFIX, billingRoutes.publicRouter);
 app.use(
   `${API_PREFIX}/platform`,
   requirePlatformAdmin,
-  rateLimit({ windowMs: 15 * 60 * 1000, limit: 600, standardHeaders: true, legacyHeaders: false }),
+  rateLimit({ windowMs: 15 * 60 * 1000, limit: 600, standardHeaders: true, legacyHeaders: false, message: rateLimited }),
   platformRoutes.protectedRouter
 );
 
