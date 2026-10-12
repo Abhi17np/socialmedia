@@ -10,7 +10,8 @@ import {
   Share2,
   Users,
   SlidersHorizontal,
-  UserCircle
+  UserCircle,
+  Megaphone
 } from 'lucide-react';
 import { atLeast } from '../roleRank';
 
@@ -31,7 +32,8 @@ const GROUPS = [
       { href: '/dashboard', icon: LayoutGrid, label: 'Dashboard', minRole: 'viewer' },
       { href: '/posts', icon: CalendarDays, label: 'Posts & schedule', minRole: 'viewer' },
       { href: '/inbox', icon: InboxIcon, label: 'Inbox', minRole: 'viewer', badge: 'inbox' },
-      { href: '/analytics', icon: LineChart, label: 'Analytics', minRole: 'viewer' }
+      { href: '/analytics', icon: LineChart, label: 'Analytics', minRole: 'viewer' },
+      { href: '/whatsapp', icon: Megaphone, label: 'WhatsApp Broadcast', minRole: 'viewer' }
     ]
   },
   {

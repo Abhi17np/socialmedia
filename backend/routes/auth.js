@@ -170,7 +170,7 @@ protectedRouter.get('/auth/me', async (req, res) => {
   try {
     const [{ data: user, error: userError }, { data: tenant, error: tenantError }] = await Promise.all([
       client.from('users').select('id, email, role, email_verified_at').eq('id', req.userId).single(),
-      client.from('tenants').select('id, name, plan').eq('id', req.tenantId).single()
+      client.from('tenants').select('id, name, plan, hubs_enabled').eq('id', req.tenantId).single()
     ]);
     if (userError || tenantError) throw userError || tenantError;
     res.json({ user, tenant });
