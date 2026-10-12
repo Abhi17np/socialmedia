@@ -22,7 +22,6 @@ const { fireTrigger } = require('../lib/automation');
 const { companySchema, contactSchema, updateContactSchema, dealSchema, moveDealStageSchema, salesActivitySchema } = require('../lib/schemas');
 
 const router = express.Router();
-router.use(requireHub('sales'));
 
 function requireSocialClient(res) {
   const client = getSocialClient();
@@ -43,7 +42,7 @@ function pageParams(req) {
 // Companies
 // -------------------------------------------------------------
 
-router.get('/sales/companies', asyncHandler(async (req, res) => {
+router.get('/sales/companies', requireHub('sales'), asyncHandler(async (req, res) => {
   const client = requireSocialClient(res);
   if (!client) return;
   const { page, pageSize, from, to } = pageParams(req);
@@ -54,7 +53,7 @@ router.get('/sales/companies', asyncHandler(async (req, res) => {
   res.json({ companies: data, page, pageSize, total: count });
 }));
 
-router.post('/sales/companies', requireRole('member'), validate(companySchema), asyncHandler(async (req, res) => {
+router.post('/sales/companies', requireHub('sales'), requireRole('member'), validate(companySchema), asyncHandler(async (req, res) => {
   const client = requireSocialClient(res);
   if (!client) return;
   const { data, error } = await client.from('companies').insert({
@@ -67,7 +66,7 @@ router.post('/sales/companies', requireRole('member'), validate(companySchema), 
   res.status(201).json({ company: data });
 }));
 
-router.get('/sales/companies/:id', asyncHandler(async (req, res) => {
+router.get('/sales/companies/:id', requireHub('sales'), asyncHandler(async (req, res) => {
   const client = requireSocialClient(res);
   if (!client) return;
   const { data: company, error } = await scoped(client, req.tenantId, 'companies').select('*').eq('id', req.params.id).maybeSingle();
@@ -81,7 +80,7 @@ router.get('/sales/companies/:id', asyncHandler(async (req, res) => {
   res.json({ company, contacts: contacts || [], deals: deals || [] });
 }));
 
-router.patch('/sales/companies/:id', requireRole('member'), validate(companySchema), asyncHandler(async (req, res) => {
+router.patch('/sales/companies/:id', requireHub('sales'), requireRole('member'), validate(companySchema), asyncHandler(async (req, res) => {
   const client = requireSocialClient(res);
   if (!client) return;
   const { data, error } = await scoped(client, req.tenantId, 'companies').update({
@@ -93,7 +92,7 @@ router.patch('/sales/companies/:id', requireRole('member'), validate(companySche
   res.json({ company: data });
 }));
 
-router.delete('/sales/companies/:id', requireRole('admin'), asyncHandler(async (req, res) => {
+router.delete('/sales/companies/:id', requireHub('sales'), requireRole('admin'), asyncHandler(async (req, res) => {
   const client = requireSocialClient(res);
   if (!client) return;
   const { error } = await scoped(client, req.tenantId, 'companies').delete().eq('id', req.params.id);
@@ -106,7 +105,7 @@ router.delete('/sales/companies/:id', requireRole('admin'), asyncHandler(async (
 // Contacts / leads (the shared spine, with CRM fields)
 // -------------------------------------------------------------
 
-router.get('/sales/contacts', asyncHandler(async (req, res) => {
+router.get('/sales/contacts', requireHub('sales'), asyncHandler(async (req, res) => {
   const client = requireSocialClient(res);
   if (!client) return;
   const { page, pageSize, from, to } = pageParams(req);
@@ -119,7 +118,7 @@ router.get('/sales/contacts', asyncHandler(async (req, res) => {
   res.json({ contacts: data, page, pageSize, total: count });
 }));
 
-router.post('/sales/contacts', requireRole('member'), validate(contactSchema), asyncHandler(async (req, res) => {
+router.post('/sales/contacts', requireHub('sales'), requireRole('member'), validate(contactSchema), asyncHandler(async (req, res) => {
   const client = requireSocialClient(res);
   if (!client) return;
   const { displayName, phone, email, companyId, jobTitle, leadStatus, ownerId, tags } = req.body;
@@ -136,7 +135,7 @@ router.post('/sales/contacts', requireRole('member'), validate(contactSchema), a
   res.status(201).json({ contact: data });
 }));
 
-router.get('/sales/contacts/:id', asyncHandler(async (req, res) => {
+router.get('/sales/contacts/:id', requireHub('sales'), asyncHandler(async (req, res) => {
   const client = requireSocialClient(res);
   if (!client) return;
   const { data: contact, error } = await scoped(client, req.tenantId, 'contacts').select('*').eq('id', req.params.id).maybeSingle();
@@ -150,7 +149,7 @@ router.get('/sales/contacts/:id', asyncHandler(async (req, res) => {
   res.json({ contact, deals: deals || [], activities: activities || [] });
 }));
 
-router.patch('/sales/contacts/:id', requireRole('member'), validate(updateContactSchema), asyncHandler(async (req, res) => {
+router.patch('/sales/contacts/:id', requireHub('sales'), requireRole('member'), validate(updateContactSchema), asyncHandler(async (req, res) => {
   const client = requireSocialClient(res);
   if (!client) return;
   const { data: before } = await scoped(client, req.tenantId, 'contacts').select('tags').eq('id', req.params.id).maybeSingle();
@@ -186,7 +185,7 @@ const DEFAULT_STAGES = [
   { name: 'Lost', probability: 0, is_lost: true }
 ];
 
-router.get('/sales/pipelines', asyncHandler(async (req, res) => {
+router.get('/sales/pipelines', requireHub('sales'), asyncHandler(async (req, res) => {
   const client = requireSocialClient(res);
   if (!client) return;
   const { data: pipelines, error } = await scoped(client, req.tenantId, 'deal_pipelines').select('*').order('created_at');
@@ -198,7 +197,7 @@ router.get('/sales/pipelines', asyncHandler(async (req, res) => {
   res.json({ pipelines: (pipelines || []).map((p) => ({ ...p, stages: byPipeline[p.id] || [] })) });
 }));
 
-router.post('/sales/pipelines', requireRole('admin'), asyncHandler(async (req, res) => {
+router.post('/sales/pipelines', requireHub('sales'), requireRole('admin'), asyncHandler(async (req, res) => {
   const client = requireSocialClient(res);
   if (!client) return;
   const { name } = req.body || {};
@@ -221,7 +220,7 @@ router.post('/sales/pipelines', requireRole('admin'), asyncHandler(async (req, r
 // Deals
 // -------------------------------------------------------------
 
-router.get('/sales/deals', asyncHandler(async (req, res) => {
+router.get('/sales/deals', requireHub('sales'), asyncHandler(async (req, res) => {
   const client = requireSocialClient(res);
   if (!client) return;
   let query = scoped(client, req.tenantId, 'deals').select('*').order('created_at', { ascending: false });
@@ -233,7 +232,7 @@ router.get('/sales/deals', asyncHandler(async (req, res) => {
   res.json({ deals: data });
 }));
 
-router.post('/sales/deals', requireRole('member'), validate(dealSchema), asyncHandler(async (req, res) => {
+router.post('/sales/deals', requireHub('sales'), requireRole('member'), validate(dealSchema), asyncHandler(async (req, res) => {
   const client = requireSocialClient(res);
   if (!client) return;
   const { name, pipelineId, stageId, amount, currency, contactId, companyId, ownerId, expectedCloseDate } = req.body;
@@ -251,7 +250,7 @@ router.post('/sales/deals', requireRole('member'), validate(dealSchema), asyncHa
   res.status(201).json({ deal: data });
 }));
 
-router.get('/sales/deals/:id', asyncHandler(async (req, res) => {
+router.get('/sales/deals/:id', requireHub('sales'), asyncHandler(async (req, res) => {
   const client = requireSocialClient(res);
   if (!client) return;
   const { data: deal, error } = await scoped(client, req.tenantId, 'deals').select('*').eq('id', req.params.id).maybeSingle();
@@ -265,7 +264,7 @@ router.get('/sales/deals/:id', asyncHandler(async (req, res) => {
   res.json({ deal, activities: activities || [], history: history || [] });
 }));
 
-router.patch('/sales/deals/:id', requireRole('member'), asyncHandler(async (req, res) => {
+router.patch('/sales/deals/:id', requireHub('sales'), requireRole('member'), asyncHandler(async (req, res) => {
   const client = requireSocialClient(res);
   if (!client) return;
   const patch = {};
@@ -280,7 +279,7 @@ router.patch('/sales/deals/:id', requireRole('member'), asyncHandler(async (req,
   res.json({ deal: data });
 }));
 
-router.post('/sales/deals/:id/move', requireRole('member'), validate(moveDealStageSchema), asyncHandler(async (req, res) => {
+router.post('/sales/deals/:id/move', requireHub('sales'), requireRole('member'), validate(moveDealStageSchema), asyncHandler(async (req, res) => {
   const client = requireSocialClient(res);
   if (!client) return;
   const { data: deal } = await scoped(client, req.tenantId, 'deals').select('id, pipeline_id, stage_id, contact_id').eq('id', req.params.id).maybeSingle();
@@ -302,7 +301,7 @@ router.post('/sales/deals/:id/move', requireRole('member'), validate(moveDealSta
   res.json({ deal: updated });
 }));
 
-router.delete('/sales/deals/:id', requireRole('admin'), asyncHandler(async (req, res) => {
+router.delete('/sales/deals/:id', requireHub('sales'), requireRole('admin'), asyncHandler(async (req, res) => {
   const client = requireSocialClient(res);
   if (!client) return;
   const { error } = await scoped(client, req.tenantId, 'deals').delete().eq('id', req.params.id);
@@ -315,7 +314,7 @@ router.delete('/sales/deals/:id', requireRole('admin'), asyncHandler(async (req,
 // Sales activities
 // -------------------------------------------------------------
 
-router.get('/sales/activities', asyncHandler(async (req, res) => {
+router.get('/sales/activities', requireHub('sales'), asyncHandler(async (req, res) => {
   const client = requireSocialClient(res);
   if (!client) return;
   let query = scoped(client, req.tenantId, 'sales_activities').select('*').order('created_at', { ascending: false });
@@ -328,7 +327,7 @@ router.get('/sales/activities', asyncHandler(async (req, res) => {
   res.json({ activities: data });
 }));
 
-router.post('/sales/activities', requireRole('member'), validate(salesActivitySchema), asyncHandler(async (req, res) => {
+router.post('/sales/activities', requireHub('sales'), requireRole('member'), validate(salesActivitySchema), asyncHandler(async (req, res) => {
   const client = requireSocialClient(res);
   if (!client) return;
   const { type, subject, notes, contactId, companyId, dealId, dueAt, assignedTo } = req.body;
@@ -340,7 +339,7 @@ router.post('/sales/activities', requireRole('member'), validate(salesActivitySc
   res.status(201).json({ activity: data });
 }));
 
-router.patch('/sales/activities/:id', requireRole('member'), asyncHandler(async (req, res) => {
+router.patch('/sales/activities/:id', requireHub('sales'), requireRole('member'), asyncHandler(async (req, res) => {
   const client = requireSocialClient(res);
   if (!client) return;
   const patch = {};
@@ -359,7 +358,7 @@ router.patch('/sales/activities/:id', requireRole('member'), asyncHandler(async 
   res.json({ activity: data });
 }));
 
-router.delete('/sales/activities/:id', requireRole('admin'), asyncHandler(async (req, res) => {
+router.delete('/sales/activities/:id', requireHub('sales'), requireRole('admin'), asyncHandler(async (req, res) => {
   const client = requireSocialClient(res);
   if (!client) return;
   const { error } = await scoped(client, req.tenantId, 'sales_activities').delete().eq('id', req.params.id);

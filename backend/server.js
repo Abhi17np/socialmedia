@@ -16,6 +16,7 @@ const platformRoutes = require('./routes/platform');
 const aiRoutes = require('./routes/ai');
 const whatsappRoutes = require('./routes/whatsapp');
 const salesRoutes = require('./routes/sales');
+const marketingRoutes = require('./routes/marketing');
 const socialScheduler = require('./social/scheduler');
 const socialPollers = require('./social/pollers');
 const broadcastQueue = require('./social/broadcastQueue');
@@ -96,6 +97,7 @@ tenantRouter.use(billingRoutes.protectedRouter);
 tenantRouter.use(teamRoutes);
 tenantRouter.use(whatsappRoutes);
 tenantRouter.use(salesRoutes);
+tenantRouter.use(marketingRoutes);
 // Scoped to '/ai' specifically (not a blanket tenantRouter.use()) so
 // aiLimiter's much tighter cap only governs AI Assist calls, not every
 // route registered after it — the same mounting-order lesson server.js
