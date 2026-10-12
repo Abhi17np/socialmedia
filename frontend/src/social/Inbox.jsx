@@ -15,7 +15,7 @@ import {
   Button, IconButton, Chip, PillSelect, EmptyState, Banner, SkeletonRows,
   Avatar, Textarea, cx
 } from '../ui';
-import { ChannelDot, ChannelBadge, channelColor, channelLabel } from '../ui/channel';
+import { ChannelBadge, PlatformIcon, channelColor, channelLabel } from '../ui/channel';
 import { atLeast } from '../roleRank';
 
 /*
@@ -433,7 +433,9 @@ function Inbox({ authFetch, role, me }) {
                     )}
                   >
                     <span className="flex items-center gap-2.5 min-w-0">
-                      <ChannelDot platform={p} />
+                      <span className="shrink-0 flex items-center" style={{ color: channelColor(p) }}>
+                        <PlatformIcon platform={p} size={14} />
+                      </span>
                       <span className="truncate">{channelLabel(p)}</span>
                     </span>
                     <span className="text-[11px] tabular-nums text-subtle">
@@ -613,7 +615,9 @@ function Inbox({ authFetch, role, me }) {
                       </Chip>
                     </div>
                     <div className="text-[11px] text-muted flex items-center gap-1.5">
-                      <span style={{ color: channelColor(selected.platform) }}>●</span>
+                      <span className="flex items-center" style={{ color: channelColor(selected.platform) }}>
+                        <PlatformIcon platform={selected.platform} size={11} />
+                      </span>
                       {channelLabel(selected.platform)}
                       {selected.accountLabel && <span className="text-subtle">· {selected.accountLabel}</span>}
                       {selected.url && (

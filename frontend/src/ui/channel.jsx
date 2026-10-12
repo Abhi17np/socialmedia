@@ -8,7 +8,7 @@ import { cx } from './index';
 /*
  * Channel identity is operational metadata, not decoration. DESIGN.md
  * restricts these hues to three shapes and nothing else:
- *   ChannelDot      — a 6–8px presence pip in lists and nav
+ *   ChannelDot      — a 6–8px brand-mark glyph in lists and nav
  *   ChannelBadge    — a 12–14px stamp overlaid on an avatar
  *   ChannelStamp    — a neutral pill carrying the glyph plus a handle
  * A channel color never fills a card, a header or a sidebar.
@@ -20,10 +20,12 @@ export const channelLabel = (platform) => PLATFORM_LABELS[platform] || platform;
 export function ChannelDot({ platform, size = 8, className }) {
   return (
     <span
-      className={cx('rounded-full shrink-0 inline-block', className)}
-      style={{ width: size, height: size, background: channelColor(platform) }}
+      className={cx('shrink-0 inline-flex items-center justify-center', className)}
+      style={{ width: size, height: size, color: channelColor(platform) }}
       title={channelLabel(platform)}
-    />
+    >
+      <PlatformIcon platform={platform} size={size} />
+    </span>
   );
 }
 
