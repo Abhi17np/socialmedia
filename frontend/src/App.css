@@ -276,3 +276,33 @@
   gap: 0.6rem;
   align-items: center;
 }
+
+/* "Backend unreachable" banner (app/(app)/layout.jsx) — a connection
+   failure is not the same thing as a page's own data erroring, and gets
+   its own clear, persistent, retryable state instead of leaking a raw
+   browser "Failed to fetch" string into whichever page happened to be
+   open when the backend went down. */
+.connectivity-banner {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  background: rgba(220, 38, 38, 0.08);
+  border: 1px solid var(--accent-danger);
+  color: var(--accent-danger);
+  border-radius: var(--radius-md);
+  padding: 0.7rem 1rem;
+  margin-bottom: 1.25rem;
+  font-size: 0.85rem;
+}
+
+.connectivity-banner code {
+  background: rgba(220, 38, 38, 0.12);
+  padding: 0.1rem 0.4rem;
+  border-radius: var(--radius-sm);
+  font-size: 0.8rem;
+}
+
+.connectivity-banner button {
+  margin-left: auto;
+  flex-shrink: 0;
+}

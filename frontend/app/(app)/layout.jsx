@@ -2,7 +2,7 @@
 
 import { useState, useCallback, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { Share2, LogOut } from 'lucide-react';
+import { Share2, LogOut, WifiOff } from 'lucide-react';
 import SocialNav from '../../src/social/SocialNav';
 import { AuthContext } from '../../src/AuthContext';
 import { API_BASE } from '../../src/apiBase';
@@ -18,6 +18,13 @@ export default function AppShellLayout({ children }) {
   const [token, setToken] = useState(null);
   const [checkedStorage, setCheckedStorage] = useState(false);
   const [me, setMe] = useState(null);
+  // Distinct from "no token" (redirect to /login) and from "a specific
+  // request errored" (that page's own error state) — this means the
+  // browser couldn't even reach API_BASE at all: backend not running,
+  // wrong port, no network. Every page that calls authFetch gets a
+  // friendly message for this for free (see the catch below) instead of
+  // each one needing its own network-vs-HTTP-error branching.
+  const [serverUnreachable, setServerUnreachable] = useState(false);
 
   // Read localStorage only after mount — reading it during the render
   // Next.js uses to produce the initial HTML would desync from what the
@@ -41,7 +48,19 @@ export default function AppShellLayout({ children }) {
     if (options.body && !(options.body instanceof FormData) && !headers['Content-Type']) {
       headers['Content-Type'] = 'application/json';
     }
-    const res = await fetch(url, { ...options, headers });
+    let res;
+    try {
+      res = await fetch(url, { ...options, headers });
+    } catch (err) {
+      // fetch() throws a bare TypeError ("Failed to fetch" in
+      // Chrome/Edge, "NetworkError..." in Firefox) when it can't even
+      // open a connection — refused, wrong port, no backend running.
+      // Translate it once, here, so every page's own `catch (err) {
+      // setError(err.message) }` shows this instead of that raw string.
+      setServerUnreachable(true);
+      throw new Error(`Can't reach the Social Hub server at ${API_BASE} — make sure the backend is running.`);
+    }
+    setServerUnreachable(false);
     if (res.status === 401) handleLogout();
     return res;
   }, [token, handleLogout]);
@@ -50,11 +69,15 @@ export default function AppShellLayout({ children }) {
     if (checkedStorage && !token) router.replace('/login');
   }, [checkedStorage, token, router]);
 
-  useEffect(() => {
+  const loadMe = useCallback(() => {
     if (!token) return;
     authFetch(`${API_BASE}/auth/me`).then(res => res.json()).then(data => { if (data.user) setMe(data); }).catch(() => {});
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [token]);
+    // authFetch already sets serverUnreachable on a network failure —
+    // this catch only needs to stop an unhandled rejection from
+    // reaching the console, not report anything a second time.
+  }, [token, authFetch]);
+
+  useEffect(() => { loadMe(); }, [loadMe]);
 
   if (!checkedStorage || !token) return null; // redirecting to /login, or still reading localStorage
 
@@ -73,9 +96,13 @@ export default function AppShellLayout({ children }) {
 
         <div className="sidebar-user-profile">
           <div className="user-profile-details">
-            <div className="user-profile-avatar">{email ? email[0].toUpperCase() : '…'}</div>
+            <div className="user-profile-avatar" style={serverUnreachable ? { background: 'var(--accent-danger)' } : undefined}>
+              {serverUnreachable ? <WifiOff size={15} /> : (email ? email[0].toUpperCase() : '…')}
+            </div>
             <div>
-              <div className="user-profile-email" title={email}>{email || 'Loading…'}</div>
+              <div className="user-profile-email" title={email}>
+                {serverUnreachable ? 'Can’t reach server' : (email || 'Loading…')}
+              </div>
               {me?.tenant && <div style={{ fontSize: '0.75rem', color: 'var(--sidebar-text-muted)' }}>{me.tenant.name} · {me.tenant.plan}</div>}
             </div>
           </div>
@@ -85,7 +112,14 @@ export default function AppShellLayout({ children }) {
         </div>
       </aside>
       <main className="main-content">
-        <AuthContext.Provider value={{ authFetch, role, me }}>
+        {serverUnreachable && (
+          <div className="connectivity-banner">
+            <WifiOff size={16} />
+            <span>Can&rsquo;t reach the Social Hub server at <code>{API_BASE}</code> — make sure the backend is running.</span>
+            <button className="btn btn-secondary btn-sm" onClick={loadMe}>Retry</button>
+          </div>
+        )}
+        <AuthContext.Provider value={{ authFetch, role, me, serverUnreachable }}>
           {children}
         </AuthContext.Provider>
       </main>
