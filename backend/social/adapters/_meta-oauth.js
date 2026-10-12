@@ -29,12 +29,14 @@
  * third-party users until that review is approved.
  */
 
+const { API_PREFIX } = require('../../lib/apiPrefix');
+
 const GRAPH_VERSION = 'v21.0';
 const GRAPH_BASE = `https://graph.facebook.com/${GRAPH_VERSION}`;
 
 function redirectUriFor(platform) {
   const base = process.env.BACKEND_PUBLIC_URL || 'http://localhost:5001';
-  return `${base}/api/social/callback/${platform}`;
+  return `${base}${API_PREFIX}/social/callback/${platform}`;
 }
 
 function isConfigured() {

@@ -23,8 +23,10 @@ const { scoped } = require('../lib/query');
 const { assertWithinLimit, recordUsage } = require('../lib/entitlements');
 const { validate } = require('../middleware/validate');
 const { requireRole } = require('../middleware/tenant');
-const { createPostSchema, savedReplySchema } = require('../lib/schemas');
+const { createPostSchema, savedReplySchema, whatsappEmbeddedSignupSchema, inboxReplySchema, updateInteractionSchema } = require('../lib/schemas');
 const socialQueue = require('../social/queue');
+const { asyncHandler } = require('../lib/asyncHandler');
+const { recordAudit } = require('../lib/audit');
 
 const STATE_MAX_AGE_MS = 15 * 60 * 1000; // OAuth round trip has 15 min to complete
 
@@ -231,7 +233,7 @@ publicRouter.post('/social/webhook/whatsapp', async (req, res) => {
 // -------------------------------------------------------------
 const protectedRouter = express.Router();
 
-protectedRouter.get('/social/accounts', async (req, res) => {
+protectedRouter.get('/social/accounts', asyncHandler(async (req, res) => {
   const client = requireSocialClient(res);
   if (!client) return;
   const { data, error } = await scoped(client, req.tenantId, 'social_accounts')
@@ -239,7 +241,7 @@ protectedRouter.get('/social/accounts', async (req, res) => {
     .order('connected_at', { ascending: false });
   if (error) return res.status(500).json({ error: error.message });
   res.json({ accounts: data });
-});
+}));
 
 protectedRouter.get('/social/accounts/:id/posts', async (req, res) => {
   try {
@@ -284,12 +286,11 @@ protectedRouter.get('/social/whatsapp/embedded-signup-config', (req, res) => {
   res.json({ appId: process.env.META_APP_ID, configId: process.env.WHATSAPP_SIGNUP_CONFIG_ID });
 });
 
-protectedRouter.post('/social/whatsapp/embedded-signup', requireRole('admin'), async (req, res) => {
+protectedRouter.post('/social/whatsapp/embedded-signup', requireRole('admin'), validate(whatsappEmbeddedSignupSchema), async (req, res) => {
   const client = requireSocialClient(res);
   if (!client) return;
 
-  const { code, wabaId, phoneNumberId } = req.body || {};
-  if (!code || !wabaId) return res.status(400).json({ error: 'code and wabaId are required.' });
+  const { code, wabaId, phoneNumberId } = req.body;
 
   try {
     await assertWithinLimit(client, req.tenantId, 'socialAccounts');
@@ -312,13 +313,14 @@ protectedRouter.post('/social/whatsapp/embedded-signup', requireRole('admin'), a
   }
 });
 
-protectedRouter.post('/social/accounts/:id/disconnect', requireRole('admin'), async (req, res) => {
+protectedRouter.post('/social/accounts/:id/disconnect', requireRole('admin'), asyncHandler(async (req, res) => {
   const client = requireSocialClient(res);
   if (!client) return;
-  const { error } = await scoped(client, req.tenantId, 'social_accounts').update({ status: 'revoked' }).eq('id', req.params.id);
+  const { data, error } = await scoped(client, req.tenantId, 'social_accounts').update({ status: 'revoked' }).eq('id', req.params.id).select('platform, account_label').maybeSingle();
   if (error) return res.status(500).json({ error: error.message });
+  await recordAudit(client, { tenantId: req.tenantId, actorUserId: req.userId, action: 'social_account.disconnected', targetType: 'social_account', targetId: req.params.id, metadata: data || {} });
   res.json({ success: true });
-});
+}));
 
 const mediaUpload = multer({
   storage: multer.memoryStorage(),
@@ -343,7 +345,7 @@ async function ensureMediaBucket(client) {
   mediaBucketReady = true;
 }
 
-protectedRouter.post('/social/media/upload', (req, res) => {
+protectedRouter.post('/social/media/upload', requireRole('member'), (req, res) => {
   mediaUpload.single('file')(req, res, async (uploadErr) => {
     if (uploadErr) return res.status(400).json({ error: uploadErr.message });
     const client = requireSocialClient(res);
@@ -377,7 +379,7 @@ protectedRouter.post('/social/media/upload', (req, res) => {
   });
 });
 
-protectedRouter.post('/social/posts', validate(createPostSchema), async (req, res) => {
+protectedRouter.post('/social/posts', requireRole('member'), validate(createPostSchema), async (req, res) => {
   const client = requireSocialClient(res);
   if (!client) return;
   const { content, mediaUrls, targetPlatforms, targetAccountIds, scheduledAt, idempotencyKey } = req.body;
@@ -426,7 +428,7 @@ protectedRouter.post('/social/posts', validate(createPostSchema), async (req, re
   res.status(201).json({ post: data });
 });
 
-protectedRouter.get('/social/posts', async (req, res) => {
+protectedRouter.get('/social/posts', asyncHandler(async (req, res) => {
   const client = requireSocialClient(res);
   if (!client) return;
   let query = scoped(client, req.tenantId, 'scheduled_posts').select('*').order('scheduled_at', { ascending: false });
@@ -435,9 +437,9 @@ protectedRouter.get('/social/posts', async (req, res) => {
   const { data, error } = await query;
   if (error) return res.status(500).json({ error: error.message });
   res.json({ posts: data });
-});
+}));
 
-protectedRouter.delete('/social/posts/:id', async (req, res) => {
+protectedRouter.delete('/social/posts/:id', asyncHandler(async (req, res) => {
   const client = requireSocialClient(res);
   if (!client) return;
 
@@ -450,7 +452,7 @@ protectedRouter.delete('/social/posts/:id', async (req, res) => {
   const { error } = await scoped(client, req.tenantId, 'scheduled_posts').delete().eq('id', req.params.id);
   if (error) return res.status(500).json({ error: error.message });
   res.json({ success: true });
-});
+}));
 
 // page/pageSize instead of a hardcoded limit(200) — that cap silently
 // hid anything past the 200th row once a tenant had real volume, with no
@@ -522,11 +524,10 @@ protectedRouter.get('/social/contacts/:id/timeline', async (req, res) => {
   }
 });
 
-protectedRouter.post('/social/inbox/:id/reply', async (req, res) => {
+protectedRouter.post('/social/inbox/:id/reply', validate(inboxReplySchema), async (req, res) => {
   const client = requireSocialClient(res);
   if (!client) return;
   const { message } = req.body;
-  if (!message) return res.status(400).json({ error: 'message is required.' });
 
   const { data: thread, error: fetchError } = await scoped(client, req.tenantId, 'inbox_messages').select('*').eq('id', req.params.id).single();
   if (fetchError || !thread) return res.status(404).json({ error: 'Message not found.' });
@@ -555,7 +556,11 @@ protectedRouter.post('/social/inbox/:id/reply', async (req, res) => {
     });
     res.json({ success: true });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    // A platform that deliberately doesn't support replies (e.g.
+    // linkedin.js's sendReply) sets err.statusCode = 400 so this reads
+    // as "not supported here," not a generic server error — same
+    // err.statusCode convention lib/entitlements.js already uses.
+    res.status(err.statusCode || 500).json({ error: err.message });
   }
 });
 
@@ -709,7 +714,7 @@ protectedRouter.get('/social/interactions', async (req, res) => {
   }
 });
 
-protectedRouter.patch('/social/interactions/:source/:id', async (req, res) => {
+protectedRouter.patch('/social/interactions/:source/:id', validate(updateInteractionSchema), asyncHandler(async (req, res) => {
   const client = requireSocialClient(res);
   if (!client) return;
 
@@ -717,41 +722,49 @@ protectedRouter.patch('/social/interactions/:source/:id', async (req, res) => {
   if (!table) return res.status(404).json({ error: `Unknown interaction source "${req.params.source}".` });
 
   const { interactionStatus, priority, assignedTo } = req.body;
+
+  // zod confirms assignedTo is a UUID shape; it can't confirm that UUID
+  // is actually a user in THIS tenant. Without this check, an interaction
+  // could be assigned to an arbitrary user id from any other tenant.
+  if (assignedTo) {
+    const { data: assignee } = await scoped(client, req.tenantId, 'users').select('id').eq('id', assignedTo).maybeSingle();
+    if (!assignee) return res.status(400).json({ error: 'assignedTo must be a member of this workspace.' });
+  }
+
   const update = {};
   if (interactionStatus !== undefined) update.interaction_status = interactionStatus;
   if (priority !== undefined) update.priority = priority;
   if (assignedTo !== undefined) update.assigned_to = assignedTo || null;
-  if (Object.keys(update).length === 0) return res.status(400).json({ error: 'Nothing to update — pass interactionStatus, priority and/or assignedTo.' });
 
   const { data, error } = await scoped(client, req.tenantId, table).update(update).eq('id', req.params.id).select().single();
   if (error) return res.status(500).json({ error: error.message });
   if (!data) return res.status(404).json({ error: 'Interaction not found.' });
   res.json({ interaction: normalizeInteraction(req.params.source, data) });
-});
+}));
 
 // Assignable teammates for the Inbox's assignee dropdown — this tenant's
 // own users table now, not a separate roster or a flat JSON file.
-protectedRouter.get('/social/team', async (req, res) => {
+protectedRouter.get('/social/team', asyncHandler(async (req, res) => {
   const client = requireSocialClient(res);
   if (!client) return;
   const { data, error } = await scoped(client, req.tenantId, 'users').select('id, email, role');
   if (error) return res.status(500).json({ error: error.message });
   res.json({ users: data });
-});
+}));
 
 // Canned responses, shared tenant-wide so a team builds one library
 // instead of each person typing the same reply from scratch. Anyone who
 // can see the Inbox can use them; only member+ can curate the set, same
 // bar as the rest of the app's write actions.
-protectedRouter.get('/social/saved-replies', async (req, res) => {
+protectedRouter.get('/social/saved-replies', asyncHandler(async (req, res) => {
   const client = requireSocialClient(res);
   if (!client) return;
   const { data, error } = await scoped(client, req.tenantId, 'saved_replies').select('*').order('title', { ascending: true });
   if (error) return res.status(500).json({ error: error.message });
   res.json({ savedReplies: data });
-});
+}));
 
-protectedRouter.post('/social/saved-replies', requireRole('member'), validate(savedReplySchema), async (req, res) => {
+protectedRouter.post('/social/saved-replies', requireRole('member'), validate(savedReplySchema), asyncHandler(async (req, res) => {
   const client = requireSocialClient(res);
   if (!client) return;
   const { title, body } = req.body;
@@ -760,9 +773,9 @@ protectedRouter.post('/social/saved-replies', requireRole('member'), validate(sa
     .select().single();
   if (error) return res.status(500).json({ error: error.message });
   res.status(201).json({ savedReply: data });
-});
+}));
 
-protectedRouter.patch('/social/saved-replies/:id', requireRole('member'), validate(savedReplySchema), async (req, res) => {
+protectedRouter.patch('/social/saved-replies/:id', requireRole('member'), validate(savedReplySchema), asyncHandler(async (req, res) => {
   const client = requireSocialClient(res);
   if (!client) return;
   const { title, body } = req.body;
@@ -772,14 +785,14 @@ protectedRouter.patch('/social/saved-replies/:id', requireRole('member'), valida
   if (error) return res.status(500).json({ error: error.message });
   if (!data) return res.status(404).json({ error: 'Saved reply not found.' });
   res.json({ savedReply: data });
-});
+}));
 
-protectedRouter.delete('/social/saved-replies/:id', requireRole('member'), async (req, res) => {
+protectedRouter.delete('/social/saved-replies/:id', requireRole('member'), asyncHandler(async (req, res) => {
   const client = requireSocialClient(res);
   if (!client) return;
   const { error } = await scoped(client, req.tenantId, 'saved_replies').delete().eq('id', req.params.id);
   if (error) return res.status(500).json({ error: error.message });
   res.status(204).end();
-});
+}));
 
 module.exports = { publicRouter, protectedRouter };

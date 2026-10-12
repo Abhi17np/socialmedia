@@ -22,7 +22,7 @@
  * @supabase/supabase-js client directly, no extra abstraction layer).
  *
  * Setup: same GCP OAuth client as youtube.js (GOOGLE_OAUTH_CLIENT_ID/
- * SECRET), with redirect URI {BACKEND_PUBLIC_URL}/api/social/callback/google_business
+ * SECRET), with redirect URI {BACKEND_PUBLIC_URL}/api/v1/social/callback/google_business
  * added, and the Business Profile APIs above enabled on that project.
  */
 

@@ -15,7 +15,7 @@
  * Setup:
  *   1. Create a GCP OAuth 2.0 Client (Web application), enable the
  *      "YouTube Data API v3", add redirect URI
- *      {BACKEND_PUBLIC_URL}/api/social/callback/youtube.
+ *      {BACKEND_PUBLIC_URL}/api/v1/social/callback/youtube.
  *   2. Set GOOGLE_OAUTH_CLIENT_ID / GOOGLE_OAUTH_CLIENT_SECRET in .env
  *      (shared with google-business.js — same GCP project).
  *   3. Set SOCIAL_TOKEN_ENCRYPTION_KEY (see social/crypto.js) before

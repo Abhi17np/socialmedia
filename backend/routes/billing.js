@@ -18,6 +18,7 @@ const { getTenantPlan, currentUsage } = require('../lib/entitlements');
 const { validate } = require('../middleware/validate');
 const { requireRole } = require('../middleware/tenant');
 const { checkoutSchema } = require('../lib/schemas');
+const { recordAudit } = require('../lib/audit');
 
 const PLAN_IDS = {
   starter: process.env.RAZORPAY_PLAN_STARTER,
@@ -37,7 +38,10 @@ const protectedRouter = express.Router();
 // to gray out "Connect account" before the backend rejects it — the
 // actual enforcement is lib/entitlements.js's assertWithinLimit(),
 // called from the routes that create something; this is read-only.
-protectedRouter.get('/billing/usage', async (req, res) => {
+// owner-only, matching Billing's own nav gating (SocialNav.jsx) — unlike
+// the Team roster, nothing else in the app needs a non-owner to read
+// plan/usage data, so there's no reason to leave it open past requireAuth.
+protectedRouter.get('/billing/usage', requireRole('owner'), async (req, res) => {
   const client = getSocialClient();
   if (!client) return res.status(503).json({ error: 'Database not configured.' });
 
@@ -91,6 +95,7 @@ protectedRouter.post('/billing/checkout', requireRole('owner'), validate(checkou
     const client = getSocialClient();
     if (client) {
       await client.from('tenants').update({ razorpay_subscription_id: subscription.id }).eq('id', req.tenantId);
+      await recordAudit(client, { tenantId: req.tenantId, actorUserId: req.userId, action: 'billing.checkout_started', targetType: 'subscription', targetId: subscription.id, metadata: { plan } });
     }
 
     res.json({ subscriptionId: subscription.id, shortUrl: subscription.short_url });

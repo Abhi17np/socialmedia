@@ -85,15 +85,12 @@ function Posts({ authFetch, setCurrentView }) {
   const [error, setError] = useState(null);
   const [subTab, setSubTab] = useState('scheduled');
   const [platformFilter, setPlatformFilter] = useState('');
-  const [brand, setBrand] = useState('');
   const [search, setSearch] = useState('');
   const [collapsedDates, setCollapsedDates] = useState({});
 
   const load = async () => {
     try {
-      const params = new URLSearchParams();
-      if (brand.trim()) params.set('brand', brand.trim());
-      const res = await authFetch(`${SOCIAL_API_BASE}/posts?${params.toString()}`);
+      const res = await authFetch(`${SOCIAL_API_BASE}/posts`);
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Could not load posts.');
       setPosts((data.posts || []).sort((a, b) => new Date(b.scheduled_at) - new Date(a.scheduled_at)));
@@ -103,7 +100,7 @@ function Posts({ authFetch, setCurrentView }) {
     }
   };
 
-  useEffect(() => { load(); }, [brand]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { load(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const cancel = async (id) => {
     if (!confirm('Cancel this pending post?')) return;
@@ -168,14 +165,6 @@ function Posts({ authFetch, setCurrentView }) {
             <Search size={14} style={{ color: 'var(--text-muted)' }} />
             <input placeholder="Search post content…" value={search} onChange={(e) => setSearch(e.target.value)} />
           </div>
-          <input
-            type="text"
-            className="form-control"
-            style={{ width: 140 }}
-            placeholder="Brand"
-            value={brand}
-            onChange={(e) => setBrand(e.target.value)}
-          />
         </div>
       </div>
 
@@ -215,7 +204,7 @@ function Posts({ authFetch, setCurrentView }) {
                           {post.content ? (post.content.length > 140 ? `${post.content.slice(0, 140)}…` : post.content) : '(no text content)'}
                         </div>
                         <div style={{ fontSize: '0.78rem', color: 'var(--text-secondary)' }}>
-                          {new Date(post.scheduled_at).toLocaleTimeString()} · {post.brand}
+                          {new Date(post.scheduled_at).toLocaleTimeString()}
                         </div>
                         <PostErrors results={post.platform_results} />
                       </div>

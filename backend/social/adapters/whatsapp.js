@@ -30,7 +30,7 @@
  * least one verified phone number set up in Meta Business Suite (this
  * adapter connects to an existing WABA/number — it doesn't run Meta's
  * Embedded Signup flow to create one). Add this redirect URI:
- *   {BACKEND_PUBLIC_URL}/api/social/callback/whatsapp
+ *   {BACKEND_PUBLIC_URL}/api/v1/social/callback/whatsapp
  * and, under the app's WhatsApp > Configuration > Webhook settings:
  *   Callback URL: {BACKEND_PUBLIC_URL}/api/social/webhook/whatsapp
  *   Verify token: WHATSAPP_WEBHOOK_VERIFY_TOKEN (.env)

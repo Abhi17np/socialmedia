@@ -22,7 +22,7 @@
  *
  * Setup: create a Meta App at developers.facebook.com, add the
  * "Facebook Login for Business" product, set redirect URI
- * {BACKEND_PUBLIC_URL}/api/social/callback/facebook, and set
+ * {BACKEND_PUBLIC_URL}/api/v1/social/callback/facebook, and set
  * META_APP_ID/META_APP_SECRET in .env (shared with instagram.js).
  */
 

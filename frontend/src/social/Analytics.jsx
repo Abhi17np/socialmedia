@@ -88,7 +88,6 @@ function ChannelCard({ row, expanded, onToggle }) {
 
 function Analytics({ authFetch }) {
   const [summary, setSummary] = useState(null);
-  const [brand, setBrand] = useState('infopace');
   const [windowDays, setWindowDays] = useState(30);
   const [error, setError] = useState(null);
   // accountId -> { posts } | { loading: true } | { error }, filled in lazily
@@ -100,9 +99,7 @@ function Analytics({ authFetch }) {
 
   const load = async () => {
     try {
-      const params = new URLSearchParams();
-      if (brand) params.set('brand', brand);
-      const res = await authFetch(`${SOCIAL_API_BASE}/analytics/summary?${params.toString()}`);
+      const res = await authFetch(`${SOCIAL_API_BASE}/analytics/summary`);
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Could not load analytics.');
       setSummary(data.summary || []);
@@ -113,7 +110,7 @@ function Analytics({ authFetch }) {
     }
   };
 
-  useEffect(() => { load(); }, [brand]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { load(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const togglePosts = async (row) => {
     if (expandedAccount === row.accountId) {
@@ -167,7 +164,6 @@ function Analytics({ authFetch }) {
           <p>Channel overview for the past {windowDays} days.</p>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
-          <input type="text" className="form-control" style={{ width: 160 }} placeholder="Brand" value={brand} onChange={(e) => setBrand(e.target.value)} />
           <button className="btn btn-secondary btn-sm" onClick={load}>
             <RefreshCw size={14} /> Refresh
           </button>
@@ -178,7 +174,7 @@ function Analytics({ authFetch }) {
 
       {!loading && rows.length === 0 ? (
         <div className="panel">
-          <p style={{ color: 'var(--text-secondary)' }}>No connected accounts for this brand yet — connect one in Connect Accounts.</p>
+          <p style={{ color: 'var(--text-secondary)' }}>No connected accounts yet — connect one in Connect Accounts.</p>
         </div>
       ) : (
         <>

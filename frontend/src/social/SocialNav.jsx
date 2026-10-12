@@ -3,9 +3,7 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { LayoutGrid, PenSquare, Layers, Inbox as InboxIcon, LineChart, Link2, Users, CreditCard } from 'lucide-react';
-
-const ROLE_RANK = { viewer: 0, member: 1, admin: 2, owner: 3 };
-const atLeast = (role, min) => (ROLE_RANK[role] ?? 0) >= ROLE_RANK[min];
+import { atLeast } from '../roleRank';
 
 // Sidebar sub-section for the Social module. Every item declares the
 // minimum role that can see it at all — this isn't decoration: every one

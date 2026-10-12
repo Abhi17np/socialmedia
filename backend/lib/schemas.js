@@ -52,4 +52,46 @@ const draftPostSchema = z.object({
   tone: z.string().trim().max(100).optional()
 });
 
-module.exports = { signupSchema, loginSchema, createPostSchema, checkoutSchema, addMemberSchema, updateMemberSchema, savedReplySchema, draftPostSchema };
+const whatsappEmbeddedSignupSchema = z.object({
+  code: z.string().trim().min(1).max(2000),
+  wabaId: z.string().trim().min(1).max(100),
+  phoneNumberId: z.string().trim().min(1).max(100).optional()
+});
+
+const inboxReplySchema = z.object({
+  message: z.string().trim().min(1).max(4096)
+});
+
+const INTERACTION_STATUSES = ['open', 'under_review', 'closed'];
+const INTERACTION_PRIORITIES = ['low', 'medium', 'high'];
+
+// assignedTo's *value* shape is checked here; whether that id actually
+// belongs to this tenant is a DB lookup the route itself still has to
+// do — zod can't see across tables.
+const updateInteractionSchema = z.object({
+  interactionStatus: z.enum(INTERACTION_STATUSES).optional(),
+  priority: z.enum(INTERACTION_PRIORITIES).optional(),
+  assignedTo: z.string().uuid().nullable().optional()
+}).refine(v => v.interactionStatus !== undefined || v.priority !== undefined || v.assignedTo !== undefined, {
+  message: 'Nothing to update — pass interactionStatus, priority and/or assignedTo.'
+});
+
+const changePasswordSchema = z.object({
+  currentPassword: z.string().min(1),
+  newPassword: z.string().min(8).max(200)
+});
+
+const forgotPasswordSchema = z.object({
+  email: z.string().trim().email()
+});
+
+const resetPasswordSchema = z.object({
+  token: z.string().min(1),
+  newPassword: z.string().min(8).max(200)
+});
+
+module.exports = {
+  signupSchema, loginSchema, createPostSchema, checkoutSchema, addMemberSchema, updateMemberSchema,
+  savedReplySchema, draftPostSchema, whatsappEmbeddedSignupSchema, inboxReplySchema, updateInteractionSchema,
+  INTERACTION_STATUSES, INTERACTION_PRIORITIES, changePasswordSchema, forgotPasswordSchema, resetPasswordSchema
+};

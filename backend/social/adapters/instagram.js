@@ -10,7 +10,7 @@
  * post, same constraint as YouTube: media_urls is required.
  *
  * Setup: same Meta App as facebook.js (META_APP_ID/SECRET), redirect URI
- * {BACKEND_PUBLIC_URL}/api/social/callback/instagram added, and the
+ * {BACKEND_PUBLIC_URL}/api/v1/social/callback/instagram added, and the
  * connected Page must have an Instagram Business (or Creator) account
  * linked to it in Meta Business Suite — Instagram Graph API access only
  * exists for accounts of that type, never a regular personal account.
@@ -22,6 +22,7 @@
  */
 
 const metaOAuth = require('./_meta-oauth');
+const { logger } = require('../../lib/logger');
 
 const PLATFORM = 'instagram';
 // Instagram publishing/insights ride on the same Page-scoped permissions
@@ -181,7 +182,9 @@ async function fetchInbox(account) {
       metaOAuth.grantedTargetIds(account.refreshToken, 'pages_messaging').catch(() => ['<lookup failed>']),
       metaOAuth.grantedTargetIds(account.refreshToken, 'instagram_manage_messages').catch(() => ['<lookup failed>'])
     ]);
-    console.log(`[instagram/fetchInbox] pageId=${pageId} pages_messaging granted for pages=[${messagingPages}] instagram_manage_messages granted for pages=[${igMessagingPages}]`);
+    // debug, not console.log — scope ids only, no customer data, and off
+    // by default (LOG_LEVEL=info) rather than unconditionally on stdout.
+    logger.debug({ pageId, messagingPages, igMessagingPages }, '[instagram/fetchInbox] granted scopes');
   }
 
   const data = await metaOAuth.graphFetch(`/${pageId}/conversations`, {
@@ -190,8 +193,9 @@ async function fetchInbox(account) {
     access_token: account.accessToken
   });
 
-  // TEMP diagnostic — remove once DM capture is confirmed working.
-  console.log(`[instagram/fetchInbox] pageId=${pageId} conversations=${(data.data || []).length}`, JSON.stringify(data));
+  // Count only — the full response includes participant names/message
+  // snippets, which don't belong in logs even at debug level.
+  logger.debug({ pageId, conversationCount: (data.data || []).length }, '[instagram/fetchInbox] fetched conversations');
 
   return (data.data || []).map(conv => ({
     externalThreadId: conv.id,

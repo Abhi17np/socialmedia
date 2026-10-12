@@ -13,18 +13,23 @@ const { requireRole } = require('../middleware/tenant');
 const { scoped } = require('../lib/query');
 const { validate } = require('../middleware/validate');
 const { addMemberSchema, updateMemberSchema } = require('../lib/schemas');
+const { asyncHandler } = require('../lib/asyncHandler');
+const { recordAudit } = require('../lib/audit');
 
 const router = express.Router();
 
-router.get('/team/members', async (req, res) => {
+// Deliberately not role-gated beyond requireAuth — the Inbox's assignee
+// dropdown (viewer-accessible) needs the full roster too, so this reads
+// the same for every role; only the mutations below are admin+.
+router.get('/team/members', asyncHandler(async (req, res) => {
   const client = getSocialClient();
   if (!client) return res.status(503).json({ error: 'Database not configured.' });
   const { data, error } = await scoped(client, req.tenantId, 'users').select('id, email, role, created_at').order('created_at');
   if (error) return res.status(500).json({ error: error.message });
   res.json({ members: data });
-});
+}));
 
-router.post('/team/members', requireRole('admin'), validate(addMemberSchema), async (req, res) => {
+router.post('/team/members', requireRole('admin'), validate(addMemberSchema), asyncHandler(async (req, res) => {
   const { email, password, role } = req.body;
   const client = getSocialClient();
   if (!client) return res.status(503).json({ error: 'Database not configured.' });
@@ -49,14 +54,15 @@ router.post('/team/members', requireRole('admin'), validate(addMemberSchema), as
       if (error.code === '23505') return res.status(409).json({ error: 'A teammate with that email already exists in this workspace.' });
       throw error;
     }
+    await recordAudit(client, { tenantId: req.tenantId, actorUserId: req.userId, action: 'team.member_added', targetType: 'user', targetId: data.id, metadata: { email: data.email, role: data.role } });
     res.status(201).json({ member: data });
   } catch (err) {
     req.log.error({ err }, 'Could not add team member');
     res.status(500).json({ error: 'Could not add teammate.' });
   }
-});
+}));
 
-router.patch('/team/members/:id', requireRole('admin'), validate(updateMemberSchema), async (req, res) => {
+router.patch('/team/members/:id', requireRole('admin'), validate(updateMemberSchema), asyncHandler(async (req, res) => {
   const { role } = req.body;
   const client = getSocialClient();
   if (!client) return res.status(503).json({ error: 'Database not configured.' });
@@ -77,14 +83,15 @@ router.patch('/team/members/:id', requireRole('admin'), validate(updateMemberSch
 
   const { data, error } = await scoped(client, req.tenantId, 'users').update({ role }).eq('id', req.params.id).select('id, email, role, created_at').single();
   if (error) return res.status(500).json({ error: error.message });
+  await recordAudit(client, { tenantId: req.tenantId, actorUserId: req.userId, action: 'team.member_role_changed', targetType: 'user', targetId: req.params.id, metadata: { fromRole: existing.role, toRole: role } });
   res.json({ member: data });
-});
+}));
 
-router.delete('/team/members/:id', requireRole('admin'), async (req, res) => {
+router.delete('/team/members/:id', requireRole('admin'), asyncHandler(async (req, res) => {
   const client = getSocialClient();
   if (!client) return res.status(503).json({ error: 'Database not configured.' });
 
-  const { data: existing } = await scoped(client, req.tenantId, 'users').select('id, role').eq('id', req.params.id).maybeSingle();
+  const { data: existing } = await scoped(client, req.tenantId, 'users').select('id, role, email').eq('id', req.params.id).maybeSingle();
   if (!existing) return res.status(404).json({ error: 'Teammate not found.' });
 
   if (existing.role === 'owner') {
@@ -94,7 +101,8 @@ router.delete('/team/members/:id', requireRole('admin'), async (req, res) => {
 
   const { error } = await scoped(client, req.tenantId, 'users').delete().eq('id', req.params.id);
   if (error) return res.status(500).json({ error: error.message });
+  await recordAudit(client, { tenantId: req.tenantId, actorUserId: req.userId, action: 'team.member_removed', targetType: 'user', targetId: req.params.id, metadata: { email: existing.email, role: existing.role } });
   res.json({ success: true });
-});
+}));
 
 module.exports = router;

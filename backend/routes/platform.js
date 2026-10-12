@@ -50,7 +50,7 @@ protectedRouter.get('/tenants', async (req, res) => {
       const [{ count: userCount }, { count: accountCount }, { data: usage }] = await Promise.all([
         client.from('users').select('id', { count: 'exact', head: true }).eq('tenant_id', t.id),
         client.from('social_accounts').select('id', { count: 'exact', head: true }).eq('tenant_id', t.id).eq('status', 'active'),
-        client.from('usage_counters').select('posts_published, whatsapp_messages').eq('tenant_id', t.id).eq('period', period).maybeSingle()
+        client.from('usage_counters').select('posts_published, whatsapp_messages, ai_generations').eq('tenant_id', t.id).eq('period', period).maybeSingle()
       ]);
       const limits = limitsFor(t.plan);
       return {
@@ -61,7 +61,9 @@ protectedRouter.get('/tenants', async (req, res) => {
         postsThisMonth: (usage && usage.posts_published) || 0,
         postsLimit: limits.postsPerMonth,
         whatsappMessagesThisMonth: (usage && usage.whatsapp_messages) || 0,
-        whatsappLimit: limits.whatsappMessagesPerMonth
+        whatsappLimit: limits.whatsappMessagesPerMonth,
+        aiGenerationsThisMonth: (usage && usage.ai_generations) || 0,
+        aiGenerationsLimit: limits.aiGenerationsPerMonth
       };
     }));
 

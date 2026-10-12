@@ -107,6 +107,7 @@ export default function PlatformDashboard({ token }) {
                   <th style={{ padding: '0.75rem 1rem' }}>Accounts</th>
                   <th style={{ padding: '0.75rem 1rem' }}>Posts (mo.)</th>
                   <th style={{ padding: '0.75rem 1rem' }}>WhatsApp (mo.)</th>
+                  <th style={{ padding: '0.75rem 1rem' }}>AI drafts (mo.)</th>
                   <th style={{ padding: '0.75rem 1rem' }}>Created</th>
                 </tr>
               </thead>
@@ -124,6 +125,7 @@ export default function PlatformDashboard({ token }) {
                     <td style={{ padding: '0.75rem 1rem' }}><UsageCell used={t.accountCount} limit={t.accountLimit} /></td>
                     <td style={{ padding: '0.75rem 1rem' }}><UsageCell used={t.postsThisMonth} limit={t.postsLimit} /></td>
                     <td style={{ padding: '0.75rem 1rem' }}><UsageCell used={t.whatsappMessagesThisMonth} limit={t.whatsappLimit} /></td>
+                    <td style={{ padding: '0.75rem 1rem' }}><UsageCell used={t.aiGenerationsThisMonth} limit={t.aiGenerationsLimit} /></td>
                     <td style={{ padding: '0.75rem 1rem', color: 'var(--text-secondary)' }}>{new Date(t.created_at).toLocaleDateString()}</td>
                   </tr>
                 ))}

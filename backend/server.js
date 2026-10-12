@@ -1,5 +1,6 @@
 const express = require('express');
 const cors = require('cors');
+const helmet = require('helmet');
 const dotenv = require('dotenv');
 const pinoHttp = require('pino-http');
 const rateLimit = require('express-rate-limit');
@@ -20,10 +21,25 @@ const socialPollers = require('./social/pollers');
 // Versioned from day one — nothing in production depends on an
 // unversioned path yet, which is exactly the window in which this is
 // free to do and after which it's a breaking change for every caller.
-const API_PREFIX = '/api/v1';
+// Shared with the OAuth adapters via lib/apiPrefix.js so their
+// redirect_uri can never drift from where these routes actually mount.
+const { API_PREFIX } = require('./lib/apiPrefix');
+
+// Comma-separated so a staging + prod frontend (or the platform console,
+// if it's ever split to its own domain) can both be allowed without code
+// changes. Previously this was a bare cors() — every origin, no
+// allowlist at all — so any website could call this API from a
+// logged-in tenant's browser using their own cookies/localStorage token.
+const allowedOrigins = (process.env.FRONTEND_URL || 'http://localhost:3000')
+  .split(',').map(o => o.trim()).filter(Boolean);
 
 const app = express();
-app.use(cors());
+// disable: this API serves JSON to a separate frontend origin, not HTML
+// it renders itself, so CSP's main job (restricting what a same-origin
+// page may load) doesn't apply here, and a default-deny CSP would just
+// break CORS preflight responses for no benefit.
+app.use(helmet({ contentSecurityPolicy: false }));
+app.use(cors({ origin: allowedOrigins }));
 app.use(pinoHttp({ logger })); // attaches req.log + req.id to every request, public or protected
 
 // `verify` stashes the raw request body bytes on req.rawBody — needed by

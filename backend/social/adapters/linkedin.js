@@ -28,9 +28,11 @@
  *      "Sign In with LinkedIn using OpenID Connect" and "Share on
  *      LinkedIn" products (Products tab — both self-serve, instant).
  *   2. Under Auth settings, add redirect URL
- *      {BACKEND_PUBLIC_URL}/api/social/callback/linkedin.
+ *      {BACKEND_PUBLIC_URL}/api/v1/social/callback/linkedin.
  *   3. Set LINKEDIN_CLIENT_ID / LINKEDIN_CLIENT_SECRET in backend/.env.
  */
+
+const { API_PREFIX } = require('../../lib/apiPrefix');
 
 const AUTH_BASE = 'https://www.linkedin.com/oauth/v2';
 const API_BASE = 'https://api.linkedin.com/rest';
@@ -47,7 +49,7 @@ const SCOPES = ['openid', 'profile', 'email', 'w_member_social'];
 
 function redirectUri() {
   const base = process.env.BACKEND_PUBLIC_URL || 'http://localhost:5001';
-  return `${base}/api/social/callback/${PLATFORM}`;
+  return `${base}${API_PREFIX}/social/callback/${PLATFORM}`;
 }
 
 function isConfigured() {
@@ -190,7 +192,11 @@ async function fetchInbox() {
 }
 
 async function sendReply() {
-  throw new Error('LinkedIn replies require Community Management API access, which this app does not have.');
+  // 400, not a bare throw (which the route caught as a generic 500) —
+  // this is "not supported for this platform," not a server failure.
+  const err = new Error('LinkedIn replies require Community Management API access, which this app does not have.');
+  err.statusCode = 400;
+  throw err;
 }
 
 // Member-level post/profile analytics also sit behind Community

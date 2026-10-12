@@ -7,9 +7,7 @@ import { API_BASE } from '../apiBase';
 import { PlatformFilterTabs } from './PlatformIcon';
 import ContactTimeline from './ContactTimeline';
 import SavedReplies from './SavedReplies';
-
-const ROLE_RANK = { viewer: 0, member: 1, admin: 2, owner: 3 };
-const atLeast = (role, min) => (ROLE_RANK[role] ?? 0) >= ROLE_RANK[min];
+import { atLeast } from '../roleRank';
 
 // Unified "all queries and leads in one place" view — mentions (comments,
 // reviews) and inbox_messages (DMs) merged server-side into one list by
