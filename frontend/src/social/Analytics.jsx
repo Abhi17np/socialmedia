@@ -2,87 +2,174 @@
 
 import React, { useEffect, useState } from 'react';
 import {
-  RefreshCw, Users, Send, Eye, ThumbsUp, MessageCircle, Share2,
-  TrendingUp, TrendingDown, ExternalLink, X, Info
+  RefreshCw, ThumbsUp, MessageCircle, Share2, TrendingUp, TrendingDown,
+  ExternalLink, Info, LineChart as LineChartIcon, ChevronDown, ChevronUp
 } from 'lucide-react';
+import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip as RTooltip, Cell, LabelList } from 'recharts';
+import { SOCIAL_API_BASE } from './api';
+import { Page, PageBar, PageBody } from '../ui/page';
 import {
-  ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip as RTooltip, Cell, LabelList
-} from 'recharts';
-import { SOCIAL_API_BASE, PLATFORM_LABELS, PLATFORM_COLORS } from './api';
-import { PlatformIcon } from './PlatformIcon';
+  IconButton, Panel, PanelHeader, StatStrip, Stat, EmptyState, Banner,
+  Skeleton, Input, cx
+} from '../ui';
+import { ChannelTile, channelColor, channelLabel } from '../ui/channel';
 
-// "Brand Health" — redesigned as a channel-card grid (one card per
-// connected account) instead of a plain table, plus an engagement
-// comparison chart and a dedicated recent-posts panel, so it reads like
-// the analytics view in Zoho Social / HubSpot rather than a spreadsheet.
-// social/pollers.js's sweepAnalytics() (backend) is what actually keeps
-// the underlying numbers current, every 6 hours; this page just reads
-// GET /social/analytics/summary (aggregate, per account) and, lazily,
-// GET /social/accounts/:id/posts (per-post detail) and renders them.
-const CHART_TOOLTIP_STYLE = { background: 'var(--bg-secondary)', border: '1px solid var(--border-color)', borderRadius: 8, fontSize: 12, boxShadow: 'var(--shadow-md)' };
+// "Brand health" — one card per connected account plus an engagement
+// comparison, reading GET /social/analytics/summary (aggregate, per
+// account) and, lazily, GET /social/accounts/:id/posts (per-post detail).
+// backend/social/pollers.js's sweepAnalytics() is what keeps the numbers
+// current, every 6 hours; this page just renders them.
+//
+// A metric this platform's adapter can't report (null) reads as a muted
+// em dash with a hover explanation, never a fabricated 0 — the rule the
+// redesign kept verbatim.
 
-function fmt(value) {
-  if (value === null || value === undefined) return null;
-  return value.toLocaleString();
-}
+const TOOLTIP_STYLE = {
+  background: 'var(--color-card)',
+  border: '1px solid var(--color-hairline)',
+  borderRadius: 8,
+  fontSize: 11,
+  color: 'var(--color-ink)',
+  boxShadow: 'var(--shadow-flyout)'
+};
 
-function formatPostDate(iso) {
-  if (!iso) return '';
-  return new Date(iso).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
-}
+const fmt = (v) => (v === null || v === undefined ? null : v.toLocaleString());
 
-// A metric this platform's adapter can't report (null) reads as a plain
-// muted dash with a hover explanation, never a fabricated 0.
 function Metric({ value, label }) {
   const display = fmt(value);
   return (
-    <div style={{ textAlign: 'center' }}>
-      <div style={{ fontSize: '1.05rem', fontWeight: 700, color: display === null ? 'var(--text-muted)' : 'var(--text-primary)' }} title={display === null ? 'Not reported by this platform / permission level yet' : undefined}>
+    <div className="min-w-0">
+      <div className="eyebrow truncate">{label}</div>
+      <div
+        className={cx('text-[15px] font-semibold tabular-nums mt-0.5', display === null ? 'text-subtle' : 'text-ink')}
+        title={display === null ? 'Not reported by this platform / permission level yet' : undefined}
+      >
         {display === null ? '—' : display}
       </div>
-      <div style={{ fontSize: '0.68rem', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.03em', marginTop: '0.15rem' }}>{label}</div>
     </div>
   );
 }
 
-function ChannelCard({ row, expanded, onToggle }) {
-  const color = PLATFORM_COLORS[row.platform] || 'var(--text-muted)';
+function ChannelCard({ row, expanded, onToggle, detail }) {
   const followers = fmt(row.followers);
   return (
-    <div className="panel" style={{ marginBottom: 0, border: expanded ? `1px solid ${color}` : undefined }}>
-      <div style={{ display: 'flex', alignItems: 'flex-start', gap: '0.75rem', marginBottom: '1rem' }}>
-        <div style={{ width: 38, height: 38, borderRadius: 'var(--radius-sm)', background: color, color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-          <PlatformIcon platform={row.platform} size={18} />
+    <Panel>
+      <div className="p-4">
+        <div className="flex items-start gap-3">
+          <ChannelTile platform={row.platform} size={34} />
+          <div className="min-w-0 flex-1">
+            <div className="text-xs font-semibold text-ink truncate">
+              {row.accountLabel || row.accountId}
+            </div>
+            <div className="text-[11px] text-subtle">{channelLabel(row.platform)}</div>
+          </div>
+          {row.newFollowers !== null && row.newFollowers !== 0 && (
+            <span
+              className={cx(
+                'flex items-center gap-1 text-[11px] font-medium tabular-nums shrink-0',
+                row.newFollowers > 0 ? 'text-success' : 'text-danger'
+              )}
+            >
+              {row.newFollowers > 0 ? <TrendingUp size={12} /> : <TrendingDown size={12} />}
+              {row.newFollowers > 0 ? `+${row.newFollowers}` : row.newFollowers}
+            </span>
+          )}
         </div>
-        <div style={{ minWidth: 0 }}>
-          <div style={{ fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{row.accountLabel || row.accountId}</div>
-          <div style={{ fontSize: '0.78rem', color: 'var(--text-secondary)' }}>{PLATFORM_LABELS[row.platform] || row.platform}</div>
-        </div>
-      </div>
 
-      <div style={{ display: 'flex', alignItems: 'baseline', gap: '0.6rem', marginBottom: '1rem' }}>
-        <div style={{ fontSize: '2rem', fontWeight: 800, color: followers === null ? 'var(--text-muted)' : 'var(--text-primary)' }}>
-          {followers === null ? '—' : followers}
-        </div>
-        <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>followers</div>
-        {row.newFollowers !== null && row.newFollowers !== 0 && (
-          <span style={{ marginLeft: 'auto', display: 'inline-flex', alignItems: 'center', gap: '0.2rem', fontSize: '0.8rem', fontWeight: 700, color: row.newFollowers > 0 ? 'var(--accent-success)' : 'var(--accent-danger)' }}>
-            {row.newFollowers > 0 ? <TrendingUp size={13} /> : <TrendingDown size={13} />}
-            {row.newFollowers > 0 ? `+${row.newFollowers}` : row.newFollowers}
+        <div className="mt-3 flex items-baseline gap-2">
+          <span
+            className={cx(
+              'text-[26px] leading-7 font-semibold tabular-nums tracking-tight',
+              followers === null ? 'text-subtle' : 'text-ink'
+            )}
+          >
+            {followers === null ? '—' : followers}
           </span>
-        )}
+          <span className="text-[11px] text-subtle">followers</span>
+        </div>
+
+        <div className="mt-3 pt-3 border-t border-hairline grid grid-cols-3 gap-3">
+          <Metric value={row.posts} label="Posts" />
+          <Metric value={row.reach} label="Reach" />
+          <Metric value={row.engagement} label="Engagement" />
+        </div>
       </div>
 
-      <div style={{ display: 'flex', justifyContent: 'space-between', paddingTop: '0.85rem', borderTop: '1px solid var(--border-color)', marginBottom: '1rem' }}>
-        <Metric value={row.posts} label="Posts" />
-        <Metric value={row.reach} label="Reach" />
-        <Metric value={row.engagement} label="Engagement" />
-      </div>
-
-      <button className="btn btn-secondary btn-sm" style={{ width: '100%', justifyContent: 'center' }} onClick={() => onToggle(row)}>
-        {expanded ? 'Hide Recent Posts' : 'View Recent Posts'}
+      <button
+        onClick={() => onToggle(row)}
+        className="w-full h-9 border-t border-hairline text-[11px] font-medium text-muted hover:text-ink hover:bg-canvas transition-colors flex items-center justify-center gap-1.5"
+      >
+        {expanded ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
+        {expanded ? 'Hide recent posts' : 'View recent posts'}
       </button>
-    </div>
+
+      {expanded && (
+        <div className="border-t border-hairline">
+          {!detail || detail.loading ? (
+            <div className="p-4 space-y-2">
+              <Skeleton className="h-8" />
+              <Skeleton className="h-8" />
+            </div>
+          ) : detail.error ? (
+            <p className="p-4 text-[11px] text-danger">{detail.error}</p>
+          ) : detail.posts.length === 0 ? (
+            <p className="p-4 text-[11px] text-subtle text-center">No posts found.</p>
+          ) : (
+            <>
+              {detail.posts.some((p) => p.likes === null || p.comments === null) && (
+                <p className="px-4 pt-3 text-[11px] text-subtle leading-relaxed">
+                  Engagement counts aren’t available for this account yet — it needs Advanced Access
+                  to Facebook’s pages_read_engagement permission.
+                </p>
+              )}
+              {detail.posts.map((post) => (
+                <div
+                  key={post.externalPostId}
+                  className="px-4 py-2.5 border-b border-hairline last:border-0 flex items-start justify-between gap-3"
+                >
+                  <div className="min-w-0">
+                    <p className="text-[11px] text-ink line-clamp-2 leading-relaxed">
+                      {post.message || '(no text)'}
+                    </p>
+                    <div className="flex items-center gap-2 text-[11px] text-subtle mt-1">
+                      {post.createdTime &&
+                        new Date(post.createdTime).toLocaleDateString(undefined, {
+                          day: 'numeric',
+                          month: 'short',
+                          year: 'numeric'
+                        })}
+                      {post.permalinkUrl && (
+                        <a
+                          href={post.permalinkUrl}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="text-brand inline-flex items-center gap-1 hover:underline"
+                        >
+                          <ExternalLink size={10} /> View
+                        </a>
+                      )}
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-3 shrink-0 text-[11px] text-muted tabular-nums">
+                    <span className="flex items-center gap-1">
+                      <ThumbsUp size={12} /> {post.likes === null ? '—' : post.likes}
+                    </span>
+                    <span className="flex items-center gap-1">
+                      <MessageCircle size={12} /> {post.comments === null ? '—' : post.comments}
+                    </span>
+                    {post.shares !== null && post.shares !== undefined && (
+                      <span className="flex items-center gap-1">
+                        <Share2 size={12} /> {post.shares}
+                      </span>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </>
+          )}
+        </div>
+      )}
+    </Panel>
   );
 }
 
@@ -90,27 +177,34 @@ function Analytics({ authFetch }) {
   const [summary, setSummary] = useState(null);
   const [windowDays, setWindowDays] = useState(30);
   const [error, setError] = useState(null);
+  const [brand, setBrand] = useState('');
+  const [refreshing, setRefreshing] = useState(false);
   // accountId -> { posts } | { loading: true } | { error }, filled in lazily
-  // when a card's "View Recent Posts" is clicked — /social/analytics/summary's
-  // aggregate numbers don't include per-post likes/comments, so this is a
-  // separate fetch.
+  // when a card is expanded — the summary's aggregate numbers don't
+  // include per-post likes/comments, so this is a separate fetch.
   const [expandedAccount, setExpandedAccount] = useState(null);
   const [postsByAccount, setPostsByAccount] = useState({});
 
   const load = async () => {
+    setRefreshing(true);
     try {
       const res = await authFetch(`${SOCIAL_API_BASE}/analytics/summary`);
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Could not load analytics.');
       setSummary(data.summary || []);
       setWindowDays(data.windowDays || 30);
+      setError(null);
     } catch (err) {
       setError(err.message);
       setSummary([]);
+    } finally {
+      setRefreshing(false);
     }
   };
 
-  useEffect(() => { load(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    load();
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const togglePosts = async (row) => {
     if (expandedAccount === row.accountId) {
@@ -120,24 +214,28 @@ function Analytics({ authFetch }) {
     setExpandedAccount(row.accountId);
     if (postsByAccount[row.accountId]) return; // already fetched — expand from cache
 
-    setPostsByAccount(prev => ({ ...prev, [row.accountId]: { loading: true } }));
+    setPostsByAccount((prev) => ({ ...prev, [row.accountId]: { loading: true } }));
     try {
       const res = await authFetch(`${SOCIAL_API_BASE}/accounts/${row.accountId}/posts`);
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Could not load posts.');
-      setPostsByAccount(prev => ({ ...prev, [row.accountId]: { posts: data.posts || [] } }));
+      setPostsByAccount((prev) => ({ ...prev, [row.accountId]: { posts: data.posts || [] } }));
     } catch (err) {
-      setPostsByAccount(prev => ({ ...prev, [row.accountId]: { error: err.message } }));
+      setPostsByAccount((prev) => ({ ...prev, [row.accountId]: { error: err.message } }));
     }
   };
 
   const loading = summary === null;
-  const rows = summary || [];
+  const allRows = summary || [];
+  const rows = brand.trim()
+    ? allRows.filter((r) => (r.brand || '').toLowerCase().includes(brand.trim().toLowerCase()))
+    : allRows;
+
   // A metric only totals up if at least one account actually reports it —
   // summing null-as-0 across accounts that all lack the permission would
   // print a real-looking "0" for a number that's actually unknown.
   const sumMetric = (key) => {
-    const known = rows.filter(r => r[key] !== null && r[key] !== undefined);
+    const known = rows.filter((r) => r[key] !== null && r[key] !== undefined);
     if (known.length === 0) return null;
     return known.reduce((sum, r) => sum + r[key], 0);
   };
@@ -149,143 +247,127 @@ function Analytics({ authFetch }) {
   };
 
   const engagementChartData = rows
-    .filter(r => r.engagement !== null && r.engagement !== undefined)
-    .map(r => ({ name: r.accountLabel || r.accountId, value: r.engagement, fill: PLATFORM_COLORS[r.platform] || '#2a78d6' }))
+    .filter((r) => r.engagement !== null && r.engagement !== undefined)
+    .map((r) => ({
+      name: r.accountLabel || r.accountId,
+      value: r.engagement,
+      fill: channelColor(r.platform)
+    }))
     .sort((a, b) => b.value - a.value);
 
-  const expandedRow = rows.find(r => r.accountId === expandedAccount);
-  const expandedPosts = expandedAccount ? postsByAccount[expandedAccount] : null;
-
   return (
-    <div>
-      <div className="header-container">
-        <div className="title-area">
-          <h1>Analytics</h1>
-          <p>Channel overview for the past {windowDays} days.</p>
-        </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
-          <button className="btn btn-secondary btn-sm" onClick={load}>
-            <RefreshCw size={14} /> Refresh
-          </button>
-        </div>
-      </div>
+    <Page>
+      <PageBar
+        title="Analytics"
+        count={loading ? undefined : `past ${windowDays} days`}
+        actions={
+          <>
+            <Input
+              className="w-32 hidden sm:block"
+              placeholder="Brand"
+              value={brand}
+              onChange={(e) => setBrand(e.target.value)}
+            />
+            <IconButton
+              icon={RefreshCw}
+              label="Refresh"
+              onClick={load}
+              className={refreshing ? 'animate-[spin_1s_linear_infinite]' : undefined}
+            />
+          </>
+        }
+      />
 
-      {error && <p style={{ color: 'var(--accent-danger)', marginBottom: '1rem' }}>{error}</p>}
+      <PageBody>
+        {error && <Banner tone="danger">{error}</Banner>}
 
-      {!loading && rows.length === 0 ? (
-        <div className="panel">
-          <p style={{ color: 'var(--text-secondary)' }}>No connected accounts yet — connect one in Connect Accounts.</p>
-        </div>
-      ) : (
-        <>
-          <div className="kpi-grid" style={{ marginBottom: '1.5rem' }}>
-            <div className="kpi-card">
-              <div className="kpi-card-icon" style={{ background: '#2a78d6' }}><Users size={17} /></div>
-              <div className="kpi-card-label">Total Followers</div>
-              <div className="kpi-card-value">{loading || totals.followers === null ? '—' : totals.followers.toLocaleString()}</div>
-            </div>
-            <div className="kpi-card">
-              <div className="kpi-card-icon" style={{ background: '#0d8f73' }}><Send size={17} /></div>
-              <div className="kpi-card-label">Posts Published</div>
-              <div className="kpi-card-value">{loading ? '—' : totals.posts.toLocaleString()}</div>
-            </div>
-            <div className="kpi-card">
-              <div className="kpi-card-icon" style={{ background: '#b8690a' }}><Eye size={17} /></div>
-              <div className="kpi-card-label">Total Reach</div>
-              <div className="kpi-card-value">{loading || totals.reach === null ? '—' : totals.reach.toLocaleString()}</div>
-            </div>
-            <div className="kpi-card">
-              <div className="kpi-card-icon" style={{ background: '#4a3aa7' }}><ThumbsUp size={17} /></div>
-              <div className="kpi-card-label">Total Engagement</div>
-              <div className="kpi-card-value">{loading || totals.engagement === null ? '—' : totals.engagement.toLocaleString()}</div>
-            </div>
-          </div>
+        {!loading && rows.length === 0 ? (
+          <Panel>
+            <EmptyState
+              icon={LineChartIcon}
+              title="No channels to report on"
+              description={
+                brand.trim()
+                  ? 'No connected accounts match this brand.'
+                  : 'Connect a channel and its numbers start arriving here — the backend refreshes them every 6 hours.'
+              }
+            />
+          </Panel>
+        ) : (
+          <>
+            <StatStrip className="xl:grid-cols-4">
+              <Stat label="Followers" value={loading || totals.followers === null ? '—' : totals.followers.toLocaleString()} />
+              <Stat label="Posts published" value={loading ? '—' : totals.posts.toLocaleString()} />
+              <Stat label="Reach" value={loading || totals.reach === null ? '—' : totals.reach.toLocaleString()} />
+              <Stat label="Engagement" value={loading || totals.engagement === null ? '—' : totals.engagement.toLocaleString()} />
+            </StatStrip>
 
-          {engagementChartData.length > 0 && (
-            <div className="panel">
-              <div className="panel-header"><h2>Engagement by Channel</h2></div>
-              <ResponsiveContainer width="100%" height={Math.max(engagementChartData.length * 38, 120)}>
-                <BarChart data={engagementChartData} layout="vertical" margin={{ top: 0, right: 28, left: 0, bottom: 0 }}>
-                  <XAxis type="number" allowDecimals={false} hide />
-                  <YAxis type="category" dataKey="name" width={150} tick={{ fontSize: 11, fill: 'var(--text-secondary)' }} axisLine={false} tickLine={false} />
-                  <RTooltip formatter={(value) => [value.toLocaleString(), 'Engagement']} contentStyle={CHART_TOOLTIP_STYLE} />
-                  <Bar dataKey="value" radius={[0, 4, 4, 0]} barSize={16}>
-                    {engagementChartData.map(d => <Cell key={d.name} fill={d.fill} />)}
-                    <LabelList dataKey="value" position="right" style={{ fontSize: 11, fill: 'var(--text-secondary)' }} />
-                  </Bar>
-                </BarChart>
-              </ResponsiveContainer>
-            </div>
-          )}
-
-          <div className="panel-header" style={{ marginBottom: '0.75rem' }}>
-            <h2 style={{ fontSize: '1rem' }}>Channels</h2>
-            <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.3rem', fontSize: '0.75rem', color: 'var(--text-muted)' }}>
-              <Info size={12} /> "—" means this platform/permission level doesn't report that metric yet
-            </span>
-          </div>
-
-          {loading ? (
-            <div className="trend-chart-empty">Loading…</div>
-          ) : (
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: '1rem', marginBottom: '1.5rem' }}>
-              {rows.map(row => (
-                <ChannelCard key={row.accountId} row={row} expanded={expandedAccount === row.accountId} onToggle={togglePosts} />
-              ))}
-            </div>
-          )}
-
-          {expandedRow && (
-            <div className="panel">
-              <div className="panel-header">
-                <h2>Recent Posts — {expandedRow.accountLabel || expandedRow.accountId} <span style={{ color: 'var(--text-muted)', fontWeight: 500 }}>({PLATFORM_LABELS[expandedRow.platform] || expandedRow.platform})</span></h2>
-                <button className="close-btn" onClick={() => setExpandedAccount(null)}><X size={18} /></button>
-              </div>
-
-              {!expandedPosts || expandedPosts.loading ? (
-                <div className="trend-chart-empty">Loading recent posts…</div>
-              ) : expandedPosts.error ? (
-                <p style={{ color: 'var(--accent-danger)' }}>{expandedPosts.error}</p>
-              ) : expandedPosts.posts.length === 0 ? (
-                <div className="trend-chart-empty">No posts found.</div>
-              ) : (
-                <div>
-                  {expandedPosts.posts.some(p => p.likes === null || p.comments === null) && (
-                    <p style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginBottom: '0.75rem' }}>
-                      Engagement counts (likes/comments) aren't available for this account yet — it needs Advanced Access to Facebook's pages_read_engagement permission. Post content still shows below.
-                    </p>
-                  )}
-                  {expandedPosts.posts.map(post => (
-                    <div key={post.externalPostId} className="post-card" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '1rem' }}>
-                      <div style={{ minWidth: 0 }}>
-                        <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' }}>
-                          {post.message || '(no text)'}
-                        </div>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.75rem', color: 'var(--text-secondary)', marginTop: '0.3rem' }}>
-                          {formatPostDate(post.createdTime)}
-                          {post.permalinkUrl && (
-                            <a href={post.permalinkUrl} target="_blank" rel="noreferrer" style={{ color: 'var(--accent-primary)', display: 'inline-flex', alignItems: 'center', gap: '0.2rem' }}>
-                              <ExternalLink size={11} /> View
-                            </a>
-                          )}
-                        </div>
-                      </div>
-                      <div style={{ display: 'flex', gap: '1rem', flexShrink: 0, fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
-                        <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}><ThumbsUp size={14} /> {post.likes === null ? '—' : post.likes}</span>
-                        <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}><MessageCircle size={14} /> {post.comments === null ? '—' : post.comments}</span>
-                        {post.shares !== null && post.shares !== undefined && (
-                          <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}><Share2 size={14} /> {post.shares}</span>
-                        )}
-                      </div>
-                    </div>
-                  ))}
+            {engagementChartData.length > 0 && (
+              <Panel>
+                <PanelHeader title="Engagement by channel" />
+                <div className="p-4">
+                  <ResponsiveContainer width="100%" height={Math.max(engagementChartData.length * 34, 120)}>
+                    <BarChart data={engagementChartData} layout="vertical" margin={{ top: 0, right: 36, left: 0, bottom: 0 }}>
+                      <XAxis type="number" allowDecimals={false} hide />
+                      <YAxis
+                        type="category"
+                        dataKey="name"
+                        width={150}
+                        tick={{ fontSize: 11, fill: 'var(--color-muted)' }}
+                        axisLine={false}
+                        tickLine={false}
+                      />
+                      <RTooltip
+                        cursor={{ fill: 'var(--color-sunken)' }}
+                        formatter={(value) => [value.toLocaleString(), 'Engagement']}
+                        contentStyle={TOOLTIP_STYLE}
+                      />
+                      <Bar dataKey="value" radius={[0, 3, 3, 0]} barSize={14}>
+                        {engagementChartData.map((d) => (
+                          <Cell key={d.name} fill={d.fill} />
+                        ))}
+                        <LabelList
+                          dataKey="value"
+                          position="right"
+                          style={{ fontSize: 11, fill: 'var(--color-muted)' }}
+                        />
+                      </Bar>
+                    </BarChart>
+                  </ResponsiveContainer>
                 </div>
-              )}
+              </Panel>
+            )}
+
+            <div className="flex items-center justify-between gap-3">
+              <h2 className="text-[13px] font-semibold text-ink">Channels</h2>
+              <span className="text-[11px] text-subtle flex items-center gap-1.5">
+                <Info size={12} /> “—” means this channel or permission level doesn’t report that metric
+              </span>
             </div>
-          )}
-        </>
-      )}
-    </div>
+
+            {loading ? (
+              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5">
+                <Skeleton className="h-44 rounded-card" />
+                <Skeleton className="h-44 rounded-card" />
+                <Skeleton className="h-44 rounded-card" />
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5 items-start">
+                {rows.map((row) => (
+                  <ChannelCard
+                    key={row.accountId}
+                    row={row}
+                    expanded={expandedAccount === row.accountId}
+                    onToggle={togglePosts}
+                    detail={postsByAccount[row.accountId]}
+                  />
+                ))}
+              </div>
+            )}
+          </>
+        )}
+      </PageBody>
+    </Page>
   );
 }
 

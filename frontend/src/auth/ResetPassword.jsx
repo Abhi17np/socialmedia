@@ -3,8 +3,16 @@
 import { useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
-import { Share2, Lock, AlertCircle, RefreshCw, Check } from 'lucide-react';
+import { Lock, Check } from 'lucide-react';
 import { API_BASE } from '../apiBase';
+import AuthShell from './AuthShell';
+import { Button, Input, Field, Banner } from '../ui';
+
+const POINTS = [
+  'One inbox for WhatsApp, Instagram, Facebook, LinkedIn, YouTube and Google Business.',
+  'Every conversation tied to one real customer record, across every channel.',
+  'Schedule once, publish everywhere, and see what it earned.'
+];
 
 export default function ResetPassword() {
   const router = useRouter();
@@ -37,76 +45,52 @@ export default function ResetPassword() {
   };
 
   return (
-    <div className="auth-split">
-      <div className="auth-brand-panel">
-        <div className="auth-brand-mark">
-          <span className="auth-brand-mark-icon"><Share2 size={16} /></span>
-          Social Hub
-        </div>
-        <div className="auth-brand-copy">
-          <h2>Every channel, one inbox. One customer, one history.</h2>
-        </div>
-        <div className="auth-brand-footer">&copy; {new Date().getFullYear()} Social Hub</div>
+    <AuthShell
+      headline="Every channel, one inbox. One customer, one history."
+      sub="The messaging and scheduling layer other tools treat as an afterthought — built here as the whole point."
+      points={POINTS}
+    >
+      <h1 className="text-[22px] font-semibold tracking-tight text-ink">Set a new password</h1>
+      <p className="text-xs text-muted mt-1">Then you’ll be sent back to log in.</p>
+
+      <div className="mt-7 flex flex-col gap-4">
+        {!token && (
+          <Banner tone="warning">
+            This link is missing its token — open the reset link from your email again.
+          </Banner>
+        )}
+        {error && <Banner tone="danger">{error}</Banner>}
+
+        {done ? (
+          <Banner tone="success" icon={Check}>
+            Password changed — taking you to the log in page.
+          </Banner>
+        ) : (
+          <form onSubmit={handleSubmit} className="flex flex-col gap-4">
+            <Field label="New password" hint="At least 8 characters.">
+              <Input
+                type="password"
+                icon={Lock}
+                placeholder="••••••••"
+                value={newPassword}
+                onChange={(e) => setNewPassword(e.target.value)}
+                minLength={8}
+                autoFocus
+                required
+              />
+            </Field>
+            <Button type="submit" variant="primary" size="lg" full loading={loading} disabled={!token}>
+              Set new password
+            </Button>
+          </form>
+        )}
       </div>
 
-      <div className="auth-form-panel">
-        <div className="auth-form-inner">
-          <div className="auth-header">
-            <div className="auth-logo"><Share2 size={22} /></div>
-            <h1 className="auth-title">Set a new password</h1>
-          </div>
-
-          <div className="auth-body">
-            {!token && (
-              <div className="alert-auth">
-                <AlertCircle size={16} style={{ flexShrink: 0, marginTop: '2px' }} />
-                <span>This reset link is missing its token — open the link from your email again.</span>
-              </div>
-            )}
-            {error && (
-              <div className="alert-auth">
-                <AlertCircle size={16} style={{ flexShrink: 0, marginTop: '2px' }} />
-                <span>{error}</span>
-              </div>
-            )}
-            {done && (
-              <div className="alert-auth" style={{ borderColor: 'var(--accent-success)', color: 'var(--accent-success)' }}>
-                <Check size={16} style={{ flexShrink: 0, marginTop: '2px' }} />
-                <span>Password reset — redirecting to log in…</span>
-              </div>
-            )}
-
-            {token && !done && (
-              <form onSubmit={handleSubmit}>
-                <div className="form-group">
-                  <label className="form-label">New password</label>
-                  <div className="form-control-wrap">
-                    <Lock size={16} className="form-control-icon" />
-                    <input
-                      type="password"
-                      className="form-control"
-                      placeholder="At least 8 characters"
-                      value={newPassword}
-                      onChange={(e) => setNewPassword(e.target.value)}
-                      autoFocus
-                      required
-                      minLength={8}
-                    />
-                  </div>
-                </div>
-
-                <button type="submit" className="btn btn-primary auth-btn" disabled={loading}>
-                  {loading ? <RefreshCw size={18} style={{ animation: 'spin 1s linear infinite' }} /> : 'Reset password'}
-                </button>
-              </form>
-            )}
-
-            <div className="auth-footer">
-              <Link href="/login" className="auth-toggle-link">Back to log in</Link>
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
+      <p className="text-xs mt-6">
+        <Link href="/login" className="text-brand font-medium hover:underline">
+          Back to log in
+        </Link>
+      </p>
+    </AuthShell>
   );
 }

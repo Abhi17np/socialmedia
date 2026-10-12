@@ -1,24 +1,80 @@
 'use client';
 
-import { useState, useCallback, useEffect } from 'react';
-import { useRouter } from 'next/navigation';
+import { useState, useCallback, useEffect, useRef } from 'react';
+import { useRouter, usePathname } from 'next/navigation';
 import Link from 'next/link';
-import { Share2, LogOut, WifiOff, Settings } from 'lucide-react';
+import {
+  Hexagon,
+  LogOut,
+  WifiOff,
+  PenSquare,
+  ChevronsUpDown,
+  Moon,
+  Sun,
+  LayoutGrid,
+  CalendarDays,
+  Inbox as InboxIcon,
+  LineChart,
+  MoreHorizontal
+} from 'lucide-react';
 import SocialNav from '../../src/social/SocialNav';
 import { AuthContext } from '../../src/AuthContext';
 import { API_BASE } from '../../src/apiBase';
+import { SOCIAL_API_BASE } from '../../src/social/api';
+import { Button } from '../../src/ui';
 
 // Everything under app/(app)/ — Dashboard, Compose, Posts, Inbox,
-// Analytics, Connect Accounts, Team, Billing — shares this one shell and
-// one auth check, the direct replacement for the old single-page
-// App.jsx's VIEWS-map switch. The route group parens mean /(app)/dashboard
-// serves at /dashboard; the group exists only to give these routes a
-// shared layout without it becoming part of the URL.
+// Analytics, Channels, Team, Workspace — shares this one shell and one
+// auth check. The route group parens mean /(app)/dashboard serves at
+// /dashboard; the group exists only to give these routes a shared layout
+// without it becoming part of the URL.
+//
+// Structurally this is the Calm Precision workstation shell: a flat 248px
+// white rail against the canvas, divided by a single hairline, with no
+// shadow and no colored fill. Each page supplies its own 56px top bar.
+
+function useTheme() {
+  const [theme, setTheme] = useState('light');
+
+  useEffect(() => {
+    setTheme(document.documentElement.classList.contains('dark') ? 'dark' : 'light');
+  }, []);
+
+  const toggle = useCallback(() => {
+    setTheme((prev) => {
+      const next = prev === 'dark' ? 'light' : 'dark';
+      document.documentElement.classList.toggle('dark', next === 'dark');
+      try {
+        localStorage.setItem('theme', next);
+      } catch {
+        /* private mode — the class still applies for this session */
+      }
+      return next;
+    });
+  }, []);
+
+  return [theme, toggle];
+}
+
+const MOBILE_TABS = [
+  { href: '/dashboard', icon: LayoutGrid, label: 'Home' },
+  { href: '/compose', icon: PenSquare, label: 'Compose' },
+  { href: '/inbox', icon: InboxIcon, label: 'Inbox' },
+  { href: '/analytics', icon: LineChart, label: 'Analytics' },
+  { href: '/posts', icon: CalendarDays, label: 'Posts' }
+];
+
 export default function AppShellLayout({ children }) {
   const router = useRouter();
+  const pathname = usePathname();
   const [token, setToken] = useState(null);
   const [checkedStorage, setCheckedStorage] = useState(false);
   const [me, setMe] = useState(null);
+  const [openCount, setOpenCount] = useState(0);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [theme, toggleTheme] = useTheme();
+  const menuRef = useRef(null);
+
   // Distinct from "no token" (redirect to /login) and from "a specific
   // request errored" (that page's own error state) — this means the
   // browser couldn't even reach API_BASE at all: backend not running,
@@ -44,27 +100,32 @@ export default function AppShellLayout({ children }) {
     router.replace('/login');
   }, [router]);
 
-  const authFetch = useCallback(async (url, options = {}) => {
-    const headers = { ...options.headers, Authorization: `Bearer ${token}` };
-    if (options.body && !(options.body instanceof FormData) && !headers['Content-Type']) {
-      headers['Content-Type'] = 'application/json';
-    }
-    let res;
-    try {
-      res = await fetch(url, { ...options, headers });
-    } catch (err) {
-      // fetch() throws a bare TypeError ("Failed to fetch" in
-      // Chrome/Edge, "NetworkError..." in Firefox) when it can't even
-      // open a connection — refused, wrong port, no backend running.
-      // Translate it once, here, so every page's own `catch (err) {
-      // setError(err.message) }` shows this instead of that raw string.
-      setServerUnreachable(true);
-      throw new Error(`Can't reach the Social Hub server at ${API_BASE} — make sure the backend is running.`);
-    }
-    setServerUnreachable(false);
-    if (res.status === 401) handleLogout();
-    return res;
-  }, [token, handleLogout]);
+  const authFetch = useCallback(
+    async (url, options = {}) => {
+      const headers = { ...options.headers, Authorization: `Bearer ${token}` };
+      if (options.body && !(options.body instanceof FormData) && !headers['Content-Type']) {
+        headers['Content-Type'] = 'application/json';
+      }
+      let res;
+      try {
+        res = await fetch(url, { ...options, headers });
+      } catch (err) {
+        // fetch() throws a bare TypeError ("Failed to fetch" in
+        // Chrome/Edge, "NetworkError..." in Firefox) when it can't even
+        // open a connection — refused, wrong port, no backend running.
+        // Translate it once, here, so every page's own `catch (err) {
+        // setError(err.message) }` shows this instead of that raw string.
+        setServerUnreachable(true);
+        throw new Error(
+          `Can't reach the Social Hub server at ${API_BASE} — make sure the backend is running.`
+        );
+      }
+      setServerUnreachable(false);
+      if (res.status === 401) handleLogout();
+      return res;
+    },
+    [token, handleLogout]
+  );
 
   useEffect(() => {
     if (checkedStorage && !token) router.replace('/login');
@@ -72,61 +133,181 @@ export default function AppShellLayout({ children }) {
 
   const loadMe = useCallback(() => {
     if (!token) return;
-    authFetch(`${API_BASE}/auth/me`).then(res => res.json()).then(data => { if (data.user) setMe(data); }).catch(() => {});
+    authFetch(`${API_BASE}/auth/me`)
+      .then((res) => res.json())
+      .then((data) => {
+        if (data.user) setMe(data);
+      })
+      .catch(() => {});
     // authFetch already sets serverUnreachable on a network failure —
     // this catch only needs to stop an unhandled rejection from
     // reaching the console, not report anything a second time.
   }, [token, authFetch]);
 
-  useEffect(() => { loadMe(); }, [loadMe]);
+  useEffect(() => {
+    loadMe();
+  }, [loadMe]);
+
+  // Drives the Inbox count in the rail. Re-read on navigation so closing
+  // a conversation is reflected without a reload.
+  useEffect(() => {
+    if (!token) return;
+    authFetch(`${SOCIAL_API_BASE}/interactions?status=open`)
+      .then((res) => res.json())
+      .then((data) => setOpenCount((data.interactions || []).length))
+      .catch(() => {});
+  }, [token, authFetch, pathname]);
+
+  useEffect(() => {
+    if (!menuOpen) return;
+    const onClick = (e) => {
+      if (menuRef.current && !menuRef.current.contains(e.target)) setMenuOpen(false);
+    };
+    document.addEventListener('mousedown', onClick);
+    return () => document.removeEventListener('mousedown', onClick);
+  }, [menuOpen]);
 
   if (!checkedStorage || !token) return null; // redirecting to /login, or still reading localStorage
 
   const role = me?.user?.role || 'viewer';
   const email = me?.user?.email;
+  const plan = me?.tenant?.plan;
 
   return (
-    <div className="dashboard-container">
-      <aside className="sidebar">
-        <div className="logo-container">
-          <div className="logo-icon"><Share2 size={18} /></div>
-          <span className="logo-text">Social Hub</span>
+    <div className="h-full flex bg-canvas text-ink">
+      {/* ---------------------------------------------- Navigation rail */}
+      <aside className="w-[248px] shrink-0 h-full bg-card border-r border-hairline flex-col justify-between z-20 hidden lg:flex">
+        <div className="flex flex-col min-h-0">
+          <div className="h-14 px-4 flex items-center justify-between border-b border-hairline shrink-0">
+            <div className="flex items-center gap-2.5 min-w-0">
+              <span className="w-6 h-6 rounded bg-brand text-white flex items-center justify-center shrink-0">
+                <Hexagon size={14} />
+              </span>
+              <span className="font-semibold text-sm tracking-tight text-ink truncate">Social Hub</span>
+            </div>
+            {plan && (
+              <span className="eyebrow px-1.5 py-0.5 rounded bg-canvas border border-hairline text-muted">
+                {plan}
+              </span>
+            )}
+          </div>
+
+          <div className="p-3 pb-1 shrink-0">
+            <Link
+              href="/compose"
+              className="w-full h-8 px-3 rounded-ui bg-canvas hover:bg-sunken border border-hairline
+                         text-ink font-medium text-xs flex items-center justify-between transition-colors"
+            >
+              <span className="flex items-center gap-2">
+                <PenSquare size={15} className="text-muted" />
+                New post
+              </span>
+              <kbd className="text-[10px] font-mono text-subtle">C</kbd>
+            </Link>
+          </div>
+
+          <div className="overflow-y-auto min-h-0">
+            <SocialNav role={role} openCount={openCount} />
+          </div>
         </div>
 
-        <SocialNav role={role} />
+        {/* Workspace card — switcher, theme and log out live behind it */}
+        <div className="p-3 border-t border-hairline shrink-0 relative" ref={menuRef}>
+          {menuOpen && (
+            <div
+              className="absolute bottom-[calc(100%-4px)] left-3 right-3 bg-card border border-hairline rounded-surface
+                         shadow-[var(--shadow-flyout)] p-1 z-30"
+            >
+              <button
+                onClick={toggleTheme}
+                className="w-full h-8 px-2 rounded-ui flex items-center gap-2 text-xs text-muted hover:text-ink hover:bg-canvas transition-colors"
+              >
+                {theme === 'dark' ? <Sun size={15} /> : <Moon size={15} />}
+                {theme === 'dark' ? 'Light theme' : 'Dark theme'}
+              </button>
+              <button
+                onClick={handleLogout}
+                className="w-full h-8 px-2 rounded-ui flex items-center gap-2 text-xs text-muted hover:text-ink hover:bg-canvas transition-colors"
+              >
+                <LogOut size={15} />
+                Log out
+              </button>
+            </div>
+          )}
 
-        <div className="sidebar-user-profile">
-          <div className="user-profile-details">
-            <div className="user-profile-avatar" style={serverUnreachable ? { background: 'var(--accent-danger)' } : undefined}>
-              {serverUnreachable ? <WifiOff size={15} /> : (email ? email[0].toUpperCase() : '…')}
-            </div>
-            <div>
-              <div className="user-profile-email" title={email}>
-                {serverUnreachable ? 'Can’t reach server' : (email || 'Loading…')}
-              </div>
-              {me?.tenant && <div style={{ fontSize: '0.75rem', color: 'var(--sidebar-text-muted)' }}>{me.tenant.name} · {me.tenant.plan}</div>}
-            </div>
-          </div>
-          <Link href="/account" className="btn btn-secondary btn-sm" style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem', marginTop: '0.5rem' }}>
-            <Settings size={14} /> Account
-          </Link>
-          <button className="btn btn-secondary btn-sm" onClick={handleLogout} style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem', marginTop: '0.5rem' }}>
-            <LogOut size={14} /> Log out
+          <button
+            onClick={() => setMenuOpen((v) => !v)}
+            className="w-full p-2 rounded-ui bg-canvas border border-hairline flex items-center justify-between gap-2 hover:bg-sunken transition-colors text-left"
+          >
+            <span className="flex items-center gap-2 min-w-0">
+              <span
+                className={`w-7 h-7 rounded font-semibold text-[11px] flex items-center justify-center shrink-0 ${
+                  serverUnreachable ? 'bg-danger-subtle text-danger' : 'bg-brand/10 text-brand'
+                }`}
+              >
+                {serverUnreachable ? <WifiOff size={14} /> : email ? email[0].toUpperCase() : '·'}
+              </span>
+              <span className="flex flex-col min-w-0 leading-tight">
+                <span className="font-medium text-xs text-ink truncate" title={email}>
+                  {serverUnreachable ? 'Can’t reach server' : email || 'Loading…'}
+                </span>
+                {me?.tenant && (
+                  <span className="text-[11px] text-muted truncate">
+                    {me.tenant.name} · {role}
+                  </span>
+                )}
+              </span>
+            </span>
+            <ChevronsUpDown size={15} className="text-subtle shrink-0" />
           </button>
         </div>
       </aside>
-      <main className="main-content">
+
+      {/* ------------------------------------------------- Work surface */}
+      <div className="flex-1 flex flex-col min-w-0 h-full overflow-hidden pb-14 lg:pb-0">
         {serverUnreachable && (
-          <div className="connectivity-banner">
-            <WifiOff size={16} />
-            <span>Can&rsquo;t reach the Social Hub server at <code>{API_BASE}</code> — make sure the backend is running.</span>
-            <button className="btn btn-secondary btn-sm" onClick={loadMe}>Retry</button>
+          <div className="shrink-0 px-4 py-2 bg-warning-subtle border-b border-hairline flex items-center gap-2.5 text-xs text-warning">
+            <WifiOff size={15} className="shrink-0" />
+            <span className="flex-1 min-w-0">
+              Can’t reach the Social Hub server at <code className="font-mono">{API_BASE}</code> — make
+              sure the backend is running.
+            </span>
+            <Button size="sm" onClick={loadMe}>
+              Retry
+            </Button>
           </div>
         )}
+
         <AuthContext.Provider value={{ authFetch, role, me, serverUnreachable }}>
           {children}
         </AuthContext.Provider>
-      </main>
+      </div>
+
+      {/* ------------------------------------------- Mobile tab bar */}
+      <nav className="lg:hidden fixed bottom-0 inset-x-0 h-14 bg-card border-t border-hairline flex items-stretch z-30">
+        {MOBILE_TABS.map(({ href, icon: Icon, label }) => {
+          const active = pathname === href;
+          return (
+            <Link
+              key={href}
+              href={href}
+              className={`flex-1 flex flex-col items-center justify-center gap-0.5 text-[10px] font-medium transition-colors ${
+                active ? 'text-brand' : 'text-subtle'
+              }`}
+            >
+              <Icon size={18} />
+              {label}
+            </Link>
+          );
+        })}
+        <button
+          onClick={handleLogout}
+          className="flex-1 flex flex-col items-center justify-center gap-0.5 text-[10px] font-medium text-subtle"
+        >
+          <MoreHorizontal size={18} />
+          More
+        </button>
+      </nav>
     </div>
   );
 }

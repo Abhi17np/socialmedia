@@ -2,15 +2,19 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Lock, Mail, AlertTriangle } from 'lucide-react';
+import { Lock, Mail, AlertTriangle, Check } from 'lucide-react';
 import { API_BASE } from '../apiBase';
+import { Page, PageBar, PageBody } from '../ui/page';
+import {
+  Button, Panel, PanelHeader, Input, Field, Banner, ConfirmDialog, Chip
+} from '../ui';
 
 // Minimal account-management page — change password, resend
 // verification, delete my own account. Not the full "Settings area"
-// grouping (Team/Billing under a gear icon) the redesign direction
-// describes; this is the functional piece the audit flagged as
-// missing (no self-serve password change/account deletion anywhere),
-// built as its own page rather than folded into Team or Billing.
+// grouping (Team/Workspace under a gear icon) the redesign direction
+// describes; this is the functional piece the audit flagged as missing
+// (no self-serve password change/account deletion anywhere), built as
+// its own page rather than folded into Team or Workspace.
 function Account({ authFetch, me }) {
   const router = useRouter();
   const [currentPassword, setCurrentPassword] = useState('');
@@ -23,6 +27,7 @@ function Account({ authFetch, me }) {
 
   const [deleteError, setDeleteError] = useState(null);
   const [deleting, setDeleting] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
 
   const changePassword = async (e) => {
     e.preventDefault();
@@ -61,7 +66,6 @@ function Account({ authFetch, me }) {
   };
 
   const deleteAccount = async () => {
-    if (!confirm('Delete your account? This cannot be undone.')) return;
     setDeleting(true);
     setDeleteError(null);
     try {
@@ -73,62 +77,100 @@ function Account({ authFetch, me }) {
     } catch (err) {
       setDeleteError(err.message);
       setDeleting(false);
+      setConfirmDelete(false);
     }
   };
 
+  const unverified = me?.user && !me.user.email_verified_at;
+
   return (
-    <div>
-      <div className="header-container">
-        <div className="title-area">
-          <h1>Account</h1>
-          <p>Your own login — password and account, separate from workspace-wide Team settings.</p>
-        </div>
-      </div>
+    <Page>
+      <PageBar title="Account" count={me?.user?.email} />
 
-      <div className="table-section" style={{ padding: '1.5rem', maxWidth: 480, marginBottom: '1.5rem' }}>
-        <div className="panel-header" style={{ padding: 0, marginBottom: '1rem' }}><h2 style={{ fontSize: '1rem' }}>Change password</h2></div>
-        {pwResult && <p style={{ color: pwResult.type === 'success' ? 'var(--accent-success)' : 'var(--accent-danger)', fontSize: '0.85rem', marginBottom: '1rem' }}>{pwResult.text}</p>}
-        <form onSubmit={changePassword}>
-          <div className="form-group">
-            <label>Current password</label>
-            <div className="form-control-wrap">
-              <Lock size={16} className="form-control-icon" />
-              <input type="password" className="form-control" value={currentPassword} onChange={(e) => setCurrentPassword(e.target.value)} required />
+      <PageBody width="narrow">
+        <Panel>
+          <PanelHeader title="Change password" meta="your own login, not the workspace" />
+          <form onSubmit={changePassword} className="p-4 flex flex-col gap-4">
+            {pwResult && (
+              <Banner tone={pwResult.type === 'success' ? 'success' : 'danger'}>{pwResult.text}</Banner>
+            )}
+            <Field label="Current password">
+              <Input
+                type="password"
+                icon={Lock}
+                value={currentPassword}
+                onChange={(e) => setCurrentPassword(e.target.value)}
+                required
+              />
+            </Field>
+            <Field label="New password" hint="At least 8 characters.">
+              <Input
+                type="password"
+                icon={Lock}
+                value={newPassword}
+                onChange={(e) => setNewPassword(e.target.value)}
+                minLength={8}
+                required
+              />
+            </Field>
+            <div>
+              <Button type="submit" variant="primary" loading={pwSaving}>
+                Change password
+              </Button>
+            </div>
+          </form>
+        </Panel>
+
+        {unverified && (
+          <Panel>
+            <PanelHeader
+              title="Verify your email"
+              action={<Chip tone="warning">Unverified</Chip>}
+            />
+            <div className="p-4 flex flex-col gap-3">
+              <p className="text-xs text-muted">
+                <span className="text-ink font-medium">{me.user.email}</span> isn’t verified yet.
+              </p>
+              {verifyResult && (
+                <Banner tone={verifyResult.type === 'success' ? 'success' : 'danger'} icon={Check}>
+                  {verifyResult.text}
+                </Banner>
+              )}
+              <div>
+                <Button icon={Mail} onClick={sendVerification} loading={verifySending}>
+                  Send verification email
+                </Button>
+              </div>
+            </div>
+          </Panel>
+        )}
+
+        <Panel className="border-danger-border">
+          <PanelHeader title="Danger zone" />
+          <div className="p-4 flex flex-col gap-3">
+            <p className="text-xs text-muted leading-relaxed">
+              Deletes your own login only — not the whole workspace. Blocked if you’re the only owner.
+            </p>
+            {deleteError && <Banner tone="danger">{deleteError}</Banner>}
+            <div>
+              <Button variant="danger" icon={AlertTriangle} onClick={() => setConfirmDelete(true)}>
+                Delete my account
+              </Button>
             </div>
           </div>
-          <div className="form-group">
-            <label>New password</label>
-            <div className="form-control-wrap">
-              <Lock size={16} className="form-control-icon" />
-              <input type="password" className="form-control" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} minLength={8} required />
-            </div>
-          </div>
-          <button type="submit" className="btn btn-primary btn-sm" disabled={pwSaving}>{pwSaving ? 'Saving…' : 'Change password'}</button>
-        </form>
-      </div>
+        </Panel>
+      </PageBody>
 
-      {me?.user && !me.user.email_verified_at && (
-        <div className="table-section" style={{ padding: '1.5rem', maxWidth: 480, marginBottom: '1.5rem' }}>
-          <div className="panel-header" style={{ padding: 0, marginBottom: '1rem' }}><h2 style={{ fontSize: '1rem' }}>Verify your email</h2></div>
-          <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', marginBottom: '1rem' }}>{me.user.email} is not verified yet.</p>
-          {verifyResult && <p style={{ color: verifyResult.type === 'success' ? 'var(--accent-success)' : 'var(--accent-danger)', fontSize: '0.85rem', marginBottom: '1rem' }}>{verifyResult.text}</p>}
-          <button className="btn btn-secondary btn-sm" onClick={sendVerification} disabled={verifySending}>
-            <Mail size={14} /> {verifySending ? 'Sending…' : 'Send verification email'}
-          </button>
-        </div>
-      )}
-
-      <div className="table-section" style={{ padding: '1.5rem', maxWidth: 480, borderColor: 'var(--accent-danger)' }}>
-        <div className="panel-header" style={{ padding: 0, marginBottom: '1rem' }}><h2 style={{ fontSize: '1rem', color: 'var(--accent-danger)' }}>Danger zone</h2></div>
-        <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', marginBottom: '1rem' }}>
-          Deletes your own login only — not the whole workspace. Blocked if you're the only owner.
-        </p>
-        {deleteError && <p style={{ color: 'var(--accent-danger)', fontSize: '0.85rem', marginBottom: '1rem' }}>{deleteError}</p>}
-        <button className="btn btn-secondary btn-sm" style={{ color: 'var(--accent-danger)', borderColor: 'var(--accent-danger)' }} onClick={deleteAccount} disabled={deleting}>
-          <AlertTriangle size={14} /> {deleting ? 'Deleting…' : 'Delete my account'}
-        </button>
-      </div>
-    </div>
+      <ConfirmDialog
+        open={confirmDelete}
+        pending={deleting}
+        title="Delete your account?"
+        body="Your login is removed from this workspace immediately and you'll be signed out. This can't be undone."
+        confirmLabel="Delete my account"
+        onCancel={() => setConfirmDelete(false)}
+        onConfirm={deleteAccount}
+      />
+    </Page>
   );
 }
 

@@ -4,36 +4,45 @@ import React, { useEffect, useRef, useState } from 'react';
 import {
   Send, AlertTriangle, UploadCloud, Film, X, Link2, Check, Globe,
   ThumbsUp, MessageCircle, Repeat2, Share2, Heart, Bookmark,
-  PlayCircle, Image as ImageIcon, Sparkles
+  PlayCircle, Image as ImageIcon, Sparkles, Clock
 } from 'lucide-react';
-import { SOCIAL_API_BASE, PLATFORM_LABELS, PLATFORM_COLORS } from './api';
+import { SOCIAL_API_BASE } from './api';
 import { API_BASE } from '../apiBase';
-import { PlatformIcon, PlatformIconButton } from './PlatformIcon';
+import { PlatformIcon } from './PlatformIcon';
+import { Page, PageBar, PageBody } from '../ui/page';
+import { Button, Panel, PanelHeader, Input, Textarea, Field, Banner, EmptyState, cx } from '../ui';
+import { channelColor, channelLabel, ChannelTile } from '../ui/channel';
 
 // Per-platform limits this composer actually warns about — kept to what
 // the connected adapters really enforce, not a guessed list for
 // platforms this app can't publish to yet (Facebook feed posts cap at
 // 63,206 chars, high enough that it's not worth a warning here).
 const CHAR_LIMITS = {
-  youtube: { field: 'title', limit: 100, note: 'YouTube has no text-only post — this becomes a video title (truncated to 100 chars) plus description; a video file is required.' },
-  google_business: { field: 'Local Post summary', limit: 1500, note: 'Google Business Profile Local Posts cap at 1500 characters.' },
-  instagram: { field: 'caption', limit: 2200, note: 'Instagram has no text-only post — attach an image or video URL; captions cap at 2200 characters.' },
-  linkedin: { field: 'commentary', limit: 3000, note: 'LinkedIn posts (personal profile only) cap at 3000 characters.' }
+  youtube: { limit: 100, note: 'YouTube has no text-only post — this becomes a video title (truncated to 100 chars) plus description; a video file is required.' },
+  google_business: { limit: 1500, note: 'Google Business Profile Local Posts cap at 1500 characters.' },
+  instagram: { limit: 2200, note: 'Instagram has no text-only post — attach an image or video; captions cap at 2200 characters.' },
+  linkedin: { limit: 3000, note: 'LinkedIn posts (personal profile only) cap at 3000 characters.' }
 };
 
 let mediaItemSeq = 0;
 
-// Collapses long preview text to 5 lines with a working "...more" toggle —
-// same idea as the real feed UIs this is mimicking, not just decoration.
+/* ------------------------------------------------------------- previews */
+
 function PreviewBody({ text }) {
   const [expanded, setExpanded] = useState(false);
-  if (!text) return <div className="preview-body" style={{ color: 'var(--text-muted)' }}>What do you want to say?</div>;
+  if (!text) return <div className="px-3 py-2 text-xs text-subtle">What do you want to say?</div>;
   return (
     <div>
-      <div className={`preview-body ${expanded ? '' : 'clamped'}`}>{text}</div>
+      <div className={cx('px-3 py-2 text-xs text-ink leading-relaxed whitespace-pre-wrap', !expanded && 'line-clamp-5')}>
+        {text}
+      </div>
       {text.length > 200 && (
-        <button type="button" className="preview-more" style={{ margin: '0 1rem 0.5rem' }} onClick={() => setExpanded(e => !e)}>
-          {expanded ? 'Show less' : '...more'}
+        <button
+          type="button"
+          className="px-3 pb-2 text-[11px] text-muted hover:text-ink"
+          onClick={() => setExpanded((e) => !e)}
+        >
+          {expanded ? 'Show less' : '…more'}
         </button>
       )}
     </div>
@@ -44,119 +53,173 @@ function PreviewMedia({ media, square, placeholder }) {
   if (!media) {
     if (!placeholder) return null;
     return (
-      <div className={`preview-media ${square ? 'square' : ''}`}>
-        <div className="preview-media-empty"><ImageIcon size={22} /><span>{placeholder}</span></div>
+      <div
+        className={cx(
+          'bg-sunken border-y border-hairline flex flex-col items-center justify-center gap-1.5 text-subtle',
+          square ? 'aspect-square' : 'aspect-video'
+        )}
+      >
+        <ImageIcon size={20} />
+        <span className="text-[11px]">{placeholder}</span>
       </div>
     );
   }
   return (
-    <div className={`preview-media ${square ? 'square' : ''}`}>
-      {media.mediaType === 'video' ? <video src={media.previewSrc} muted /> : <img src={media.previewSrc} alt="" />}
+    <div className={cx('bg-sunken border-y border-hairline overflow-hidden', square ? 'aspect-square' : '')}>
+      {media.mediaType === 'video' ? (
+        <video src={media.previewSrc} muted className="w-full h-full object-cover" />
+      ) : (
+        <img src={media.previewSrc} alt="" className="w-full h-full object-cover" />
+      )}
+    </div>
+  );
+}
+
+function PreviewHead({ platform, name, meta }) {
+  return (
+    <div className="px-3 py-2.5 flex items-center gap-2.5">
+      <span
+        className="w-8 h-8 rounded-full flex items-center justify-center text-white shrink-0"
+        style={{ background: channelColor(platform) }}
+      >
+        <PlatformIcon platform={platform} size={15} />
+      </span>
+      <div className="min-w-0">
+        <div className="text-xs font-medium text-ink truncate">{name}</div>
+        {meta && <div className="text-[11px] text-subtle flex items-center gap-1">{meta}</div>}
+      </div>
+    </div>
+  );
+}
+
+function PreviewActions({ items }) {
+  return (
+    <div className="px-3 py-2 border-t border-hairline flex items-center justify-around text-muted">
+      {items.map(({ icon: Icon, label }) => (
+        <span key={label} className="flex items-center gap-1.5 text-[11px]">
+          <Icon size={14} /> {label}
+        </span>
+      ))}
     </div>
   );
 }
 
 function LinkedInPreview({ accountLabel, content, media, timestampLabel }) {
   return (
-    <div className="preview-card">
-      <div className="preview-header">
-        <div className="preview-avatar" style={{ background: PLATFORM_COLORS.linkedin }}><PlatformIcon platform="linkedin" size={16} /></div>
-        <div>
-          <div className="preview-name">{accountLabel || 'Your LinkedIn Page'}</div>
-          <div className="preview-meta">{timestampLabel} · <Globe size={11} /></div>
-        </div>
-      </div>
+    <>
+      <PreviewHead
+        platform="linkedin"
+        name={accountLabel || 'Your LinkedIn profile'}
+        meta={<>{timestampLabel} · <Globe size={10} /></>}
+      />
       <PreviewBody text={content} />
       <PreviewMedia media={media} />
-      <div className="preview-actions">
-        <span className="preview-action"><ThumbsUp size={15} /> Like</span>
-        <span className="preview-action"><MessageCircle size={15} /> Comment</span>
-        <span className="preview-action"><Repeat2 size={15} /> Repost</span>
-        <span className="preview-action"><Send size={15} /> Send</span>
-      </div>
-    </div>
+      <PreviewActions
+        items={[
+          { icon: ThumbsUp, label: 'Like' },
+          { icon: MessageCircle, label: 'Comment' },
+          { icon: Repeat2, label: 'Repost' },
+          { icon: Send, label: 'Send' }
+        ]}
+      />
+    </>
   );
 }
 
 function FacebookPreview({ accountLabel, content, media, timestampLabel }) {
   return (
-    <div className="preview-card">
-      <div className="preview-header">
-        <div className="preview-avatar" style={{ background: PLATFORM_COLORS.facebook }}><PlatformIcon platform="facebook" size={16} /></div>
-        <div>
-          <div className="preview-name">{accountLabel || 'Your Facebook Page'}</div>
-          <div className="preview-meta">{timestampLabel} · <Globe size={11} /></div>
-        </div>
-      </div>
+    <>
+      <PreviewHead
+        platform="facebook"
+        name={accountLabel || 'Your Facebook page'}
+        meta={<>{timestampLabel} · <Globe size={10} /></>}
+      />
       <PreviewBody text={content} />
       <PreviewMedia media={media} />
-      <div className="preview-actions">
-        <span className="preview-action"><ThumbsUp size={15} /> Like</span>
-        <span className="preview-action"><MessageCircle size={15} /> Comment</span>
-        <span className="preview-action"><Share2 size={15} /> Share</span>
-      </div>
-    </div>
+      <PreviewActions
+        items={[
+          { icon: ThumbsUp, label: 'Like' },
+          { icon: MessageCircle, label: 'Comment' },
+          { icon: Share2, label: 'Share' }
+        ]}
+      />
+    </>
   );
 }
 
 function InstagramPreview({ accountLabel, content, media }) {
   return (
-    <div className="preview-card">
-      <div className="preview-header">
-        <div className="preview-avatar" style={{ background: PLATFORM_COLORS.instagram }}><PlatformIcon platform="instagram" size={16} /></div>
-        <div className="preview-name">{accountLabel || 'your_page'}</div>
-      </div>
+    <>
+      <PreviewHead platform="instagram" name={accountLabel || 'your_page'} />
       <PreviewMedia media={media} square placeholder="Instagram requires a photo or video" />
-      <div className="preview-icon-row">
-        <div className="icons-left">
-          <Heart size={19} /> <MessageCircle size={19} /> <Send size={19} />
-        </div>
-        <Bookmark size={19} />
+      <div className="px-3 py-2 flex items-center justify-between text-ink">
+        <span className="flex items-center gap-3">
+          <Heart size={17} />
+          <MessageCircle size={17} />
+          <Send size={17} />
+        </span>
+        <Bookmark size={17} />
       </div>
       {content && (
-        <div className="preview-body" style={{ paddingTop: 0, WebkitLineClamp: 2, display: '-webkit-box', WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
-          <strong>{accountLabel || 'your_page'}</strong> {content}
-        </div>
+        <p className="px-3 pb-3 text-xs text-ink leading-relaxed line-clamp-2">
+          <strong className="font-medium">{accountLabel || 'your_page'}</strong> {content}
+        </p>
       )}
-    </div>
+    </>
   );
 }
 
 function YouTubePreview({ accountLabel, content, media, timestampLabel }) {
   const title = content ? content.slice(0, 100) : 'Video title';
   return (
-    <div className="preview-card">
-      <div className="preview-media" style={{ aspectRatio: '16 / 9' }}>
-        {media ? (media.mediaType === 'video' ? <video src={media.previewSrc} muted /> : <img src={media.previewSrc} alt="" />) : (
-          <div className="preview-media-empty"><Film size={22} /><span>Video required for YouTube</span></div>
+    <>
+      <div className="relative aspect-video bg-sunken border-b border-hairline overflow-hidden flex items-center justify-center">
+        {media ? (
+          media.mediaType === 'video' ? (
+            <video src={media.previewSrc} muted className="w-full h-full object-cover" />
+          ) : (
+            <img src={media.previewSrc} alt="" className="w-full h-full object-cover" />
+          )
+        ) : (
+          <div className="flex flex-col items-center gap-1.5 text-subtle">
+            <Film size={20} />
+            <span className="text-[11px]">Video required for YouTube</span>
+          </div>
         )}
-        <div className="preview-play-overlay"><PlayCircle size={44} color="#fff" fill="rgba(0,0,0,0.4)" /></div>
+        <PlayCircle size={40} className="absolute text-white/90" />
       </div>
-      <div className="preview-header" style={{ alignItems: 'flex-start' }}>
-        <div className="preview-avatar" style={{ background: PLATFORM_COLORS.youtube }}><PlatformIcon platform="youtube" size={16} /></div>
-        <div>
-          <div className="preview-name" style={{ WebkitLineClamp: 2, display: '-webkit-box', WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>{title}</div>
-          <div className="preview-meta">{accountLabel || 'Your Channel'} · {timestampLabel}</div>
+      <div className="px-3 py-2.5 flex items-start gap-2.5">
+        <span
+          className="w-8 h-8 rounded-full flex items-center justify-center text-white shrink-0"
+          style={{ background: channelColor('youtube') }}
+        >
+          <PlatformIcon platform="youtube" size={15} />
+        </span>
+        <div className="min-w-0">
+          <div className="text-xs font-medium text-ink line-clamp-2">{title}</div>
+          <div className="text-[11px] text-subtle mt-0.5">
+            {accountLabel || 'Your channel'} · {timestampLabel}
+          </div>
         </div>
       </div>
-    </div>
+    </>
   );
 }
 
 function GoogleBusinessPreview({ accountLabel, content, media, timestampLabel }) {
   return (
-    <div className="preview-card">
+    <>
       <PreviewMedia media={media} placeholder="Add a photo (optional)" />
-      <div className="preview-header">
-        <div className="preview-avatar" style={{ background: PLATFORM_COLORS.google_business }}><PlatformIcon platform="google_business" size={16} /></div>
-        <div>
-          <div className="preview-name">{accountLabel || 'Your Business'}</div>
-          <div className="preview-meta">Local Post · {timestampLabel}</div>
-        </div>
-      </div>
+      <PreviewHead
+        platform="google_business"
+        name={accountLabel || 'Your business'}
+        meta={`Local post · ${timestampLabel}`}
+      />
       <PreviewBody text={content} />
-      <div className="preview-cta">Learn more</div>
-    </div>
+      <div className="px-3 pb-3">
+        <span className="text-[11px] font-medium text-brand">Learn more</span>
+      </div>
+    </>
   );
 }
 
@@ -167,6 +230,8 @@ const PREVIEW_COMPONENTS = {
   youtube: YouTubePreview,
   google_business: GoogleBusinessPreview
 };
+
+/* ============================================================== Composer */
 
 function Composer({ authFetch }) {
   const [accounts, setAccounts] = useState(null);
@@ -188,9 +253,9 @@ function Composer({ authFetch }) {
   const fileInputRef = useRef(null);
 
   // AI Assist — a drafting aid, not an autonomous poster. Generating a
-  // draft only fills the same `content` textarea Manual mode uses; the
+  // draft only fills the same `content` textarea manual mode uses; the
   // human still reviews/edits it and still presses Publish/Schedule
-  // themselves below. See backend/lib/ai.js for why this stays a single
+  // themselves. See backend/lib/ai.js for why this stays a single
   // drafting call rather than an agent that posts on its own.
   const [composeMode, setComposeMode] = useState('manual'); // 'manual' | 'ai'
   const [brief, setBrief] = useState('');
@@ -200,25 +265,27 @@ function Composer({ authFetch }) {
 
   useEffect(() => {
     authFetch(`${SOCIAL_API_BASE}/accounts`)
-      .then(async res => {
+      .then(async (res) => {
         const data = await res.json();
         if (!res.ok) throw new Error(data.error || 'Could not load connected accounts.');
         // whatsapp has no publish() — it's messaging-only (see
         // backend/social/adapters/whatsapp.js) — so it's excluded here
         // rather than offered as a broadcast-post target that would just
         // fail when the queue tries to publish to it.
-        setAccounts((data.accounts || []).filter(a => a.status === 'active' && a.platform !== 'whatsapp'));
+        setAccounts((data.accounts || []).filter((a) => a.status === 'active' && a.platform !== 'whatsapp'));
       })
-      .catch(err => { setResult({ type: 'error', text: err.message }); setAccounts([]); });
+      .catch((err) => {
+        setResult({ type: 'error', text: err.message });
+        setAccounts([]);
+      });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const toggleAccount = (id) => {
-    setSelectedAccountIds(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
-  };
+  const toggleAccount = (id) =>
+    setSelectedAccountIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
 
-  const selectedAccounts = (accounts || []).filter(a => selectedAccountIds.includes(a.id));
-  const selectedPlatforms = Array.from(new Set(selectedAccounts.map(a => a.platform)));
+  const selectedAccounts = (accounts || []).filter((a) => selectedAccountIds.includes(a.id));
+  const selectedPlatforms = Array.from(new Set(selectedAccounts.map((a) => a.platform)));
 
   const generateDraft = async () => {
     if (!brief.trim() || selectedPlatforms.length === 0) return;
@@ -227,7 +294,11 @@ function Composer({ authFetch }) {
     try {
       const res = await authFetch(`${API_BASE}/ai/compose/draft`, {
         method: 'POST',
-        body: JSON.stringify({ brief: brief.trim(), platforms: selectedPlatforms, tone: tone.trim() || undefined })
+        body: JSON.stringify({
+          brief: brief.trim(),
+          platforms: selectedPlatforms,
+          tone: tone.trim() || undefined
+        })
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Could not generate a draft.');
@@ -252,7 +323,7 @@ function Composer({ authFetch }) {
   }, [selectedPlatforms.join(',')]);
 
   const uploadFiles = (files) => {
-    Array.from(files).forEach(file => {
+    Array.from(files).forEach((file) => {
       if (!/^image\/|^video\//.test(file.type)) {
         setResult({ type: 'error', text: `${file.name} isn't an image or video — skipped.` });
         return;
@@ -260,36 +331,41 @@ function Composer({ authFetch }) {
       const id = ++mediaItemSeq;
       const previewSrc = URL.createObjectURL(file);
       const mediaType = file.type.startsWith('video/') ? 'video' : 'image';
-      setMediaItems(prev => [...prev, { id, previewSrc, mediaType, uploading: true, url: null, error: null }]);
+      setMediaItems((prev) => [...prev, { id, previewSrc, mediaType, uploading: true, url: null, error: null }]);
 
       const formData = new FormData();
       formData.append('file', file);
       formData.append('brand', brand);
 
       authFetch(`${SOCIAL_API_BASE}/media/upload`, { method: 'POST', body: formData })
-        .then(async res => {
+        .then(async (res) => {
           const data = await res.json();
           if (!res.ok) throw new Error(data.error || 'Upload failed.');
-          setMediaItems(prev => prev.map(m => (m.id === id ? { ...m, uploading: false, url: data.url } : m)));
+          setMediaItems((prev) => prev.map((m) => (m.id === id ? { ...m, uploading: false, url: data.url } : m)));
         })
-        .catch(err => {
-          setMediaItems(prev => prev.map(m => (m.id === id ? { ...m, uploading: false, error: err.message } : m)));
+        .catch((err) => {
+          setMediaItems((prev) =>
+            prev.map((m) => (m.id === id ? { ...m, uploading: false, error: err.message } : m))
+          );
         });
     });
   };
 
-  const removeMediaItem = (id) => setMediaItems(prev => prev.filter(m => m.id !== id));
+  const removeMediaItem = (id) => setMediaItems((prev) => prev.filter((m) => m.id !== id));
 
   const addPastedUrl = () => {
     const url = pastedUrl.trim();
     if (!url) return;
     const mediaType = /\.(mp4|mov|webm|m4v)(\?|$)/i.test(url) ? 'video' : 'image';
-    setMediaItems(prev => [...prev, { id: ++mediaItemSeq, previewSrc: url, mediaType, uploading: false, url, error: null }]);
+    setMediaItems((prev) => [
+      ...prev,
+      { id: ++mediaItemSeq, previewSrc: url, mediaType, uploading: false, url, error: null }
+    ]);
     setPastedUrl('');
   };
 
-  const mediaUrls = mediaItems.filter(m => m.url).map(m => m.url);
-  const mediaUploading = mediaItems.some(m => m.uploading);
+  const mediaUrls = mediaItems.filter((m) => m.url).map((m) => m.url);
+  const mediaUploading = mediaItems.some((m) => m.uploading);
   const firstMedia = mediaItems[0] || null;
 
   const submit = async (e) => {
@@ -323,7 +399,13 @@ function Composer({ authFetch }) {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Could not schedule post.');
-      setResult({ type: 'success', text: mode === 'now' ? 'Post queued to publish now — check Posts for its status.' : 'Post scheduled — check Posts for its status.' });
+      setResult({
+        type: 'success',
+        text:
+          mode === 'now'
+            ? 'Post queued to publish now — check Posts for its status.'
+            : 'Post scheduled — check Posts for its status.'
+      });
       setContent('');
       setMediaItems([]);
       setPastedUrl('');
@@ -337,262 +419,398 @@ function Composer({ authFetch }) {
     }
   };
 
-  const timestampLabel = mode === 'now'
-    ? 'Just now'
-    : (scheduledAt ? new Date(scheduledAt).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : 'Scheduled');
+  const timestampLabel =
+    mode === 'now'
+      ? 'Just now'
+      : scheduledAt
+      ? new Date(scheduledAt).toLocaleString(undefined, {
+          month: 'short',
+          day: 'numeric',
+          hour: 'numeric',
+          minute: '2-digit'
+        })
+      : 'Scheduled';
 
-  const activePreviewAccount = selectedAccounts.find(a => a.platform === previewPlatform);
+  const activePreviewAccount = selectedAccounts.find((a) => a.platform === previewPlatform);
   const ActivePreview = previewPlatform ? PREVIEW_COMPONENTS[previewPlatform] : null;
+  const overLimit = selectedPlatforms.filter((p) => CHAR_LIMITS[p] && content.length > CHAR_LIMITS[p].limit);
 
   return (
-    <div>
-      <div className="header-container">
-        <div className="title-area">
-          <h1>Compose</h1>
-          <p>Write once, preview per platform, and publish to every connected account you pick below.</p>
-        </div>
-      </div>
+    <Page>
+      <form onSubmit={submit} className="contents">
+        <PageBar
+          title="Compose"
+          actions={
+            <Button
+              type="submit"
+              variant="primary"
+              icon={mode === 'now' ? Send : Clock}
+              loading={submitting}
+              disabled={mediaUploading}
+            >
+              {mediaUploading ? 'Uploading media…' : mode === 'now' ? 'Publish now' : 'Schedule post'}
+            </Button>
+          }
+        />
 
-      {accounts !== null && accounts.length === 0 && (
-        <p style={{ color: 'var(--text-secondary)', marginBottom: '1rem' }}>
-          No accounts connected yet — go to Connect Accounts first.
-        </p>
-      )}
+        <PageBody>
+          {result && <Banner tone={result.type === 'success' ? 'success' : 'danger'}>{result.text}</Banner>}
 
-      <form onSubmit={submit}>
-        <div className="composer-grid">
-          {/* ---- Editor ---- */}
-          <div className="panel" style={{ marginBottom: 0 }}>
-            <div className="account-picker-row">
-              {(accounts || []).map(a => {
-                const selected = selectedAccountIds.includes(a.id);
-                return (
+          {accounts !== null && accounts.length === 0 && (
+            <Banner tone="warning">No channels connected yet — connect one first and it appears here.</Banner>
+          )}
+
+          <div className="grid grid-cols-1 xl:grid-cols-[1.6fr_1fr] gap-5 items-start">
+            {/* ------------------------------------------------ editor */}
+            <Panel>
+              {/* account picker */}
+              <div className="px-4 py-3 border-b border-hairline flex items-center gap-2 flex-wrap">
+                {(accounts || []).map((a) => {
+                  const selected = selectedAccountIds.includes(a.id);
+                  return (
+                    <button
+                      type="button"
+                      key={a.id}
+                      onClick={() => toggleAccount(a.id)}
+                      title={`${channelLabel(a.platform)} — ${a.account_label || a.id}`}
+                      className={cx(
+                        'relative h-8 pl-1.5 pr-2.5 rounded-ui border flex items-center gap-2 text-xs transition-colors',
+                        selected
+                          ? 'bg-brand-subtle border-brand/30 text-ink font-medium'
+                          : 'bg-card border-hairline text-muted hover:bg-canvas hover:text-ink'
+                      )}
+                    >
+                      <span className="relative">
+                        <ChannelTile platform={a.platform} size={22} />
+                        {selected && (
+                          <span className="absolute -top-1 -right-1 w-3.5 h-3.5 rounded-full bg-brand text-white flex items-center justify-center ring-2 ring-card">
+                            <Check size={8} />
+                          </span>
+                        )}
+                      </span>
+                      <span className="truncate max-w-[140px]">{a.account_label || channelLabel(a.platform)}</span>
+                    </button>
+                  );
+                })}
+                {accounts === null && <span className="text-xs text-subtle">Loading channels…</span>}
+              </div>
+
+              {/* manual / AI assist */}
+              <div className="px-4 pt-3 flex items-center gap-1 p-0.5">
+                <div className="flex items-center gap-1 p-0.5 rounded-ui bg-sunken border border-hairline">
                   <button
                     type="button"
-                    key={a.id}
-                    className={`account-chip ${selected ? 'selected' : ''}`}
-                    onClick={() => toggleAccount(a.id)}
-                    title={`${PLATFORM_LABELS[a.platform] || a.platform} — ${a.account_label || a.id}`}
+                    onClick={() => setComposeMode('manual')}
+                    className={cx(
+                      'h-6 px-2.5 rounded text-[11px] font-medium transition-colors',
+                      composeMode === 'manual' ? 'bg-card text-ink' : 'text-muted hover:text-ink'
+                    )}
                   >
-                    <div className="account-chip-avatar-wrap">
-                      <div className="account-chip-avatar" style={{ background: PLATFORM_COLORS[a.platform] || 'var(--text-muted)' }}>
-                        <PlatformIcon platform={a.platform} size={18} />
-                      </div>
-                      {selected && <span className="account-chip-check"><Check size={10} /></span>}
-                    </div>
-                    <span className="account-chip-label">{PLATFORM_LABELS[a.platform] || a.platform}</span>
+                    Manual
                   </button>
-                );
-              })}
-            </div>
-
-            <div className="mode-toggle">
-              <button type="button" className={`mode-toggle-btn ${composeMode === 'manual' ? 'active' : ''}`} onClick={() => setComposeMode('manual')}>
-                Manual
-              </button>
-              <button type="button" className={`mode-toggle-btn ${composeMode === 'ai' ? 'active' : ''}`} onClick={() => setComposeMode('ai')}>
-                <Sparkles size={13} /> AI Assist
-              </button>
-            </div>
-
-            {composeMode === 'ai' && (
-              <div className="ai-assist-panel">
-                <textarea
-                  className="form-control"
-                  rows={2}
-                  placeholder="What do you want to post about? e.g. “Announce our Diwali sale — 20% off, ends Sunday”"
-                  value={brief}
-                  onChange={(e) => setBrief(e.target.value)}
-                />
-                <div className="ai-assist-row">
-                  <input
-                    type="text"
-                    className="form-control"
-                    style={{ maxWidth: 220 }}
-                    placeholder="Tone (optional) — e.g. playful"
-                    value={tone}
-                    onChange={(e) => setTone(e.target.value)}
-                  />
                   <button
                     type="button"
-                    className="btn btn-primary btn-sm"
-                    onClick={generateDraft}
-                    disabled={generating || !brief.trim() || selectedPlatforms.length === 0}
+                    onClick={() => setComposeMode('ai')}
+                    className={cx(
+                      'h-6 px-2.5 rounded text-[11px] font-medium transition-colors flex items-center gap-1',
+                      composeMode === 'ai' ? 'bg-card text-ink' : 'text-muted hover:text-ink'
+                    )}
                   >
-                    <Sparkles size={14} /> {generating ? 'Generating…' : 'Generate draft'}
+                    <Sparkles size={12} /> AI assist
                   </button>
                 </div>
-                {selectedPlatforms.length === 0 && (
-                  <p className="ai-assist-hint">Select an account above first, so the draft fits the right platform.</p>
-                )}
-                {aiError && <p style={{ color: 'var(--accent-danger)', fontSize: '0.82rem', margin: 0 }}>{aiError}</p>}
-              </div>
-            )}
-
-            <textarea
-              className="form-control composer-textarea"
-              placeholder="What do you want to say?"
-              value={content}
-              onChange={(e) => setContent(e.target.value)}
-            />
-
-            {selectedPlatforms.map(p => CHAR_LIMITS[p] && content.length > CHAR_LIMITS[p].limit && (
-              <p key={p} style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', color: 'var(--accent-warning)', fontSize: '0.82rem', marginTop: '0.6rem' }}>
-                <AlertTriangle size={14} /> {PLATFORM_LABELS[p]}: {content.length}/{CHAR_LIMITS[p].limit} chars — {CHAR_LIMITS[p].note}
-              </p>
-            ))}
-            {selectedPlatforms.filter(p => CHAR_LIMITS[p]).map(p => (
-              <p key={`note-${p}`} style={{ color: 'var(--text-secondary)', fontSize: '0.78rem', marginTop: '0.4rem' }}>{CHAR_LIMITS[p].note}</p>
-            ))}
-
-            <div style={{ marginTop: '1rem' }}>
-              <div
-                className={`media-upload-zone ${dragOver ? 'dragover' : ''}`}
-                onClick={() => fileInputRef.current && fileInputRef.current.click()}
-                onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
-                onDragLeave={() => setDragOver(false)}
-                onDrop={(e) => {
-                  e.preventDefault();
-                  setDragOver(false);
-                  if (e.dataTransfer.files && e.dataTransfer.files.length) uploadFiles(e.dataTransfer.files);
-                }}
-              >
-                <UploadCloud size={20} style={{ color: 'var(--accent-primary)', marginBottom: '0.3rem' }} />
-                <div style={{ fontSize: '0.83rem', fontWeight: 600 }}>Click to upload, or drag and drop</div>
-                <div style={{ fontSize: '0.73rem', color: 'var(--text-muted)', marginTop: '0.15rem' }}>Images or videos, up to 50MB each</div>
-                <input
-                  ref={fileInputRef}
-                  type="file"
-                  accept="image/*,video/*"
-                  multiple
-                  style={{ display: 'none' }}
-                  onChange={(e) => { if (e.target.files && e.target.files.length) uploadFiles(e.target.files); e.target.value = ''; }}
-                />
               </div>
 
-              {mediaItems.length > 0 && (
-                <div className="media-chip-row">
-                  {mediaItems.map(m => (
-                    <div className="media-chip" key={m.id}>
-                      {m.mediaType === 'video' ? <video src={m.previewSrc} muted /> : <img src={m.previewSrc} alt="" />}
-                      {m.mediaType === 'video' && (
-                        <span style={{ position: 'absolute', bottom: 3, left: 3, background: 'rgba(15,18,30,0.65)', color: '#fff', borderRadius: 4, padding: '1px 4px', display: 'flex', alignItems: 'center', gap: 2, fontSize: '0.62rem' }}>
-                          <Film size={10} /> video
-                        </span>
-                      )}
-                      {m.uploading && <div className="media-chip-uploading">Uploading…</div>}
-                      {m.error && <div className="media-chip-uploading" style={{ color: 'var(--accent-danger)' }} title={m.error}>Failed</div>}
-                      <button type="button" className="media-chip-remove" onClick={() => removeMediaItem(m.id)}>
-                        <X size={12} />
-                      </button>
-                    </div>
-                  ))}
+              {composeMode === 'ai' && (
+                <div className="mx-4 mt-3 p-3 rounded-ui bg-brand-subtle/60 border border-hairline flex flex-col gap-2">
+                  <Textarea
+                    rows={2}
+                    placeholder="What do you want to post about? e.g. “Announce our Diwali sale — 20% off, ends Sunday”"
+                    value={brief}
+                    onChange={(e) => setBrief(e.target.value)}
+                  />
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <Input
+                      className="max-w-[220px]"
+                      placeholder="Tone (optional) — e.g. playful"
+                      value={tone}
+                      onChange={(e) => setTone(e.target.value)}
+                    />
+                    <Button
+                      type="button"
+                      variant="primary"
+                      size="sm"
+                      icon={Sparkles}
+                      loading={generating}
+                      onClick={generateDraft}
+                      disabled={!brief.trim() || selectedPlatforms.length === 0}
+                    >
+                      {generating ? 'Generating…' : 'Generate draft'}
+                    </Button>
+                    {selectedPlatforms.length === 0 && (
+                      <span className="text-[11px] text-muted">
+                        Select a channel first, so the draft fits the right platform.
+                      </span>
+                    )}
+                  </div>
+                  {aiError && <p className="text-[11px] text-danger">{aiError}</p>}
+                  <p className="text-[11px] text-subtle">
+                    The draft lands in the editor below — you review, edit and publish it yourself.
+                  </p>
                 </div>
               )}
 
-              <div style={{ marginTop: '0.6rem' }}>
-                {showUrlField ? (
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                    <Link2 size={14} style={{ color: 'var(--text-muted)', flexShrink: 0 }} />
-                    <input
-                      type="text"
-                      className="form-control"
-                      placeholder="Paste an already-hosted media URL"
-                      value={pastedUrl}
-                      autoFocus
-                      onChange={(e) => setPastedUrl(e.target.value)}
-                      onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addPastedUrl(); } }}
-                    />
-                    <button type="button" className="btn btn-secondary btn-sm" onClick={addPastedUrl}>Add</button>
+              {/* editor */}
+              <div className="p-4 pt-3">
+                <Textarea
+                  rows={9}
+                  placeholder="What do you want to say?"
+                  value={content}
+                  onChange={(e) => setContent(e.target.value)}
+                  className="text-[13px]"
+                />
+
+                {/* per-channel counters */}
+                {selectedPlatforms.filter((p) => CHAR_LIMITS[p]).length > 0 && (
+                  <div className="mt-2 flex items-center gap-3 flex-wrap text-[11px] tabular-nums">
+                    {selectedPlatforms
+                      .filter((p) => CHAR_LIMITS[p])
+                      .map((p) => {
+                        const over = content.length > CHAR_LIMITS[p].limit;
+                        return (
+                          <span key={p} className={over ? 'text-warning font-medium' : 'text-subtle'}>
+                            {channelLabel(p)} {content.length}/{CHAR_LIMITS[p].limit}
+                          </span>
+                        );
+                      })}
                   </div>
-                ) : (
-                  <button type="button" onClick={() => setShowUrlField(true)} style={{ background: 'none', border: 'none', padding: 0, color: 'var(--accent-primary)', fontSize: '0.8rem', fontWeight: 600, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: '0.3rem' }}>
-                    <Link2 size={13} /> …or paste an already-hosted media URL
-                  </button>
                 )}
-              </div>
-            </div>
-          </div>
 
-          {/* ---- Publishing Options ---- */}
-          <div className="composer-sticky">
-            <div className="panel">
-              <div className="panel-header"><h2 style={{ fontSize: '1rem' }}>Publishing Options</h2></div>
+                {overLimit.map((p) => (
+                  <p key={p} className="mt-2 flex items-start gap-1.5 text-[11px] text-warning leading-relaxed">
+                    <AlertTriangle size={13} className="shrink-0 mt-px" />
+                    {CHAR_LIMITS[p].note}
+                  </p>
+                ))}
 
-              <div className="form-group">
-                <label>Brand</label>
-                <input type="text" className="form-control" value={brand} onChange={(e) => setBrand(e.target.value)} />
-              </div>
-
-              <label className="publish-option">
-                <input type="radio" name="mode" checked={mode === 'now'} onChange={() => setMode('now')} />
-                <div>
-                  <div className="publish-option-title">Publish Now</div>
+                {/* media */}
+                <div
+                  className={cx(
+                    'mt-4 rounded-ui border border-dashed px-4 py-5 flex flex-col items-center justify-center gap-1 cursor-pointer transition-colors',
+                    dragOver ? 'border-brand bg-brand-subtle' : 'border-hairline-strong bg-sunken/50 hover:bg-sunken'
+                  )}
+                  onClick={() => fileInputRef.current && fileInputRef.current.click()}
+                  onDragOver={(e) => {
+                    e.preventDefault();
+                    setDragOver(true);
+                  }}
+                  onDragLeave={() => setDragOver(false)}
+                  onDrop={(e) => {
+                    e.preventDefault();
+                    setDragOver(false);
+                    if (e.dataTransfer.files && e.dataTransfer.files.length) uploadFiles(e.dataTransfer.files);
+                  }}
+                >
+                  <UploadCloud size={18} className="text-muted" />
+                  <span className="text-xs font-medium text-ink">Click to upload, or drag and drop</span>
+                  <span className="text-[11px] text-subtle">Images or videos, up to 50MB each</span>
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept="image/*,video/*"
+                    multiple
+                    className="hidden"
+                    onChange={(e) => {
+                      if (e.target.files && e.target.files.length) uploadFiles(e.target.files);
+                      e.target.value = '';
+                    }}
+                  />
                 </div>
-              </label>
 
-              <label className="publish-option">
-                <input type="radio" name="mode" checked={mode === 'schedule'} onChange={() => setMode('schedule')} />
-                <div style={{ flex: 1 }}>
-                  <div className="publish-option-title">Schedule for a Specific Date</div>
-                  {mode === 'schedule' && (
-                    <div className="publish-option-body">
+                {mediaItems.length > 0 && (
+                  <div className="mt-3 flex items-center gap-2 flex-wrap">
+                    {mediaItems.map((m) => (
+                      <div
+                        key={m.id}
+                        className="relative w-16 h-16 rounded-ui overflow-hidden border border-hairline bg-sunken"
+                      >
+                        {m.mediaType === 'video' ? (
+                          <video src={m.previewSrc} muted className="w-full h-full object-cover" />
+                        ) : (
+                          <img src={m.previewSrc} alt="" className="w-full h-full object-cover" />
+                        )}
+                        {m.mediaType === 'video' && (
+                          <span className="absolute bottom-1 left-1 px-1 rounded bg-black/60 text-white text-[9px] flex items-center gap-0.5">
+                            <Film size={8} /> video
+                          </span>
+                        )}
+                        {(m.uploading || m.error) && (
+                          <span
+                            className={cx(
+                              'absolute inset-0 flex items-center justify-center text-[10px] font-medium bg-card/85',
+                              m.error ? 'text-danger' : 'text-muted'
+                            )}
+                            title={m.error || undefined}
+                          >
+                            {m.error ? 'Failed' : 'Uploading…'}
+                          </span>
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => removeMediaItem(m.id)}
+                          className="absolute top-1 right-1 w-4 h-4 rounded-full bg-black/60 text-white flex items-center justify-center"
+                        >
+                          <X size={10} />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                <div className="mt-3">
+                  {showUrlField ? (
+                    <div className="flex items-center gap-2">
+                      <Link2 size={14} className="text-subtle shrink-0" />
+                      <Input
+                        placeholder="Paste an already-hosted media URL"
+                        value={pastedUrl}
+                        autoFocus
+                        onChange={(e) => setPastedUrl(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            e.preventDefault();
+                            addPastedUrl();
+                          }
+                        }}
+                      />
+                      <Button type="button" size="sm" onClick={addPastedUrl}>
+                        Add
+                      </Button>
+                    </div>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => setShowUrlField(true)}
+                      className="text-[11px] text-brand hover:underline inline-flex items-center gap-1"
+                    >
+                      <Link2 size={12} /> …or paste an already-hosted media URL
+                    </button>
+                  )}
+                </div>
+              </div>
+            </Panel>
+
+            {/* ------------------------------------- options + preview */}
+            <div className="flex flex-col gap-5 xl:sticky xl:top-0">
+              <Panel>
+                <PanelHeader title="Publishing options" />
+                <div className="p-4 flex flex-col gap-4">
+                  <Field label="Brand">
+                    <Input value={brand} onChange={(e) => setBrand(e.target.value)} />
+                  </Field>
+
+                  <div className="flex flex-col gap-2">
+                    <label className="flex items-start gap-2.5 cursor-pointer">
                       <input
-                        type="datetime-local"
-                        className="form-control"
-                        value={scheduledAt}
-                        onChange={(e) => setScheduledAt(e.target.value)}
+                        type="radio"
+                        name="mode"
+                        checked={mode === 'now'}
+                        onChange={() => setMode('now')}
+                        className="mt-0.5 accent-[var(--color-brand)]"
+                      />
+                      <span className="text-xs font-medium text-ink">Publish now</span>
+                    </label>
+
+                    <label className="flex items-start gap-2.5 cursor-pointer">
+                      <input
+                        type="radio"
+                        name="mode"
+                        checked={mode === 'schedule'}
+                        onChange={() => setMode('schedule')}
+                        className="mt-0.5 accent-[var(--color-brand)]"
+                      />
+                      <span className="flex-1 min-w-0">
+                        <span className="text-xs font-medium text-ink">Schedule for a specific date</span>
+                        {mode === 'schedule' && (
+                          <span className="block mt-2">
+                            <Input
+                              type="datetime-local"
+                              value={scheduledAt}
+                              onChange={(e) => setScheduledAt(e.target.value)}
+                            />
+                            <span className="block text-[11px] text-subtle mt-1">
+                              In your browser’s timezone (
+                              {Intl.DateTimeFormat().resolvedOptions().timeZone}).
+                            </span>
+                          </span>
+                        )}
+                      </span>
+                    </label>
+                  </div>
+
+                  {selectedAccounts.length > 0 && (
+                    <p className="text-[11px] text-muted leading-relaxed border-t border-hairline pt-3">
+                      Posting to {selectedAccounts.map((a) => a.account_label || a.id).join(', ')}
+                    </p>
+                  )}
+                </div>
+              </Panel>
+
+              <Panel className="overflow-hidden">
+                <PanelHeader
+                  title="Post preview"
+                  action={
+                    selectedPlatforms.length > 1 && (
+                      <div className="flex items-center gap-1">
+                        {selectedPlatforms.map((p) => (
+                          <button
+                            key={p}
+                            type="button"
+                            onClick={() => setPreviewPlatform(p)}
+                            title={channelLabel(p)}
+                            className={cx(
+                              'w-6 h-6 rounded flex items-center justify-center border transition-colors',
+                              previewPlatform === p
+                                ? 'bg-canvas border-hairline'
+                                : 'border-transparent text-subtle hover:text-ink'
+                            )}
+                            style={previewPlatform === p ? { color: channelColor(p) } : undefined}
+                          >
+                            <PlatformIcon platform={p} size={13} />
+                          </button>
+                        ))}
+                      </div>
+                    )
+                  }
+                />
+                {!ActivePreview ? (
+                  <EmptyState
+                    icon={ImageIcon}
+                    title="Nothing to preview yet"
+                    description="Select a channel above to see exactly how this post will look there."
+                  />
+                ) : (
+                  <div className="p-4">
+                    <div className="rounded-ui border border-hairline overflow-hidden bg-card">
+                      <ActivePreview
+                        accountLabel={
+                          activePreviewAccount
+                            ? activePreviewAccount.account_label || activePreviewAccount.id
+                            : channelLabel(previewPlatform)
+                        }
+                        content={content}
+                        media={firstMedia}
+                        timestampLabel={timestampLabel}
                       />
                     </div>
-                  )}
-                </div>
-              </label>
-
-              {selectedAccounts.length > 0 && (
-                <p style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', marginTop: '1rem' }}>
-                  Posting to {selectedAccounts.map(a => a.account_label || a.id).join(', ')}
-                </p>
-              )}
-
-              {result && (
-                <p style={{ color: result.type === 'success' ? 'var(--accent-success)' : 'var(--accent-danger)', fontSize: '0.85rem', marginTop: '1rem' }}>{result.text}</p>
-              )}
-
-              <button type="submit" className="btn btn-primary btn-sm" style={{ width: '100%', justifyContent: 'center', marginTop: '1.25rem' }} disabled={submitting || mediaUploading}>
-                <Send size={14} /> {submitting ? 'Publishing…' : mediaUploading ? 'Uploading media…' : mode === 'now' ? 'Publish Now' : 'Schedule Post'}
-              </button>
+                  </div>
+                )}
+              </Panel>
             </div>
           </div>
-
-          {/* ---- Post Preview ---- */}
-          <div className="composer-sticky">
-            <div className="panel">
-              <div className="panel-header"><h2 style={{ fontSize: '1rem' }}>Post Preview</h2></div>
-
-              {!ActivePreview ? (
-                <div className="preview-empty-state">Select an account above to see how your post will look.</div>
-              ) : (
-                <>
-                  {selectedPlatforms.length > 1 && (
-                    <div className="preview-tabs platform-icon-tabs">
-                      {selectedPlatforms.map(p => (
-                        <PlatformIconButton key={p} platform={p} active={previewPlatform === p} onClick={() => setPreviewPlatform(p)} />
-                      ))}
-                    </div>
-                  )}
-                  <ActivePreview
-                    accountLabel={activePreviewAccount ? (activePreviewAccount.account_label || activePreviewAccount.id) : PLATFORM_LABELS[previewPlatform]}
-                    content={content}
-                    media={firstMedia}
-                    timestampLabel={timestampLabel}
-                  />
-                </>
-              )}
-            </div>
-          </div>
-        </div>
+        </PageBody>
       </form>
-    </div>
+    </Page>
   );
 }
 

@@ -1,0 +1,222 @@
+@import 'tailwindcss';
+
+/*
+ * "Calm Precision" — the design system Stitch produced for Social Hub
+ * (see stitch_social_hub_saas_platform/DESIGN.md). Tokens here are the
+ * single source of truth; components reference them through Tailwind
+ * utilities (bg-canvas, border-hairline, text-muted…) rather than raw
+ * hex, so the dark theme below re-skins everything without touching a
+ * component.
+ *
+ * The rules this system is built on, kept here so they survive the next
+ * edit: one surface per region (no card inside a card), hierarchy from
+ * type and space rather than containers, hairlines instead of shadows,
+ * and the indigo accent on well under 5% of the pixels.
+ */
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+@theme {
+  /* --- Neutral ramp -------------------------------------------------- */
+  --color-canvas: #f7f7fb;        /* page background, level 0 */
+  --color-card: #ffffff;          /* resting panel, level 1 */
+  --color-sunken: #f3f3f9;        /* search fields, toolbars, level -1 */
+  --color-hairline: #e7e7f1;      /* the only divider color */
+  --color-hairline-strong: #d8d8e5;
+  --color-ink: #111118;           /* primary text */
+  --color-muted: #6e6e82;         /* secondary text */
+  --color-subtle: #9a9aa8;        /* meta, placeholders */
+
+  /* --- Brand: primary operational intents only ----------------------- */
+  --color-brand: #5b5fef;
+  --color-brand-hover: #4a4ede;
+  --color-brand-active: #3f43ce;
+  --color-brand-subtle: #eef0ff;
+
+  /* --- Semantic ------------------------------------------------------ */
+  --color-success: #16a34a;
+  --color-success-subtle: #dcfce7;
+  --color-warning: #d97706;
+  --color-warning-subtle: #fef3c7;
+  --color-danger: #dc2626;
+  --color-danger-subtle: #fef2f2;
+  --color-danger-border: #fca5a5;
+  --color-info: #0d9488;
+  --color-info-subtle: #ccfbf1;
+
+  /* --- Channel identity: badges, dots and presence bars only --------- */
+  --color-ch-whatsapp: #25d366;
+  --color-ch-instagram: #e1306c;
+  --color-ch-facebook: #1877f2;
+  --color-ch-linkedin: #0a66c2;
+  --color-ch-youtube: #ff0000;
+  --color-ch-google: #4285f4;
+  --color-ch-pinterest: #e60023;
+  --color-ch-x: #0f1419;
+
+  /* --- Type ---------------------------------------------------------- */
+  --font-sans: var(--font-inter), 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+
+  /* --- Shape --------------------------------------------------------- */
+  --radius-ui: 6px;        /* inputs, buttons, nav rows */
+  --radius-surface: 8px;   /* panels */
+  --radius-card: 12px;     /* data modules */
+
+  /* --- Elevation: three shadows in the whole system ------------------ */
+  --shadow-hover: 0 2px 4px rgba(22, 22, 31, 0.04);
+  --shadow-flyout: 0 8px 24px -4px rgba(22, 22, 31, 0.08), 0 2px 6px -1px rgba(22, 22, 31, 0.04);
+  --shadow-modal: 0 20px 32px -8px rgba(22, 22, 31, 0.12), 0 1px 2px rgba(22, 22, 31, 0.04);
+}
+
+/* --- Dark theme: same system, deeper canvas -------------------------- */
+.dark {
+  --color-canvas: #0e0e14;
+  --color-card: #17171f;
+  --color-sunken: #1d1d27;
+  --color-hairline: #262635;
+  --color-hairline-strong: #343447;
+  --color-ink: #f2f2f7;
+  --color-muted: #a0a0b4;
+  --color-subtle: #6e6e85;
+
+  --color-brand: #6e72ff;
+  --color-brand-hover: #8184ff;
+  --color-brand-active: #5b5fef;
+  --color-brand-subtle: #1e1e3a;
+
+  --color-success-subtle: #0d2a1a;
+  --color-warning-subtle: #2e2008;
+  --color-danger-subtle: #2c1416;
+  --color-danger-border: #7f2a2a;
+  --color-info-subtle: #0c2c2a;
+
+  color-scheme: dark;
+}
+
+@layer base {
+  html,
+  body {
+    height: 100%;
+  }
+
+  body {
+    background-color: var(--color-canvas);
+    color: var(--color-ink);
+    font-family: var(--font-sans);
+    /* body-md: the density this tool is designed around */
+    font-size: 13px;
+    line-height: 18px;
+    letter-spacing: -0.002em;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* Sentence case is mandated by the system; headings carry the tight
+     negative tracking that gives it the editorial feel. */
+  h1,
+  h2,
+  h3 {
+    letter-spacing: -0.02em;
+    font-weight: 600;
+  }
+
+  ::selection {
+    background: var(--color-brand);
+    color: #fff;
+  }
+
+  ::-webkit-scrollbar {
+    width: 4px;
+    height: 4px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: var(--color-hairline-strong);
+    border-radius: 4px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: var(--color-subtle);
+  }
+
+  /* Operational numbers never reflow as they tick. */
+  .tabular-nums {
+    font-variant-numeric: tabular-nums;
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--color-brand);
+    outline-offset: 1px;
+  }
+}
+
+@layer components {
+  /* The shared label used above every number and section in the app. */
+  .eyebrow {
+    font-size: 11px;
+    line-height: 14px;
+    font-weight: 500;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--color-subtle);
+  }
+
+  /* Native select, restyled to match the control set rather than being
+     replaced by a JS listbox — keyboard and mobile behaviour stay free. */
+  .select-ui {
+    appearance: none;
+    background-image: linear-gradient(45deg, transparent 50%, var(--color-subtle) 50%),
+      linear-gradient(135deg, var(--color-subtle) 50%, transparent 50%);
+    background-position: calc(100% - 13px) calc(50% + 1px), calc(100% - 9px) calc(50% + 1px);
+    background-size: 4px 4px, 4px 4px;
+    background-repeat: no-repeat;
+    padding-right: 26px;
+  }
+
+  .skeleton {
+    background: linear-gradient(
+      90deg,
+      var(--color-sunken) 25%,
+      var(--color-hairline) 37%,
+      var(--color-sunken) 63%
+    );
+    background-size: 400% 100%;
+    animation: skeleton-sweep 1.4s ease infinite;
+  }
+}
+
+@keyframes skeleton-sweep {
+  0% {
+    background-position: 100% 50%;
+  }
+  100% {
+    background-position: 0 50%;
+  }
+}
+
+@keyframes drawer-in {
+  from {
+    transform: translateX(16px);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}

@@ -1,25 +1,33 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
-import { RefreshCw, X, Calendar as CalendarIcon, ChevronDown, ChevronUp, PenSquare, Search } from 'lucide-react';
-import { SOCIAL_API_BASE, PLATFORM_LABELS, PLATFORM_COLORS, AVAILABLE_PLATFORMS } from './api';
-import { PlatformIcon, PlatformFilterTabs } from './PlatformIcon';
+import React, { useEffect, useMemo, useState } from 'react';
+import {
+  RefreshCw, X, ChevronDown, ChevronRight, PenSquare, CalendarDays, List as ListIcon,
+  CalendarClock
+} from 'lucide-react';
+import { SOCIAL_API_BASE, AVAILABLE_PLATFORMS } from './api';
+import { Page, PageBar, PageBody } from '../ui/page';
+import {
+  Button, IconButton, Panel, Chip, Input, EmptyState, Banner, Skeleton,
+  ConfirmDialog, cx
+} from '../ui';
+import { ChannelFilterTabs, ChannelDot, channelLabel } from '../ui/channel';
 
-// Renamed from "Calendar" — Zoho/HubSpot both call this section "Posts"
-// with Scheduled/Published as its two sub-views (Zoho's Posts nav has
-// Published Posts, Scheduled Posts, Approvals, Unpublished, Drafts;
-// this app's data model only distinguishes pending/publishing (still
-// queued) from published/failed (already attempted), so those become the
-// two sub-tabs rather than a 1:1 copy of Zoho's five). List view, not a
-// grid calendar — this repo has no calendar/date-grid library installed,
-// and the build spec explicitly allows "calendar/list view" here.
-// Post cards carry the same platform-badge/status-pill visual language as
-// Inbox (social/Inbox.jsx) rather than plain colored text.
-const STATUS_STYLE = {
-  pending: { color: 'var(--text-secondary)', bg: 'var(--bg-surface-hover)', label: 'Pending' },
-  publishing: { color: 'var(--accent-warning)', bg: 'rgba(184,105,10,0.12)', label: 'Publishing' },
-  published: { color: 'var(--accent-success)', bg: 'rgba(12,163,12,0.1)', label: 'Published' },
-  failed: { color: 'var(--accent-danger)', bg: 'rgba(208,59,59,0.1)', label: 'Failed' }
+/*
+ * Scheduled and published posts. The data model distinguishes
+ * pending/publishing (still queued) from published/failed (already
+ * attempted), so those are the two sub-tabs.
+ *
+ * The redesign adds a month calendar next to the list — the thing a
+ * social manager actually plans in — built from the same `posts` array,
+ * with no date library: a plain 6×7 grid of the month's cells.
+ */
+
+const STATUS = {
+  pending: { tone: 'neutral', label: 'Pending' },
+  publishing: { tone: 'warning', label: 'Publishing' },
+  published: { tone: 'success', label: 'Published' },
+  failed: { tone: 'danger', label: 'Failed' }
 };
 
 const SUB_TABS = [
@@ -27,34 +35,26 @@ const SUB_TABS = [
   { key: 'published', label: 'Published', statuses: ['published', 'failed'] }
 ];
 
-function groupByDate(posts) {
-  const groups = {};
-  posts.forEach(p => {
-    const key = new Date(p.scheduled_at).toLocaleDateString(undefined, { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
-    (groups[key] = groups[key] || []).push(p);
-  });
-  return groups;
-}
+const dayKey = (d) => new Date(d).toDateString();
 
 function PostErrors({ results }) {
   const [expanded, setExpanded] = useState(false);
   const entries = Object.entries(results || {});
   if (entries.length === 0) return null;
-
-  const anyFailed = entries.some(([, r]) => r.status === 'failed');
-  const visible = expanded ? entries : entries.filter(([, r]) => r.status === 'failed').slice(0, 1);
-  if (!expanded && visible.length === 0) return null;
+  const failed = entries.filter(([, r]) => r.status === 'failed');
+  if (failed.length === 0 && !expanded) return null;
+  const visible = expanded ? entries : failed.slice(0, 1);
 
   return (
-    <div className="post-error-box">
+    <div className="mt-2 rounded-ui border border-danger-border bg-danger-subtle/60 px-2.5 py-2 flex flex-col gap-1">
       {visible.map(([key, result]) => (
-        <div key={key} className={`post-error-row ${result.status === 'failed' ? 'failed' : ''}`}>
-          <span className="platform-name">{PLATFORM_LABELS[key] || key}</span>
+        <div key={key} className="text-[11px] leading-tight">
+          <span className="font-medium text-ink">{channelLabel(key)}</span>
           {': '}
           {result.status === 'failed' ? (
-            <span className="error-text">{result.error || 'failed'}</span>
+            <span className="text-danger">{result.error || 'failed'}</span>
           ) : (
-            <span style={{ color: 'var(--text-secondary)' }}>{result.status}{result.url ? ` — ${result.url}` : ''}</span>
+            <span className="text-muted">{result.status}</span>
           )}
         </div>
       ))}
@@ -62,169 +62,379 @@ function PostErrors({ results }) {
         <button
           type="button"
           onClick={() => setExpanded(true)}
-          style={{ alignSelf: 'flex-start', background: 'none', border: 'none', color: 'var(--accent-primary)', fontSize: '0.75rem', cursor: 'pointer', padding: 0 }}
+          className="self-start text-[11px] text-brand hover:underline"
         >
-          Show all {entries.length} platform results
-        </button>
-      )}
-      {expanded && anyFailed && entries.length > 1 && (
-        <button
-          type="button"
-          onClick={() => setExpanded(false)}
-          style={{ alignSelf: 'flex-start', background: 'none', border: 'none', color: 'var(--text-muted)', fontSize: '0.75rem', cursor: 'pointer', padding: 0 }}
-        >
-          Show less
+          Show all {entries.length} channel results
         </button>
       )}
     </div>
   );
 }
 
+function PostCard({ post, onCancel }) {
+  const status = STATUS[post.status] || STATUS.pending;
+  return (
+    <div className="px-4 py-3 border-b border-hairline last:border-0 flex items-start justify-between gap-4 hover:bg-canvas/60 transition-colors">
+      <div className="flex-1 min-w-0">
+        <div className="flex items-center gap-1.5 mb-1.5">
+          {(post.target_platforms || []).map((p) => (
+            <span
+              key={p}
+              className="inline-flex items-center gap-1 text-[11px] text-muted"
+              title={channelLabel(p)}
+            >
+              <ChannelDot platform={p} size={7} />
+            </span>
+          ))}
+          <span className="text-[11px] text-subtle tabular-nums ml-1">
+            {new Date(post.scheduled_at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}
+          </span>
+          {post.brand && <span className="text-[11px] text-subtle">· {post.brand}</span>}
+        </div>
+        <p className="text-xs text-ink leading-relaxed line-clamp-2">
+          {post.content || <span className="text-subtle">(no text content)</span>}
+        </p>
+        <PostErrors results={post.platform_results} />
+      </div>
+      <div className="flex flex-col items-end gap-2 shrink-0">
+        <Chip tone={status.tone}>{status.label}</Chip>
+        {post.status === 'pending' && (
+          <Button size="sm" variant="ghost" icon={X} onClick={() => onCancel(post)}>
+            Cancel
+          </Button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------- Calendar */
+
+function MonthCalendar({ posts, month, onMonthChange }) {
+  const first = new Date(month.getFullYear(), month.getMonth(), 1);
+  const startOffset = (first.getDay() + 6) % 7; // week starts Monday
+  const daysInMonth = new Date(month.getFullYear(), month.getMonth() + 1, 0).getDate();
+  const cells = [];
+  for (let i = 0; i < startOffset; i++) cells.push(null);
+  for (let d = 1; d <= daysInMonth; d++) cells.push(new Date(month.getFullYear(), month.getMonth(), d));
+  while (cells.length % 7 !== 0) cells.push(null);
+
+  const byDay = {};
+  posts.forEach((p) => {
+    const k = dayKey(p.scheduled_at);
+    (byDay[k] = byDay[k] || []).push(p);
+  });
+
+  const today = new Date().toDateString();
+
+  return (
+    <Panel className="overflow-hidden">
+      <div className="h-11 px-4 flex items-center justify-between border-b border-hairline">
+        <h2 className="text-[13px] font-semibold text-ink">
+          {month.toLocaleDateString(undefined, { month: 'long', year: 'numeric' })}
+        </h2>
+        <div className="flex items-center gap-1">
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={() => onMonthChange(new Date(month.getFullYear(), month.getMonth() - 1, 1))}
+          >
+            Previous
+          </Button>
+          <Button size="sm" variant="ghost" onClick={() => onMonthChange(new Date())}>
+            Today
+          </Button>
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={() => onMonthChange(new Date(month.getFullYear(), month.getMonth() + 1, 1))}
+          >
+            Next
+          </Button>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-7 border-b border-hairline bg-sunken/60">
+        {['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map((d) => (
+          <div key={d} className="eyebrow px-2 py-2 text-center">
+            {d}
+          </div>
+        ))}
+      </div>
+
+      <div className="grid grid-cols-7">
+        {cells.map((date, i) => {
+          const items = date ? byDay[date.toDateString()] || [] : [];
+          const isToday = date && date.toDateString() === today;
+          return (
+            <div
+              key={i}
+              className={cx(
+                'min-h-[92px] border-b border-r border-hairline p-1.5 flex flex-col gap-1',
+                i % 7 === 6 && 'border-r-0',
+                !date && 'bg-sunken/40'
+              )}
+            >
+              {date && (
+                <span
+                  className={cx(
+                    'text-[11px] tabular-nums w-5 h-5 flex items-center justify-center rounded-full shrink-0',
+                    isToday ? 'bg-brand text-white font-semibold' : 'text-subtle'
+                  )}
+                >
+                  {date.getDate()}
+                </span>
+              )}
+              {items.slice(0, 3).map((p) => (
+                <div
+                  key={p.id}
+                  title={p.content}
+                  className="flex items-center gap-1 px-1 py-0.5 rounded bg-sunken border border-hairline min-w-0"
+                >
+                  <ChannelDot platform={(p.target_platforms || [])[0]} size={5} />
+                  <span className="text-[10px] text-muted truncate">
+                    {new Date(p.scheduled_at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}{' '}
+                    {p.content}
+                  </span>
+                </div>
+              ))}
+              {items.length > 3 && (
+                <span className="text-[10px] text-subtle pl-1">+{items.length - 3} more</span>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </Panel>
+  );
+}
+
+/* ================================================================= Posts */
+
 function Posts({ authFetch, setCurrentView }) {
   const [posts, setPosts] = useState(null);
   const [error, setError] = useState(null);
   const [subTab, setSubTab] = useState('scheduled');
   const [platformFilter, setPlatformFilter] = useState('');
+  const [brand, setBrand] = useState('');
   const [search, setSearch] = useState('');
-  const [collapsedDates, setCollapsedDates] = useState({});
+  const [mode, setMode] = useState('list');
+  const [month, setMonth] = useState(new Date());
+  const [collapsed, setCollapsed] = useState({});
+  const [confirmCancel, setConfirmCancel] = useState(null);
+  const [refreshing, setRefreshing] = useState(false);
 
   const load = async () => {
+    setRefreshing(true);
     try {
-      const res = await authFetch(`${SOCIAL_API_BASE}/posts`);
+      const params = new URLSearchParams();
+      if (brand.trim()) params.set('brand', brand.trim());
+      const res = await authFetch(`${SOCIAL_API_BASE}/posts?${params.toString()}`);
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Could not load posts.');
       setPosts((data.posts || []).sort((a, b) => new Date(b.scheduled_at) - new Date(a.scheduled_at)));
+      setError(null);
     } catch (err) {
       setError(err.message);
       setPosts([]);
+    } finally {
+      setRefreshing(false);
     }
   };
 
-  useEffect(() => { load(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    load();
+  }, [brand]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const cancel = async (id) => {
-    if (!confirm('Cancel this pending post?')) return;
+  const cancel = async (post) => {
     try {
-      const res = await authFetch(`${SOCIAL_API_BASE}/posts/${id}`, { method: 'DELETE' });
+      const res = await authFetch(`${SOCIAL_API_BASE}/posts/${post.id}`, { method: 'DELETE' });
       if (!res.ok) throw new Error((await res.json()).error || 'Could not cancel post.');
       load();
     } catch (err) {
       setError(err.message);
+    } finally {
+      setConfirmCancel(null);
     }
   };
 
-  const toggleDate = (date) => setCollapsedDates(prev => ({ ...prev, [date]: !prev[date] }));
-
-  const activeStatuses = (SUB_TABS.find(t => t.key === subTab) || SUB_TABS[0]).statuses;
+  const activeStatuses = (SUB_TABS.find((t) => t.key === subTab) || SUB_TABS[0]).statuses;
   const searchLower = search.trim().toLowerCase();
 
-  const filteredPosts = (posts || []).filter(p => {
-    if (!activeStatuses.includes(p.status)) return false;
-    if (platformFilter && !(p.target_platforms || []).includes(platformFilter)) return false;
-    if (searchLower && !(p.content || '').toLowerCase().includes(searchLower)) return false;
-    return true;
-  });
-  const groups = posts ? groupByDate(filteredPosts) : {};
-  const countFor = (statuses) => (posts || []).filter(p => statuses.includes(p.status)).length;
+  const filtered = useMemo(
+    () =>
+      (posts || []).filter((p) => {
+        if (!activeStatuses.includes(p.status)) return false;
+        if (platformFilter && !(p.target_platforms || []).includes(platformFilter)) return false;
+        if (searchLower && !(p.content || '').toLowerCase().includes(searchLower)) return false;
+        return true;
+      }),
+    [posts, activeStatuses, platformFilter, searchLower]
+  );
+
+  const groups = useMemo(() => {
+    const out = {};
+    filtered.forEach((p) => {
+      const key = new Date(p.scheduled_at).toLocaleDateString(undefined, {
+        weekday: 'long',
+        year: 'numeric',
+        month: 'long',
+        day: 'numeric'
+      });
+      (out[key] = out[key] || []).push(p);
+    });
+    return out;
+  }, [filtered]);
+
+  const countFor = (statuses) => (posts || []).filter((p) => statuses.includes(p.status)).length;
 
   return (
-    <div>
-      <div className="header-container">
-        <div className="title-area">
-          <h1>Posts</h1>
-          <p>Everything scheduled and everything already published, across every connected account.</p>
-        </div>
-        <div style={{ display: 'flex', gap: '0.6rem' }}>
-          <button className="btn btn-secondary btn-sm" onClick={load}>
-            <RefreshCw size={14} /> Refresh
-          </button>
-          <button className="btn btn-primary btn-sm" onClick={() => setCurrentView('social-compose')}>
-            <PenSquare size={14} /> New Post
-          </button>
-        </div>
-      </div>
+    <Page>
+      <PageBar
+        title="Posts & schedule"
+        search={search}
+        onSearch={setSearch}
+        searchPlaceholder="Search post content…"
+        actions={
+          <>
+            <IconButton
+              icon={RefreshCw}
+              label="Refresh"
+              onClick={load}
+              className={refreshing ? 'animate-[spin_1s_linear_infinite]' : undefined}
+            />
+            <Button variant="primary" icon={PenSquare} onClick={() => setCurrentView('social-compose')}>
+              New post
+            </Button>
+          </>
+        }
+      />
 
-      {error && <p style={{ color: 'var(--accent-danger)', marginBottom: '1rem' }}>{error}</p>}
+      <PageBody>
+        {error && <Banner tone="danger">{error}</Banner>}
 
-      <div className="range-tabs" style={{ marginBottom: '1rem', display: 'inline-flex' }}>
-        {SUB_TABS.map(t => (
-          <button
-            key={t.key}
-            className={`range-tab ${subTab === t.key ? 'active' : ''}`}
-            onClick={() => setSubTab(t.key)}
-          >
-            {t.label} <span style={{ opacity: 0.75 }}>({countFor(t.statuses)})</span>
-          </button>
-        ))}
-      </div>
+        <div className="flex items-center gap-3 flex-wrap">
+          <div className="flex items-center gap-1 p-0.5 rounded-ui bg-sunken border border-hairline">
+            {SUB_TABS.map((t) => (
+              <button
+                key={t.key}
+                onClick={() => setSubTab(t.key)}
+                className={cx(
+                  'h-6 px-2.5 rounded text-[11px] font-medium transition-colors',
+                  subTab === t.key ? 'bg-card text-ink shadow-[var(--shadow-hover)]' : 'text-muted hover:text-ink'
+                )}
+              >
+                {t.label}{' '}
+                <span className="tabular-nums opacity-70">{posts ? countFor(t.statuses) : '—'}</span>
+              </button>
+            ))}
+          </div>
 
-      <div className="platform-tabs">
-        <PlatformFilterTabs platforms={AVAILABLE_PLATFORMS} value={platformFilter} onChange={setPlatformFilter} />
-        <div style={{ marginLeft: 'auto', display: 'flex', gap: '0.75rem' }}>
-          <div className="search-bar" style={{ width: 200 }}>
-            <Search size={14} style={{ color: 'var(--text-muted)' }} />
-            <input placeholder="Search post content…" value={search} onChange={(e) => setSearch(e.target.value)} />
+          <ChannelFilterTabs
+            platforms={AVAILABLE_PLATFORMS}
+            value={platformFilter}
+            onChange={setPlatformFilter}
+            className="flex-1 min-w-0"
+          />
+
+          <Input
+            className="w-32"
+            placeholder="Brand"
+            value={brand}
+            onChange={(e) => setBrand(e.target.value)}
+          />
+
+          <div className="flex items-center gap-1 p-0.5 rounded-ui bg-sunken border border-hairline">
+            <button
+              onClick={() => setMode('list')}
+              title="List"
+              className={cx(
+                'w-7 h-6 rounded flex items-center justify-center transition-colors',
+                mode === 'list' ? 'bg-card text-ink' : 'text-muted hover:text-ink'
+              )}
+            >
+              <ListIcon size={14} />
+            </button>
+            <button
+              onClick={() => setMode('calendar')}
+              title="Calendar"
+              className={cx(
+                'w-7 h-6 rounded flex items-center justify-center transition-colors',
+                mode === 'calendar' ? 'bg-card text-ink' : 'text-muted hover:text-ink'
+              )}
+            >
+              <CalendarDays size={14} />
+            </button>
           </div>
         </div>
-      </div>
 
-      {posts === null ? (
-        <div className="trend-chart-empty">Loading posts...</div>
-      ) : filteredPosts.length === 0 ? (
-        <div className="trend-chart-empty">
-          {subTab === 'scheduled' ? 'Nothing scheduled — write one in Compose.' : 'No published posts match these filters yet.'}
-        </div>
-      ) : (
-        Object.entries(groups).map(([date, datePosts]) => {
-          const collapsed = !!collapsedDates[date];
-          return (
-            <div className="panel" key={date} style={{ marginBottom: '1.25rem' }}>
-              <div className="panel-header" style={{ cursor: 'pointer' }} onClick={() => toggleDate(date)}>
-                <div className="calendar-date-header">
-                  <h2><CalendarIcon size={16} />{date}</h2>
-                  <span className="calendar-date-count">{datePosts.length} post{datePosts.length === 1 ? '' : 's'}</span>
-                </div>
-                {collapsed ? <ChevronDown size={16} style={{ color: 'var(--text-muted)' }} /> : <ChevronUp size={16} style={{ color: 'var(--text-muted)' }} />}
-              </div>
+        {posts === null ? (
+          <Panel className="p-4 space-y-3">
+            <Skeleton className="h-10" />
+            <Skeleton className="h-10" />
+            <Skeleton className="h-10" />
+          </Panel>
+        ) : mode === 'calendar' ? (
+          <MonthCalendar posts={filtered} month={month} onMonthChange={setMonth} />
+        ) : filtered.length === 0 ? (
+          <Panel>
+            <EmptyState
+              icon={CalendarClock}
+              title={subTab === 'scheduled' ? 'Nothing scheduled' : 'No published posts match'}
+              description={
+                subTab === 'scheduled'
+                  ? 'Write a post in Compose and schedule it — it will appear here and in the calendar.'
+                  : 'Try a different channel or clear the search.'
+              }
+              action={
+                subTab === 'scheduled' && (
+                  <Button variant="primary" onClick={() => setCurrentView('social-compose')}>
+                    Write a post
+                  </Button>
+                )
+              }
+            />
+          </Panel>
+        ) : (
+          Object.entries(groups).map(([date, datePosts]) => {
+            const isCollapsed = !!collapsed[date];
+            return (
+              <Panel key={date}>
+                <button
+                  onClick={() => setCollapsed((prev) => ({ ...prev, [date]: !prev[date] }))}
+                  className="w-full h-11 px-4 flex items-center justify-between border-b border-hairline hover:bg-canvas transition-colors"
+                >
+                  <span className="flex items-center gap-2">
+                    {isCollapsed ? (
+                      <ChevronRight size={14} className="text-subtle" />
+                    ) : (
+                      <ChevronDown size={14} className="text-subtle" />
+                    )}
+                    <span className="text-[13px] font-semibold text-ink">{date}</span>
+                  </span>
+                  <span className="text-[11px] text-subtle tabular-nums">
+                    {datePosts.length} post{datePosts.length === 1 ? '' : 's'}
+                  </span>
+                </button>
+                {!isCollapsed &&
+                  datePosts.map((post) => (
+                    <PostCard key={post.id} post={post} onCancel={setConfirmCancel} />
+                  ))}
+              </Panel>
+            );
+          })
+        )}
+      </PageBody>
 
-              {!collapsed && datePosts.map(post => {
-                const status = STATUS_STYLE[post.status] || STATUS_STYLE.pending;
-                return (
-                  <div key={post.id} className="post-card">
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '1rem' }}>
-                      <div style={{ flex: 1, minWidth: 0 }}>
-                        <div className="post-platform-chips">
-                          {(post.target_platforms || []).map(p => (
-                            <div key={p} className="post-platform-chip" style={{ background: PLATFORM_COLORS[p] || 'var(--text-muted)' }} title={PLATFORM_LABELS[p] || p}>
-                              <PlatformIcon platform={p} size={12} />
-                            </div>
-                          ))}
-                        </div>
-                        <div style={{ fontWeight: 600, marginBottom: '0.25rem' }}>
-                          {post.content ? (post.content.length > 140 ? `${post.content.slice(0, 140)}…` : post.content) : '(no text content)'}
-                        </div>
-                        <div style={{ fontSize: '0.78rem', color: 'var(--text-secondary)' }}>
-                          {new Date(post.scheduled_at).toLocaleTimeString()}
-                        </div>
-                        <PostErrors results={post.platform_results} />
-                      </div>
-                      <div style={{ textAlign: 'right', flexShrink: 0, display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '0.5rem' }}>
-                        <span className="status-pill" style={{ color: status.color, background: status.bg }}>{status.label}</span>
-                        {post.status === 'pending' && (
-                          <button className="btn btn-secondary btn-sm" onClick={() => cancel(post.id)}>
-                            <X size={12} /> Cancel
-                          </button>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          );
-        })
-      )}
-    </div>
+      <ConfirmDialog
+        open={!!confirmCancel}
+        title="Cancel this scheduled post?"
+        body="It will be removed from the publish queue and won't go out on any channel. This can't be undone."
+        confirmLabel="Cancel post"
+        onCancel={() => setConfirmCancel(null)}
+        onConfirm={() => cancel(confirmCancel)}
+      />
+    </Page>
   );
 }
 

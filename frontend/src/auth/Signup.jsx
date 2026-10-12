@@ -3,14 +3,18 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { Share2, Building2, Mail, Lock, AlertCircle, RefreshCw, Check } from 'lucide-react';
+import { Building2, Mail, Lock } from 'lucide-react';
 import { API_BASE } from '../apiBase';
+import AuthShell from './AuthShell';
+import { Button, Input, Field, Banner, cx } from '../ui';
 
-const FEATURES = [
-  'Free plan: 2 connected accounts, no card required',
-  'Invite your team and assign conversations',
-  'Upgrade only when you outgrow a limit'
+const POINTS = [
+  'Free plan: two connected channels, no card required.',
+  'Invite your team and assign conversations from day one.',
+  'Upgrade only when you outgrow a limit.'
 ];
+
+const STEPS = ['Create workspace', 'Connect a channel', 'Publish your first post'];
 
 export default function Signup() {
   const router = useRouter();
@@ -41,108 +45,107 @@ export default function Signup() {
     }
   };
 
+  // Plain length check, matching the backend's own minimum — enough to
+  // tell someone why the form will reject them before they submit.
+  const strength = password.length === 0 ? null : password.length < 8 ? 'weak' : password.length < 12 ? 'ok' : 'strong';
+
   return (
-    <div className="auth-split">
-      <div className="auth-brand-panel">
-        <div className="auth-brand-mark">
-          <span className="auth-brand-mark-icon"><Share2 size={16} /></span>
-          Social Hub
-        </div>
+    <AuthShell
+      headline="Set up your workspace in under a minute."
+      sub="Connect a channel, invite your team, and start working every conversation from one place."
+      points={POINTS}
+    >
+      <h1 className="text-[22px] font-semibold tracking-tight text-ink">Create your workspace</h1>
+      <p className="text-xs text-muted mt-1">You’ll be its owner</p>
 
-        <div className="auth-brand-copy">
-          <h2>Set up your workspace in under a minute.</h2>
-          <p>Connect your first channel today; invite the rest of your team once you've seen it work.</p>
-          <div className="auth-brand-feature-list">
-            {FEATURES.map(f => (
-              <div className="auth-brand-feature" key={f}>
-                <span className="auth-brand-feature-icon"><Check size={12} /></span>
-                {f}
-              </div>
-            ))}
-          </div>
-        </div>
+      <form onSubmit={handleSubmit} className="mt-7 flex flex-col gap-4">
+        {error && <Banner tone="danger">{error}</Banner>}
 
-        <div className="auth-brand-footer">&copy; {new Date().getFullYear()} Social Hub</div>
-      </div>
+        <Field label="Workspace name">
+          <Input
+            icon={Building2}
+            placeholder="Acme Co."
+            value={tenantName}
+            onChange={(e) => setTenantName(e.target.value)}
+            autoFocus
+            required
+          />
+        </Field>
 
-      <div className="auth-form-panel">
-        <div className="auth-form-inner">
-          <div className="auth-header">
-            <div className="auth-logo"><Share2 size={22} /></div>
-            <h1 className="auth-title">Create your workspace</h1>
-            <p className="auth-subtitle">Connect WhatsApp, Instagram and Facebook in one inbox</p>
-          </div>
+        <Field label="Email address">
+          <Input
+            type="email"
+            icon={Mail}
+            placeholder="you@company.com"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            required
+          />
+        </Field>
 
-          <div className="auth-body">
-            {error && (
-              <div className="alert-auth">
-                <AlertCircle size={16} style={{ flexShrink: 0, marginTop: '2px' }} />
-                <span>{error}</span>
-              </div>
-            )}
-
-            <form onSubmit={handleSubmit}>
-              <div className="form-group">
-                <label className="form-label">Workspace name</label>
-                <div className="form-control-wrap">
-                  <Building2 size={16} className="form-control-icon" />
-                  <input
-                    type="text"
-                    className="form-control"
-                    placeholder="Acme Co."
-                    value={tenantName}
-                    onChange={(e) => setTenantName(e.target.value)}
-                    autoFocus
-                    required
-                  />
-                </div>
-              </div>
-
-              <div className="form-group">
-                <label className="form-label">Email address</label>
-                <div className="form-control-wrap">
-                  <Mail size={16} className="form-control-icon" />
-                  <input
-                    type="email"
-                    className="form-control"
-                    placeholder="you@company.com"
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                    required
-                  />
-                </div>
-              </div>
-
-              <div className="form-group">
-                <label className="form-label">Password</label>
-                <div className="form-control-wrap">
-                  <Lock size={16} className="form-control-icon" />
-                  <input
-                    type="password"
-                    className="form-control"
-                    placeholder="At least 8 characters"
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    minLength={8}
-                    required
-                  />
-                </div>
-              </div>
-
-              <button type="submit" className="btn btn-primary auth-btn" disabled={loading}>
-                {loading ? <RefreshCw size={18} style={{ animation: 'spin 1s linear infinite' }} /> : 'Create workspace'}
-              </button>
-            </form>
-
-            <div className="auth-footer">
-              <span>
-                Already have an account?{' '}
-                <Link href="/login" className="auth-toggle-link">Log in</Link>
-              </span>
+        <Field label="Password" hint="At least 8 characters.">
+          <Input
+            type="password"
+            icon={Lock}
+            placeholder="••••••••"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            minLength={8}
+            required
+          />
+          {strength && (
+            <div className="flex items-center gap-1.5 mt-1.5">
+              {['weak', 'ok', 'strong'].map((level, i) => (
+                <span
+                  key={level}
+                  className={cx(
+                    'h-0.5 flex-1 rounded-full transition-colors',
+                    (strength === 'weak' && i === 0) ||
+                      (strength === 'ok' && i <= 1) ||
+                      strength === 'strong'
+                      ? strength === 'weak'
+                        ? 'bg-danger'
+                        : strength === 'ok'
+                        ? 'bg-warning'
+                        : 'bg-success'
+                      : 'bg-hairline'
+                  )}
+                />
+              ))}
             </div>
+          )}
+        </Field>
+
+        <Button type="submit" variant="primary" size="lg" full loading={loading}>
+          Create workspace
+        </Button>
+      </form>
+
+      <div className="mt-6 flex items-center gap-2">
+        {STEPS.map((step, i) => (
+          <div key={step} className="flex items-center gap-2 min-w-0">
+            <span
+              className={cx(
+                'text-[10px] tabular-nums w-4 h-4 rounded-full flex items-center justify-center shrink-0',
+                i === 0 ? 'bg-brand text-white font-medium' : 'bg-sunken text-subtle border border-hairline'
+              )}
+            >
+              {i + 1}
+            </span>
+            <span className={cx('text-[10px] truncate', i === 0 ? 'text-ink font-medium' : 'text-subtle')}>
+              {step}
+            </span>
+            {i < STEPS.length - 1 && <span className="w-3 h-px bg-hairline shrink-0" />}
           </div>
-        </div>
+        ))}
       </div>
-    </div>
+
+      <p className="text-xs text-muted mt-6">
+        Already have an account?{' '}
+        <Link href="/login" className="text-brand font-medium hover:underline">
+          Log in
+        </Link>
+      </p>
+    </AuthShell>
   );
 }

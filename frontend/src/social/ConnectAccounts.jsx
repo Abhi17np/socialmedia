@@ -1,8 +1,24 @@
 'use client';
 
 import React, { useEffect, useRef, useState } from 'react';
-import { RefreshCw, Link2, Unlink } from 'lucide-react';
+import { RefreshCw, Link2, Unlink, HelpCircle } from 'lucide-react';
 import { SOCIAL_API_BASE, PLATFORM_LABELS, AVAILABLE_PLATFORMS } from './api';
+import { Page, PageBar, PageBody } from '../ui/page';
+import {
+  Button, IconButton, Panel, Input, Field, Chip, Banner, Skeleton, ConfirmDialog
+} from '../ui';
+import { ChannelTile, channelLabel } from '../ui/channel';
+
+// What connecting each channel actually buys — shown on the card so the
+// choice isn't just a logo and a button.
+const CHANNEL_BLURB = {
+  youtube: 'Publish videos and read channel analytics.',
+  google_business: 'Post local updates and collect reviews into the inbox.',
+  facebook: 'Publish to a page, and pull comments into the inbox.',
+  instagram: 'Publish photos and reels, and pull comments and DMs in.',
+  linkedin: 'Publish to a personal profile (page posting needs review).',
+  whatsapp: 'Two-way messaging in the inbox. Messaging only — no posts.'
+};
 
 // Loads the Facebook JS SDK once (idempotent — safe to call on every
 // mount). Needed only for WhatsApp's Embedded Signup button below; every
@@ -23,14 +39,12 @@ function loadFacebookSdk() {
   });
 }
 
-// Mirrors the Supabase Connection Manager panel's UX (App.jsx's
-// currentView === 'settings' block) — same header-container/config-grid/
-// config-card shapes, just OAuth-connect instead of paste-a-key.
 function ConnectAccounts({ authFetch }) {
   const [accounts, setAccounts] = useState(null);
   const [brand, setBrand] = useState('infopace');
   const [connectingPlatform, setConnectingPlatform] = useState(null);
   const [banner, setBanner] = useState(null);
+  const [confirmDisconnect, setConfirmDisconnect] = useState(null);
 
   // WhatsApp Embedded Signup's popup reports which WABA/phone number was
   // picked via a postMessage event (captured here), separately from
@@ -50,7 +64,10 @@ function ConnectAccounts({ authFetch }) {
         // 'FINISH_WHATSAPP_BUSINESS_APP_ONBOARDING' instead, and its data
         // can omit phone_number_id — completeEmbeddedSignup() on the
         // backend resolves that from waba_id when it's missing.
-        if (data.type === 'WA_EMBEDDED_SIGNUP' && (data.event === 'FINISH' || data.event === 'FINISH_WHATSAPP_BUSINESS_APP_ONBOARDING')) {
+        if (
+          data.type === 'WA_EMBEDDED_SIGNUP' &&
+          (data.event === 'FINISH' || data.event === 'FINISH_WHATSAPP_BUSINESS_APP_ONBOARDING')
+        ) {
           embeddedSignupDataRef.current = data.data; // { phone_number_id?, waba_id }
         }
       } catch (err) {
@@ -80,7 +97,8 @@ function ConnectAccounts({ authFetch }) {
     const params = new URLSearchParams(window.location.search);
     const connected = params.get('social_connected');
     const error = params.get('social_error');
-    if (connected) setBanner({ type: 'success', text: `${PLATFORM_LABELS[connected] || connected} connected.` });
+    if (connected)
+      setBanner({ type: 'success', text: `${PLATFORM_LABELS[connected] || connected} connected.` });
     if (error) setBanner({ type: 'error', text: error });
     if (connected || error) {
       window.history.replaceState({}, '', window.location.pathname);
@@ -96,7 +114,9 @@ function ConnectAccounts({ authFetch }) {
     }
     setConnectingPlatform(platform);
     try {
-      const res = await authFetch(`${SOCIAL_API_BASE}/connect/${platform}?brand=${encodeURIComponent(brand.trim())}`);
+      const res = await authFetch(
+        `${SOCIAL_API_BASE}/connect/${platform}?brand=${encodeURIComponent(brand.trim())}`
+      );
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Could not start the connect flow.');
       window.location.href = data.url; // leaves the app for the platform's OAuth consent screen
@@ -137,7 +157,9 @@ function ConnectAccounts({ authFetch }) {
               throw new Error('WhatsApp Embedded Signup was cancelled or did not complete.');
             }
             if (!embeddedSignupDataRef.current || !embeddedSignupDataRef.current.waba_id) {
-              throw new Error('Did not receive a WhatsApp Business Account selection from the signup popup — please try again.');
+              throw new Error(
+                'Did not receive a WhatsApp Business Account selection from the signup popup — please try again.'
+              );
             }
             const { waba_id: wabaId, phone_number_id: phoneNumberId } = embeddedSignupDataRef.current;
 
@@ -175,106 +197,161 @@ function ConnectAccounts({ authFetch }) {
     }
   };
 
-  const disconnect = async (accountId) => {
-    if (!confirm('Disconnect this account? Scheduled posts already targeting it will fail until reconnected.')) return;
+  const disconnect = async (account) => {
     try {
-      const res = await authFetch(`${SOCIAL_API_BASE}/accounts/${accountId}/disconnect`, { method: 'POST' });
+      const res = await authFetch(`${SOCIAL_API_BASE}/accounts/${account.id}/disconnect`, { method: 'POST' });
       if (!res.ok) throw new Error('Could not disconnect account.');
       loadAccounts();
     } catch (err) {
       setBanner({ type: 'error', text: err.message });
+    } finally {
+      setConfirmDisconnect(null);
     }
   };
 
   const accountsByPlatform = {};
-  (accounts || []).forEach(a => {
+  (accounts || []).forEach((a) => {
     if (a.status !== 'active') return;
     (accountsByPlatform[a.platform] = accountsByPlatform[a.platform] || []).push(a);
   });
 
+  const totalConnected = Object.values(accountsByPlatform).reduce((n, list) => n + list.length, 0);
+
   return (
-    <div>
-      <div className="header-container">
-        <div className="title-area">
-          <h1>Connect Accounts</h1>
-          <p>Connect real platform accounts to publish, monitor, and reply from this dashboard.</p>
-        </div>
-        <button className="btn btn-secondary btn-sm" onClick={loadAccounts}>
-          <RefreshCw size={14} /> Refresh
-        </button>
-      </div>
+    <Page>
+      <PageBar
+        title="Channels"
+        count={accounts === null ? undefined : `${totalConnected} connected`}
+        actions={<IconButton icon={RefreshCw} label="Refresh" onClick={loadAccounts} />}
+      />
 
-      {banner && (
-        <p style={{ color: banner.type === 'success' ? 'var(--accent-success)' : 'var(--accent-danger)', marginBottom: '1rem' }}>
-          {banner.text}
-        </p>
-      )}
+      <PageBody>
+        {banner && (
+          <Banner
+            tone={banner.type === 'success' ? 'success' : 'danger'}
+            action={
+              <Button size="sm" onClick={() => setBanner(null)}>
+                Dismiss
+              </Button>
+            }
+          >
+            {banner.text}
+          </Banner>
+        )}
 
-      <div className="form-group" style={{ maxWidth: 320, marginBottom: '1.5rem' }}>
-        <label>Brand</label>
-        <input
-          type="text"
-          className="form-control"
-          placeholder="e.g. infopace"
-          value={brand}
-          onChange={(e) => setBrand(e.target.value)}
-        />
-      </div>
+        <Panel className="p-4">
+          <Field
+            label="Brand"
+            hint="Accounts are connected under a brand, so one workspace can run several."
+            className="max-w-xs"
+          >
+            <Input placeholder="e.g. infopace" value={brand} onChange={(e) => setBrand(e.target.value)} />
+          </Field>
+        </Panel>
 
-      {accounts === null ? (
-        <div className="trend-chart-empty">Loading connected accounts...</div>
-      ) : (
-        <div className="config-grid">
-          {AVAILABLE_PLATFORMS.map(platform => {
-            const connected = accountsByPlatform[platform] || [];
-            return (
-              <div className="config-card" key={platform}>
-                <div className="config-header">
-                  <h3>{PLATFORM_LABELS[platform]}</h3>
-                  <span className={`mode-badge ${connected.length > 0 ? 'live' : 'mock'}`}>
-                    {connected.length > 0 ? `${connected.length} connected` : 'not connected'}
-                  </span>
-                </div>
-
-                {connected.map(a => (
-                  <div key={a.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.5rem 0', borderBottom: '1px solid var(--border-color)' }}>
-                    <div>
-                      <div style={{ fontWeight: 600 }}>{a.account_label || a.id}</div>
-                      <div style={{ fontSize: '0.78rem', color: 'var(--text-secondary)' }}>Brand: {a.brand}</div>
+        {accounts === null ? (
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5">
+            <Skeleton className="h-40 rounded-card" />
+            <Skeleton className="h-40 rounded-card" />
+            <Skeleton className="h-40 rounded-card" />
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5 items-start">
+            {AVAILABLE_PLATFORMS.map((platform) => {
+              const connected = accountsByPlatform[platform] || [];
+              const busy = connectingPlatform === platform;
+              return (
+                <Panel key={platform}>
+                  <div className="p-4 flex items-start gap-3">
+                    <ChannelTile platform={platform} size={34} />
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center justify-between gap-2">
+                        <h3 className="text-xs font-semibold text-ink truncate">
+                          {channelLabel(platform)}
+                        </h3>
+                        <Chip tone={connected.length > 0 ? 'success' : 'neutral'}>
+                          {connected.length > 0 ? `${connected.length} connected` : 'Not connected'}
+                        </Chip>
+                      </div>
+                      <p className="text-[11px] text-muted leading-relaxed mt-1">
+                        {CHANNEL_BLURB[platform]}
+                      </p>
                     </div>
-                    <button className="btn btn-secondary btn-sm" onClick={() => disconnect(a.id)}>
-                      <Unlink size={14} /> Disconnect
-                    </button>
                   </div>
-                ))}
 
-                <div style={{ marginTop: '1rem', display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
-                  <button
-                    className="btn btn-primary btn-sm"
-                    disabled={connectingPlatform === platform}
-                    onClick={() => connect(platform)}
-                  >
-                    <Link2 size={14} /> {connectingPlatform === platform
-                      ? 'Redirecting...'
-                      : connected.length > 0 ? `Connect another ${PLATFORM_LABELS[platform]} account` : `Connect ${PLATFORM_LABELS[platform]}`}
-                  </button>
-                  {platform === 'whatsapp' && (
-                    <button
-                      className="btn btn-secondary btn-sm"
-                      disabled={connectingPlatform === platform}
-                      onClick={connectWhatsAppEmbedded}
-                      title="Use this if webhook messages aren't arriving after a plain Connect WhatsApp — it explicitly subscribes this app to the WABA's webhook events."
-                    >
-                      <Link2 size={14} /> {connectingPlatform === platform ? 'Connecting...' : 'Connect via Embedded Signup'}
-                    </button>
+                  {connected.length > 0 && (
+                    <div className="border-t border-hairline">
+                      {connected.map((a) => (
+                        <div
+                          key={a.id}
+                          className="px-4 py-2.5 border-b border-hairline last:border-0 flex items-center justify-between gap-3"
+                        >
+                          <div className="min-w-0">
+                            <div className="text-xs font-medium text-ink truncate">
+                              {a.account_label || a.id}
+                            </div>
+                            <div className="text-[11px] text-subtle flex items-center gap-1.5">
+                              <span className="w-1.5 h-1.5 rounded-full bg-success" />
+                              Token valid · brand {a.brand}
+                            </div>
+                          </div>
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            icon={Unlink}
+                            onClick={() => setConfirmDisconnect(a)}
+                          >
+                            Disconnect
+                          </Button>
+                        </div>
+                      ))}
+                    </div>
                   )}
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      )}
-    </div>
+
+                  <div className="p-3 border-t border-hairline flex items-center gap-2 flex-wrap">
+                    <Button
+                      variant={connected.length > 0 ? 'secondary' : 'primary'}
+                      size="sm"
+                      icon={Link2}
+                      loading={busy}
+                      onClick={() => connect(platform)}
+                    >
+                      {busy
+                        ? 'Redirecting…'
+                        : connected.length > 0
+                        ? 'Connect another'
+                        : `Connect ${channelLabel(platform)}`}
+                    </Button>
+                    {platform === 'whatsapp' && (
+                      <Button
+                        size="sm"
+                        icon={HelpCircle}
+                        disabled={busy}
+                        onClick={connectWhatsAppEmbedded}
+                        title="Use this if webhook messages aren't arriving after a plain connect — it explicitly subscribes this app to the WABA's webhook events."
+                      >
+                        Embedded signup
+                      </Button>
+                    )}
+                  </div>
+                </Panel>
+              );
+            })}
+          </div>
+        )}
+      </PageBody>
+
+      <ConfirmDialog
+        open={!!confirmDisconnect}
+        title="Disconnect this account?"
+        body={`${
+          confirmDisconnect?.account_label || 'This account'
+        } will stop syncing, and any scheduled post already targeting it will fail until it's reconnected.`}
+        confirmLabel="Disconnect"
+        onCancel={() => setConfirmDisconnect(null)}
+        onConfirm={() => disconnect(confirmDisconnect)}
+      />
+    </Page>
   );
 }
 

@@ -1,12 +1,15 @@
 import React from 'react';
-import { PLATFORM_LABELS, PLATFORM_COLORS } from './api';
+import { PLATFORM_LABELS } from './api';
 
-// Real brand marks (paths sourced from the platforms' official logo sets),
-// swapped in for the old dot+text-label filter pills. LinkedIn isn't in
-// simple-icons (removed after a trademark request), so it uses the
-// Font Awesome Free glyph instead — hence the different viewBox.
+// Real brand marks (paths sourced from the platforms' official logo sets).
+// LinkedIn isn't in simple-icons (removed after a trademark request), so it
+// uses the Font Awesome Free glyph instead — hence the different viewBox.
 // google_business reuses the Google "G" mark; there's no distinct public
 // logo for Google Business Profile itself.
+//
+// Under the Calm Precision system these glyphs only ever appear as small
+// channel stamps, avatar badges and presence dots — never as a large
+// colored fill. The wrappers that enforce that live in src/ui/channel.jsx.
 const ICON_DATA = {
   youtube: {
     viewBox: '0 0 24 24',
@@ -34,74 +37,22 @@ const ICON_DATA = {
   }
 };
 
-function hexToRgba(hex, alpha) {
-  const clean = (hex || '#5b6478').replace('#', '');
-  const full = clean.length === 3 ? clean.split('').map(c => c + c).join('') : clean;
-  const int = parseInt(full, 16);
-  const r = (int >> 16) & 255;
-  const g = (int >> 8) & 255;
-  const b = int & 255;
-  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
-}
-
-export function PlatformIcon({ platform, size = 18 }) {
+export function PlatformIcon({ platform, size = 16, className }) {
   const data = ICON_DATA[platform];
   if (!data) {
-    return <span style={{ fontSize: size * 0.55, fontWeight: 700, lineHeight: 1 }}>{(PLATFORM_LABELS[platform] || platform || '?')[0].toUpperCase()}</span>;
+    return (
+      <span
+        className={className}
+        style={{ fontSize: size * 0.62, fontWeight: 600, lineHeight: 1 }}
+      >
+        {(PLATFORM_LABELS[platform] || platform || '?')[0].toUpperCase()}
+      </span>
+    );
   }
   return (
-    <svg width={size} height={size} viewBox={data.viewBox} aria-hidden="true">
+    <svg width={size} height={size} viewBox={data.viewBox} className={className} aria-hidden="true">
       <path fill="currentColor" d={data.path} />
     </svg>
-  );
-}
-
-// Glassmorphism icon button, brand-tinted per platform, with a hover tooltip
-// and fill sweep — same visual language as the Uiverse.io reference this
-// was adapted from, minus the raw <ul>/<a> markup so it drops into a React
-// filter toolbar instead of a standalone social-link widget.
-export function PlatformIconButton({ platform, active, onClick, size = 20 }) {
-  const brand = PLATFORM_COLORS[platform] || '#5b6478';
-  const style = {
-    '--brand': brand,
-    '--brand-wash': hexToRgba(brand, 0.14),
-    '--brand-border': hexToRgba(brand, 0.5),
-    '--brand-glow': hexToRgba(brand, 0.45)
-  };
-  return (
-    <div className="platform-icon-item">
-      <button
-        type="button"
-        className={`platform-icon-btn ${active ? 'active' : ''}`}
-        style={style}
-        onClick={onClick}
-        aria-label={PLATFORM_LABELS[platform] || platform}
-        aria-pressed={!!active}
-      >
-        <span className="platform-icon-fill" />
-        <PlatformIcon platform={platform} size={size} />
-      </button>
-      <span className="platform-icon-tooltip">{PLATFORM_LABELS[platform] || platform}</span>
-    </div>
-  );
-}
-
-// Filter row: "All" plus one brand-icon button per platform. Used anywhere
-// posts/messages are filtered by platform (Posts, Inbox).
-export function PlatformFilterTabs({ platforms, value, onChange }) {
-  return (
-    <div className="platform-icon-tabs">
-      <button
-        type="button"
-        className={`platform-icon-all ${value === '' ? 'active' : ''}`}
-        onClick={() => onChange('')}
-      >
-        All
-      </button>
-      {platforms.map(p => (
-        <PlatformIconButton key={p} platform={p} active={value === p} onClick={() => onChange(p)} />
-      ))}
-    </div>
   );
 }
 

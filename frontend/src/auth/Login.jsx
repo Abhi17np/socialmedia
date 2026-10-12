@@ -3,13 +3,15 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { Share2, Mail, Lock, AlertCircle, RefreshCw, Check } from 'lucide-react';
+import { Mail, Lock } from 'lucide-react';
 import { API_BASE } from '../apiBase';
+import AuthShell from './AuthShell';
+import { Button, Input, Field, Banner } from '../ui';
 
-const FEATURES = [
-  'One inbox for WhatsApp, Instagram and Facebook',
-  'Every conversation tied to a real customer record',
-  'Schedule once, publish to every connected channel'
+const POINTS = [
+  'One inbox for WhatsApp, Instagram, Facebook, LinkedIn, YouTube and Google Business.',
+  'Every conversation tied to one real customer record, across every channel.',
+  'Schedule once, publish everywhere, and see what it earned.'
 ];
 
 export default function Login() {
@@ -41,92 +43,51 @@ export default function Login() {
   };
 
   return (
-    <div className="auth-split">
-      <div className="auth-brand-panel">
-        <div className="auth-brand-mark">
-          <span className="auth-brand-mark-icon"><Share2 size={16} /></span>
-          Social Hub
-        </div>
+    <AuthShell
+      headline="Every channel, one inbox. One customer, one history."
+      sub="The messaging and scheduling layer other tools treat as an afterthought — built here as the whole point."
+      points={POINTS}
+    >
+      <h1 className="text-[22px] font-semibold tracking-tight text-ink">Welcome back</h1>
+      <p className="text-xs text-muted mt-1">Log in to your workspace</p>
 
-        <div className="auth-brand-copy">
-          <h2>Every channel, one inbox. One customer, one history.</h2>
-          <p>The messaging and scheduling layer other tools treat as an afterthought — built as the whole point.</p>
-          <div className="auth-brand-feature-list">
-            {FEATURES.map(f => (
-              <div className="auth-brand-feature" key={f}>
-                <span className="auth-brand-feature-icon"><Check size={12} /></span>
-                {f}
-              </div>
-            ))}
-          </div>
-        </div>
+      <form onSubmit={handleSubmit} className="mt-7 flex flex-col gap-4">
+        {error && <Banner tone="danger">{error}</Banner>}
 
-        <div className="auth-brand-footer">&copy; {new Date().getFullYear()} Social Hub</div>
-      </div>
+        <Field label="Email address">
+          <Input
+            type="email"
+            icon={Mail}
+            placeholder="you@company.com"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            autoFocus
+            required
+          />
+        </Field>
 
-      <div className="auth-form-panel">
-        <div className="auth-form-inner">
-          <div className="auth-header">
-            <div className="auth-logo"><Share2 size={22} /></div>
-            <h1 className="auth-title">Welcome back</h1>
-            <p className="auth-subtitle">Log in to your workspace</p>
-          </div>
+        <Field label="Password">
+          <Input
+            type="password"
+            icon={Lock}
+            placeholder="••••••••"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            required
+          />
+        </Field>
 
-          <div className="auth-body">
-            {error && (
-              <div className="alert-auth">
-                <AlertCircle size={16} style={{ flexShrink: 0, marginTop: '2px' }} />
-                <span>{error}</span>
-              </div>
-            )}
+        <Button type="submit" variant="primary" size="lg" full loading={loading}>
+          Log in
+        </Button>
+      </form>
 
-            <form onSubmit={handleSubmit}>
-              <div className="form-group">
-                <label className="form-label">Email address</label>
-                <div className="form-control-wrap">
-                  <Mail size={16} className="form-control-icon" />
-                  <input
-                    type="email"
-                    className="form-control"
-                    placeholder="you@company.com"
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                    autoFocus
-                    required
-                  />
-                </div>
-              </div>
-
-              <div className="form-group">
-                <label className="form-label">Password</label>
-                <div className="form-control-wrap">
-                  <Lock size={16} className="form-control-icon" />
-                  <input
-                    type="password"
-                    className="form-control"
-                    placeholder="••••••••"
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    required
-                  />
-                </div>
-              </div>
-
-              <button type="submit" className="btn btn-primary auth-btn" disabled={loading}>
-                {loading ? <RefreshCw size={18} style={{ animation: 'spin 1s linear infinite' }} /> : 'Log in'}
-              </button>
-            </form>
-
-            <div className="auth-footer" style={{ flexDirection: 'column', gap: '0.5rem' }}>
-              <Link href="/forgot-password" className="auth-toggle-link">Forgot your password?</Link>
-              <span>
-                No account yet?{' '}
-                <Link href="/signup" className="auth-toggle-link">Create a workspace</Link>
-              </span>
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
+      <p className="text-xs text-muted mt-6">
+        No account yet?{' '}
+        <Link href="/signup" className="text-brand font-medium hover:underline">
+          Create a workspace
+        </Link>
+      </p>
+    </AuthShell>
   );
 }

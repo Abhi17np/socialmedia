@@ -2,39 +2,52 @@
 
 import { useState, useCallback, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { Shield, LogOut, RefreshCw, Search } from 'lucide-react';
+import { Shield, LogOut, RefreshCw, Search, Building2 } from 'lucide-react';
 import { API_BASE } from '../apiBase';
+import {
+  Panel, Table, Th, Td, Input, Chip, Banner, EmptyState, Skeleton, cx
+} from '../ui';
 
 function UsageCell({ used, limit }) {
   const unlimited = limit === null || limit === undefined || !Number.isFinite(limit);
   const pct = unlimited ? 0 : Math.min(100, Math.round((used / limit) * 100));
   const warn = !unlimited && pct >= 80;
   return (
-    <span style={{ color: warn ? 'var(--accent-warning)' : 'var(--text-secondary)', fontWeight: warn ? 600 : 400 }}>
-      {used}{unlimited ? '' : ` / ${limit}`}
+    <span className={cx('tabular-nums', warn ? 'text-warning font-medium' : 'text-muted')}>
+      {used}
+      {unlimited ? '' : ` / ${limit}`}
     </span>
   );
 }
 
-const STATUS_COLOR = { active: 'var(--accent-success)', past_due: 'var(--accent-warning)', canceled: 'var(--accent-danger)' };
+const STATUS_TONE = { active: 'success', past_due: 'warning', canceled: 'danger' };
 
 // The "I'm giving my product to a client, I need to see what they're
 // doing" view: every tenant, their plan, and their usage against it, in
 // one list. app/platform/page.jsx owns the auth check (redirects to
 // /platform/login if there's no platform_token) before this ever mounts.
+//
+// Kept on slate chrome rather than the indigo app shell so it's obvious
+// at a glance that this is not the customer-facing product.
 export default function PlatformDashboard({ token }) {
   const router = useRouter();
   const [tenants, setTenants] = useState(null);
   const [error, setError] = useState(null);
   const [query, setQuery] = useState('');
 
-  const authFetch = useCallback((url) => fetch(url, { headers: { Authorization: `Bearer ${token}` } }), [token]);
+  const authFetch = useCallback(
+    (url) => fetch(url, { headers: { Authorization: `Bearer ${token}` } }),
+    [token]
+  );
 
   const load = useCallback(() => {
     authFetch(`${API_BASE}/platform/tenants`)
-      .then(res => res.json().then(body => ({ ok: res.ok, body })))
-      .then(({ ok, body }) => { if (!ok) throw new Error(body.error); setTenants(body.tenants); })
-      .catch(err => setError(err.message));
+      .then((res) => res.json().then((body) => ({ ok: res.ok, body })))
+      .then(({ ok, body }) => {
+        if (!ok) throw new Error(body.error);
+        setTenants(body.tenants);
+      })
+      .catch((err) => setError(err.message));
   }, [authFetch]);
 
   useEffect(load, [load]);
@@ -44,96 +57,127 @@ export default function PlatformDashboard({ token }) {
     router.push('/platform/login');
   };
 
-  const filtered = (tenants || []).filter(t => t.name.toLowerCase().includes(query.toLowerCase()));
+  const filtered = (tenants || []).filter((t) => t.name.toLowerCase().includes(query.toLowerCase()));
 
   return (
-    <div className="dashboard-container">
-      <aside className="sidebar" style={{ background: '#0b0c14' }}>
-        <div className="logo-container">
-          <div className="logo-icon" style={{ background: '#2f3042' }}><Shield size={18} /></div>
-          {/* theme.css's .logo-text override assumes the tenant app's now-light
-              sidebar (dark text) — this console keeps the old dark sidebar on
-              purpose (a visual signal this isn't the customer-facing app), so
-              it needs its own white text here rather than inheriting that rule. */}
-          <span className="logo-text" style={{ color: '#ffffff' }}>Platform Admin</span>
+    <div className="h-full flex flex-col bg-canvas">
+      <header className="h-14 shrink-0 bg-[#0b0c14] px-4 flex items-center justify-between gap-3">
+        <div className="flex items-center gap-2.5 min-w-0">
+          <span className="w-6 h-6 rounded bg-[#2f3042] text-white flex items-center justify-center shrink-0">
+            <Shield size={14} />
+          </span>
+          <span className="text-sm font-semibold text-white tracking-tight">Social Hub · Internal</span>
+          <span className="text-[11px] text-white/40 hidden sm:block">All tenants</span>
         </div>
-        <div className="menu-section">
-          <div className="menu-title">Infopace Internal</div>
-          <ul className="menu-list">
-            <li className="menu-item"><div className="menu-link active">All Tenants</div></li>
-          </ul>
-        </div>
-        <div className="sidebar-user-profile">
-          <button className="btn btn-secondary btn-sm" onClick={handleLogout} style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem' }}>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={load}
+            className="w-8 h-8 rounded-ui border border-white/10 text-white/60 hover:text-white hover:bg-white/5 flex items-center justify-center transition-colors"
+            title="Refresh"
+          >
+            <RefreshCw size={16} />
+          </button>
+          <button
+            onClick={handleLogout}
+            className="h-8 px-3 rounded-ui border border-white/10 text-white/70 hover:text-white hover:bg-white/5 text-xs font-medium flex items-center gap-1.5 transition-colors"
+          >
             <LogOut size={14} /> Log out
           </button>
         </div>
-      </aside>
+      </header>
 
-      <main className="main-content">
-        <div className="header-container">
-          <div className="title-area">
-            <h1>All Tenants</h1>
-            <p>Every customer workspace running on Social Hub — plan, seats, and usage against their limit.</p>
-          </div>
-          <button className="btn btn-secondary btn-sm" onClick={load}><RefreshCw size={14} /> Refresh</button>
-        </div>
+      <div className="flex-1 overflow-y-auto">
+        <div className="px-6 py-5 max-w-[1280px] flex flex-col gap-5">
+          {error && <Banner tone="danger">{error}</Banner>}
 
-        {error && <p style={{ color: 'var(--accent-danger)', marginBottom: '1rem' }}>{error}</p>}
-
-        <div className="table-section">
-          <div className="table-header">
-            <div className="form-control-wrap" style={{ maxWidth: 280 }}>
-              <Search size={16} className="form-control-icon" />
-              <input className="form-control" placeholder="Search tenants…" value={query} onChange={(e) => setQuery(e.target.value)} />
+          <Panel className="overflow-hidden">
+            <div className="h-11 px-4 flex items-center justify-between gap-3 border-b border-hairline">
+              <div className="w-full max-w-[280px]">
+                <Input
+                  icon={Search}
+                  placeholder="Search tenants…"
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                />
+              </div>
+              <span className="text-[11px] text-subtle tabular-nums shrink-0">
+                {tenants === null ? 'Loading…' : `${filtered.length} tenant${filtered.length === 1 ? '' : 's'}`}
+              </span>
             </div>
-            <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
-              {tenants === null ? 'Loading…' : `${filtered.length} tenant${filtered.length === 1 ? '' : 's'}`}
-            </div>
-          </div>
 
-          {tenants === null ? (
-            <div style={{ textAlign: 'center', padding: '3rem', color: 'var(--text-muted)' }}>Loading…</div>
-          ) : filtered.length === 0 ? (
-            <div style={{ textAlign: 'center', padding: '3rem', color: 'var(--text-muted)' }}>No tenants yet.</div>
-          ) : (
-            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-              <thead>
-                <tr style={{ textAlign: 'left', borderBottom: '1px solid var(--border-color)' }}>
-                  <th style={{ padding: '0.75rem 1rem' }}>Workspace</th>
-                  <th style={{ padding: '0.75rem 1rem' }}>Plan</th>
-                  <th style={{ padding: '0.75rem 1rem' }}>Status</th>
-                  <th style={{ padding: '0.75rem 1rem' }}>Seats</th>
-                  <th style={{ padding: '0.75rem 1rem' }}>Accounts</th>
-                  <th style={{ padding: '0.75rem 1rem' }}>Posts (mo.)</th>
-                  <th style={{ padding: '0.75rem 1rem' }}>WhatsApp (mo.)</th>
-                  <th style={{ padding: '0.75rem 1rem' }}>AI drafts (mo.)</th>
-                  <th style={{ padding: '0.75rem 1rem' }}>Created</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filtered.map(t => (
-                  <tr key={t.id} style={{ borderBottom: '1px solid var(--border-color)' }}>
-                    <td style={{ padding: '0.75rem 1rem', fontWeight: 600 }}>{t.name}</td>
-                    <td style={{ padding: '0.75rem 1rem', textTransform: 'capitalize' }}>{t.plan}</td>
-                    <td style={{ padding: '0.75rem 1rem' }}>
-                      <span style={{ color: STATUS_COLOR[t.subscription_status] || 'var(--text-secondary)', fontWeight: 600, fontSize: '0.8rem' }}>
-                        {t.subscription_status}
-                      </span>
-                    </td>
-                    <td style={{ padding: '0.75rem 1rem' }}>{t.userCount}</td>
-                    <td style={{ padding: '0.75rem 1rem' }}><UsageCell used={t.accountCount} limit={t.accountLimit} /></td>
-                    <td style={{ padding: '0.75rem 1rem' }}><UsageCell used={t.postsThisMonth} limit={t.postsLimit} /></td>
-                    <td style={{ padding: '0.75rem 1rem' }}><UsageCell used={t.whatsappMessagesThisMonth} limit={t.whatsappLimit} /></td>
-                    <td style={{ padding: '0.75rem 1rem' }}><UsageCell used={t.aiGenerationsThisMonth} limit={t.aiGenerationsLimit} /></td>
-                    <td style={{ padding: '0.75rem 1rem', color: 'var(--text-secondary)' }}>{new Date(t.created_at).toLocaleDateString()}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
+            {tenants === null ? (
+              <div className="p-4 space-y-3">
+                <Skeleton className="h-9" />
+                <Skeleton className="h-9" />
+                <Skeleton className="h-9" />
+              </div>
+            ) : filtered.length === 0 ? (
+              <EmptyState
+                icon={Building2}
+                title={query ? 'No tenants match' : 'No tenants yet'}
+                description={query ? 'Try a different search.' : 'Workspaces appear here as soon as someone signs up.'}
+              />
+            ) : (
+              <div className="overflow-x-auto">
+                <Table>
+                  <thead>
+                    <tr>
+                      <Th>Workspace</Th>
+                      <Th>Plan</Th>
+                      <Th>Status</Th>
+                      <Th align="right">Seats</Th>
+                      <Th align="right">Channels</Th>
+                      <Th align="right">Posts (mo.)</Th>
+                      <Th align="right">WhatsApp (mo.)</Th>
+                      <Th align="right">AI drafts (mo.)</Th>
+                      <Th align="right">Created</Th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filtered.map((t) => (
+                      <tr key={t.id} className="hover:bg-canvas transition-colors last:[&>td]:border-0">
+                        <Td>
+                          <span className="font-medium">{t.name}</span>
+                        </Td>
+                        <Td>
+                          <span className="capitalize text-muted">{t.plan}</span>
+                        </Td>
+                        <Td>
+                          <Chip tone={STATUS_TONE[t.subscription_status] || 'neutral'}>
+                            {t.subscription_status}
+                          </Chip>
+                        </Td>
+                        <Td align="right">{t.userCount}</Td>
+                        <Td align="right">
+                          <UsageCell used={t.accountCount} limit={t.accountLimit} />
+                        </Td>
+                        <Td align="right">
+                          <UsageCell used={t.postsThisMonth} limit={t.postsLimit} />
+                        </Td>
+                        <Td align="right">
+                          <UsageCell used={t.whatsappMessagesThisMonth} limit={t.whatsappLimit} />
+                        </Td>
+                        <Td align="right">
+                          <UsageCell used={t.aiGenerationsThisMonth} limit={t.aiGenerationsLimit} />
+                        </Td>
+                        <Td align="right">
+                          <span className="text-muted">
+                            {new Date(t.created_at).toLocaleDateString(undefined, {
+                              day: 'numeric',
+                              month: 'short',
+                              year: 'numeric'
+                            })}
+                          </span>
+                        </Td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </Table>
+              </div>
+            )}
+          </Panel>
         </div>
-      </main>
+      </div>
     </div>
   );
 }
