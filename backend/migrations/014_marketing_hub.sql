@@ -49,7 +49,7 @@ create table if not exists automation_rules (
   name text not null,
   trigger_type text not null,             -- 'contact_created' | 'contact_tag_added' | 'deal_stage_changed' | 'deal_won' | 'deal_lost'
   trigger_config jsonb not null default '{}'::jsonb,
-  action_type text not null,              -- 'add_tag' | 'remove_tag' | 'create_task' | 'add_to_segment'
+  action_type text not null,              -- 'add_tag' | 'remove_tag' | 'create_task'
   action_config jsonb not null default '{}'::jsonb,
   is_active boolean not null default true,
   created_by uuid references users(id),

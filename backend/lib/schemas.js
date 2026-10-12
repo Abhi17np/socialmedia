@@ -143,6 +143,28 @@ const companySchema = z.object({
   ownerId: z.string().uuid().optional()
 });
 
+const contactSchema = z.object({
+  displayName: z.string().trim().min(1).max(200),
+  phone: z.string().trim().max(50).optional(),
+  email: z.string().trim().email().optional(),
+  companyId: z.string().uuid().optional(),
+  jobTitle: z.string().trim().max(150).optional(),
+  leadStatus: z.enum(['new', 'contacted', 'qualified', 'unqualified', 'customer']).optional(),
+  ownerId: z.string().uuid().optional(),
+  tags: z.array(z.string().trim().max(50)).max(20).optional()
+});
+
+const updateContactSchema = z.object({
+  displayName: z.string().trim().min(1).max(200).optional(),
+  phone: z.string().trim().max(50).optional(),
+  email: z.string().trim().email().optional(),
+  companyId: z.string().uuid().nullable().optional(),
+  jobTitle: z.string().trim().max(150).optional(),
+  leadStatus: z.enum(['new', 'contacted', 'qualified', 'unqualified', 'customer']).optional(),
+  ownerId: z.string().uuid().nullable().optional(),
+  tags: z.array(z.string().trim().max(50)).max(20).optional()
+}).refine(v => Object.keys(v).length > 0, { message: 'Nothing to update.' });
+
 const dealSchema = z.object({
   name: z.string().trim().min(1).max(200),
   pipelineId: z.string().uuid(),
@@ -182,7 +204,7 @@ const automationRuleSchema = z.object({
   name: z.string().trim().min(1).max(200),
   triggerType: z.enum(['contact_created', 'contact_tag_added', 'deal_stage_changed', 'deal_won', 'deal_lost']),
   triggerConfig: z.record(z.string(), z.any()).optional().default({}),
-  actionType: z.enum(['add_tag', 'remove_tag', 'create_task', 'add_to_segment']),
+  actionType: z.enum(['add_tag', 'remove_tag', 'create_task']),
   actionConfig: z.record(z.string(), z.any()).optional().default({}),
   isActive: z.boolean().optional().default(true)
 });
@@ -192,6 +214,6 @@ module.exports = {
   savedReplySchema, draftPostSchema, whatsappEmbeddedSignupSchema, inboxReplySchema, updateInteractionSchema,
   INTERACTION_STATUSES, INTERACTION_PRIORITIES, changePasswordSchema, forgotPasswordSchema, resetPasswordSchema,
   updateHubsSchema, templateSchema, segmentSchema, whatsappCampaignSchema,
-  companySchema, dealSchema, moveDealStageSchema, salesActivitySchema,
+  companySchema, contactSchema, updateContactSchema, dealSchema, moveDealStageSchema, salesActivitySchema,
   marketingCampaignSchema, automationRuleSchema
 };
