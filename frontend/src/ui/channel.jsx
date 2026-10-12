@@ -86,12 +86,12 @@ export function ChannelTile({ platform, size = 32, className }) {
  */
 export function ChannelFilterTabs({ platforms, value, onChange, counts, className }) {
   return (
-    <div className={cx('flex items-center gap-1.5 overflow-x-auto', className)}>
+    <div className={cx('flex items-center gap-2 flex-wrap', className)}>
       <button
         type="button"
         onClick={() => onChange('')}
         className={cx(
-          'h-6 px-2.5 rounded-full border text-[11px] shrink-0 transition-colors',
+          'h-8 px-3 rounded-full border text-xs shrink-0 transition-colors',
           value === ''
             ? 'bg-canvas border-hairline text-ink font-medium'
             : 'bg-card border-hairline text-muted hover:bg-canvas hover:text-ink'
@@ -108,14 +108,14 @@ export function ChannelFilterTabs({ platforms, value, onChange, counts, classNam
             onClick={() => onChange(active ? '' : p)}
             title={channelLabel(p)}
             className={cx(
-              'h-6 pl-1.5 pr-2.5 rounded-full border text-[11px] shrink-0 transition-colors',
-              'flex items-center gap-1.5',
+              'h-8 pl-2 pr-3 rounded-full border text-xs shrink-0 transition-colors',
+              'flex items-center gap-2',
               active
                 ? 'bg-canvas border-hairline text-ink font-medium'
                 : 'bg-card border-hairline text-muted hover:bg-canvas hover:text-ink'
             )}
           >
-            <ChannelDot platform={p} size={6} />
+            <ChannelDot platform={p} size={16} />
             <span>{channelLabel(p)}</span>
             {counts && counts[p] !== undefined && (
               <span className="tabular-nums text-subtle">{counts[p]}</span>

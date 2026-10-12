@@ -330,13 +330,6 @@ function Posts({ authFetch, setCurrentView }) {
             ))}
           </div>
 
-          <ChannelFilterTabs
-            platforms={AVAILABLE_PLATFORMS}
-            value={platformFilter}
-            onChange={setPlatformFilter}
-            className="flex-1 min-w-0"
-          />
-
           <Input
             className="w-32"
             placeholder="Brand"
@@ -367,6 +360,12 @@ function Posts({ authFetch, setCurrentView }) {
             </button>
           </div>
         </div>
+
+        <ChannelFilterTabs
+          platforms={AVAILABLE_PLATFORMS}
+          value={platformFilter}
+          onChange={setPlatformFilter}
+        />
 
         {posts === null ? (
           <Panel className="p-4 space-y-3">
