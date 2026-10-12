@@ -7,6 +7,7 @@
     "start": "node server.js",
     "dev": "node --watch server.js",
     "test": "node --test",
+    "test:integration": "node scripts/integration-tests/broadcast-queue.js && node scripts/integration-tests/whatsapp-routes.js && node scripts/integration-tests/sales-routes.js && node scripts/integration-tests/marketing-routes.js",
     "lint": "eslint ."
   },
   "dependencies": {

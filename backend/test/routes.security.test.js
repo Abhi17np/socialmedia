@@ -116,6 +116,84 @@ test('helmet security headers are present', async () => {
   assert.equal(res.headers['x-content-type-options'], 'nosniff');
 });
 
+// --- WhatsApp outbound (routes/whatsapp.js) — same no-DB-needed
+// reasoning as the rest of this file: requireRole runs before any
+// database call, so these are safe without a real Supabase project.
+test('viewer cannot create a WhatsApp template — requires member+', async () => {
+  const res = await request(app)
+    .post('/api/v1/whatsapp/templates')
+    .set('Authorization', `Bearer ${token('viewer')}`)
+    .send({ name: 'x', bodyText: 'y', socialAccountId: '11111111-1111-1111-1111-111111111111' });
+  assert.equal(res.status, 403);
+});
+
+test('member cannot submit a WhatsApp template for approval — requires admin+', async () => {
+  const res = await request(app)
+    .post('/api/v1/whatsapp/templates/11111111-1111-1111-1111-111111111111/submit')
+    .set('Authorization', `Bearer ${token('member')}`);
+  assert.equal(res.status, 403);
+});
+
+test('member cannot send a WhatsApp campaign — requires admin+ (sends to real recipients)', async () => {
+  const res = await request(app)
+    .post('/api/v1/whatsapp/campaigns/11111111-1111-1111-1111-111111111111/send')
+    .set('Authorization', `Bearer ${token('member')}`);
+  assert.equal(res.status, 403);
+});
+
+// --- Sales Hub / Marketing Hub (routes/sales.js, routes/marketing.js)
+// — requireHub() runs before requireRole and needs a real database to
+// check tenants.hubs_enabled, so a role-gate assertion like the ones
+// above can't run without a live Supabase project (it would always see
+// hub-check failure first). What IS safe to assert without a database:
+// requireAuth's own checks, which run before either gate.
+test('a platform-admin token is rejected by Sales Hub routes', async () => {
+  const res = await request(app)
+    .get('/api/v1/sales/companies')
+    .set('Authorization', `Bearer ${signPlatformToken({ adminId: 'admin-1' })}`);
+  assert.equal(res.status, 401);
+});
+
+test('a platform-admin token is rejected by Marketing Hub routes', async () => {
+  const res = await request(app)
+    .get('/api/v1/marketing/campaigns')
+    .set('Authorization', `Bearer ${signPlatformToken({ adminId: 'admin-1' })}`);
+  assert.equal(res.status, 401);
+});
+
+test('no token at all is rejected by Sales Hub routes', async () => {
+  const res = await request(app).get('/api/v1/sales/companies');
+  assert.equal(res.status, 401);
+});
+
+test('no token at all is rejected by Marketing Hub routes', async () => {
+  const res = await request(app).get('/api/v1/marketing/campaigns');
+  assert.equal(res.status, 401);
+});
+
+// Regression guard for a real bug: routes/sales.js and routes/marketing.js
+// originally had `router.use(requireHub(...))` as a blanket mount on the
+// router object itself. Since both routers are mounted bare (no path
+// prefix) on tenantRouter, that blanket middleware ran for EVERY request
+// that reached that router — including requests meant for the OTHER
+// Hub's routes, or any route mounted after it — before Express ever
+// tried to match a specific path pattern. Same bug class as the
+// authLimiter/requireRole mounting mistakes this app hit earlier; see
+// routes/sales.js's and routes/marketing.js's git history for the fix.
+// Guard it structurally so it can't silently come back: requireHub must
+// only ever appear as a per-route argument, never as a bare router.use().
+test('requireHub is never blanket-mounted on the Sales/Marketing Hub routers (regression guard)', () => {
+  const fs = require('node:fs');
+  for (const file of ['../routes/sales.js', '../routes/marketing.js']) {
+    const source = fs.readFileSync(require.resolve(file), 'utf8');
+    assert.doesNotMatch(
+      source,
+      /router\.use\(\s*requireHub\(/,
+      `${file} must apply requireHub() per-route (as a middleware argument on each router.get/post/patch/delete call), never as a blanket router.use() — a bare router.use(requireHub(...)) runs for every request reaching that router object, including ones meant for other routes mounted alongside it.`
+    );
+  }
+});
+
 test('the auth rate limiter returns real JSON, not express-rate-limit\'s plain-text default', async () => {
   // authLimiter's cap is 20 — exhaust it on an isolated endpoint
   // (platform login, also under authLimiter) so this doesn't affect

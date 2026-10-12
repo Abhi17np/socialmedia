@@ -1,0 +1,17 @@
+# Example PostgREST config for running the integration scripts in this
+# directory locally. Copy, adjust the db-uri password, and run:
+#   postgrest postgrest.conf.example
+#
+# These scripts expect PostgREST reachable at http://localhost:3001 with
+# the /rest/v1 prefix supabase-js always appends — PostgREST itself has
+# no path-prefix option, so put a one-line reverse proxy in front that
+# strips /rest/v1 and forwards to this server's real port, OR point
+# SUPABASE_URL_SOCIAL in your test env at this server's bare URL (no
+# /rest/v1) and accept that only raw curl against it (not supabase-js)
+# will work without the proxy. See the README for the one-time role
+# setup this config assumes (authenticator/service_role/web_anon).
+db-uri = "postgres://authenticator:test@localhost/socialhub_test"
+db-schemas = "public"
+db-anon-role = "web_anon"
+jwt-secret = "test-postgrest-jwt-secret-0123456789"
+server-port = 3002
