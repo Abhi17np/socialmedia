@@ -5,6 +5,17 @@
  */
 const { z } = require('zod');
 
+// A form field left blank arrives as "" (not absent) — plain .optional()
+// only tolerates the key being missing, so an empty string still fails
+// .email()'s format check or .uuid()'s format check. This bit every
+// optional email/uuid field fed by a <select>/<input> whose "none"
+// value is "" (segment, company, owner, contact, deal pickers across
+// Sales/Marketing/WhatsApp Hub forms) — coercing "" to undefined first
+// is what .optional() is actually meant to cover here.
+const optionalEmail = () => z.preprocess((v) => (v === '' ? undefined : v), z.string().trim().email().optional());
+const optionalUuid = () => z.preprocess((v) => (v === '' ? undefined : v), z.string().uuid().optional());
+const nullableOptionalUuid = () => z.preprocess((v) => (v === '' ? undefined : v), z.string().uuid().nullable().optional());
+
 const signupSchema = z.object({
   tenantName: z.string().trim().min(1).max(200),
   email: z.string().trim().email(),
@@ -124,7 +135,7 @@ const whatsappCampaignSchema = z.object({
   name: z.string().trim().min(1).max(200),
   socialAccountId: z.string().uuid(),
   templateId: z.string().uuid(),
-  segmentId: z.string().uuid().optional(),
+  segmentId: optionalUuid(),
   contactIds: z.array(z.string().uuid()).max(10000).optional(),
   variableValues: z.array(z.string().max(200)).max(10).optional().default([]),
   scheduledAt: z.string().datetime({ offset: true }).or(z.string().datetime()).optional()
@@ -140,24 +151,17 @@ const companySchema = z.object({
   phone: z.string().trim().max(50).optional(),
   address: z.string().trim().max(500).optional(),
   notes: z.string().trim().max(5000).optional(),
-  ownerId: z.string().uuid().optional()
+  ownerId: optionalUuid()
 });
-
-// A form field left blank arrives as "" (not absent) — plain .optional()
-// only tolerates the key being missing, so an empty string still failed
-// .email()'s format check on every "no email given" submission from the
-// New Lead form. Coercing "" to undefined first is what .optional() is
-// actually meant to cover here.
-const optionalEmail = () => z.preprocess((v) => (v === '' ? undefined : v), z.string().trim().email().optional());
 
 const contactSchema = z.object({
   displayName: z.string().trim().min(1).max(200),
   phone: z.string().trim().max(50).optional(),
   email: optionalEmail(),
-  companyId: z.string().uuid().optional(),
+  companyId: optionalUuid(),
   jobTitle: z.string().trim().max(150).optional(),
   leadStatus: z.enum(['new', 'contacted', 'qualified', 'unqualified', 'customer']).optional(),
-  ownerId: z.string().uuid().optional(),
+  ownerId: optionalUuid(),
   tags: z.array(z.string().trim().max(50)).max(20).optional()
 });
 
@@ -165,10 +169,10 @@ const updateContactSchema = z.object({
   displayName: z.string().trim().min(1).max(200).optional(),
   phone: z.string().trim().max(50).optional(),
   email: optionalEmail(),
-  companyId: z.string().uuid().nullable().optional(),
+  companyId: nullableOptionalUuid(),
   jobTitle: z.string().trim().max(150).optional(),
   leadStatus: z.enum(['new', 'contacted', 'qualified', 'unqualified', 'customer']).optional(),
-  ownerId: z.string().uuid().nullable().optional(),
+  ownerId: nullableOptionalUuid(),
   tags: z.array(z.string().trim().max(50)).max(20).optional()
 }).refine(v => Object.keys(v).length > 0, { message: 'Nothing to update.' });
 
@@ -178,9 +182,9 @@ const dealSchema = z.object({
   stageId: z.string().uuid(),
   amount: z.number().min(0).max(1e12).optional().default(0),
   currency: z.string().trim().length(3).optional().default('INR'),
-  contactId: z.string().uuid().optional(),
-  companyId: z.string().uuid().optional(),
-  ownerId: z.string().uuid().optional(),
+  contactId: optionalUuid(),
+  companyId: optionalUuid(),
+  ownerId: optionalUuid(),
   expectedCloseDate: z.string().trim().max(10).optional()
 });
 
@@ -192,17 +196,17 @@ const salesActivitySchema = z.object({
   type: z.enum(['call', 'email', 'meeting', 'note', 'task']),
   subject: z.string().trim().min(1).max(300),
   notes: z.string().trim().max(5000).optional(),
-  contactId: z.string().uuid().optional(),
-  companyId: z.string().uuid().optional(),
-  dealId: z.string().uuid().optional(),
+  contactId: optionalUuid(),
+  companyId: optionalUuid(),
+  dealId: optionalUuid(),
   dueAt: z.string().datetime({ offset: true }).or(z.string().datetime()).optional(),
-  assignedTo: z.string().uuid().optional()
+  assignedTo: optionalUuid()
 });
 
 const marketingCampaignSchema = z.object({
   name: z.string().trim().min(1).max(200),
   description: z.string().trim().max(2000).optional(),
-  segmentId: z.string().uuid().optional(),
+  segmentId: optionalUuid(),
   startDate: z.string().trim().max(10).optional(),
   endDate: z.string().trim().max(10).optional()
 });
