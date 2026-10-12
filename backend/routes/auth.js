@@ -49,18 +49,32 @@ router.post('/auth/login', validate(loginSchema), async (req, res) => {
   if (!client) return res.status(503).json({ error: 'Database not configured.' });
 
   try {
-    const { data: user, error } = await client
+    // One person can legitimately hold a user row in several tenants: the
+    // schema's constraint is unique(tenant_id, email) — per tenant, not
+    // global (migrations/001_tenants_users.sql). So this can't use
+    // .maybeSingle(), which throws PGRST116 ("multiple (or no) rows
+    // returned") the moment someone signs up for a second workspace, and
+    // that 500 then locks them out of every workspace, not just the new
+    // one. Newest workspace first, then take the row whose password
+    // actually verifies.
+    const { data: candidates, error } = await client
       .from('users')
       .select('id, tenant_id, email, password_hash, role')
       .eq('email', email.toLowerCase().trim())
-      .maybeSingle();
+      .order('created_at', { ascending: false });
     if (error) throw error;
+
+    let user = null;
+    for (const candidate of candidates || []) {
+      if (await verifyPassword(password, candidate.password_hash)) {
+        user = candidate;
+        break;
+      }
+    }
 
     // Same error for "no such user" and "wrong password" — don't leak
     // which one it was.
-    if (!user || !(await verifyPassword(password, user.password_hash))) {
-      return res.status(401).json({ error: 'Invalid email or password.' });
-    }
+    if (!user) return res.status(401).json({ error: 'Invalid email or password.' });
 
     const token = signToken({ userId: user.id, tenantId: user.tenant_id, role: user.role });
     res.json({ token });

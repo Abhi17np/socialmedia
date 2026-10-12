@@ -205,9 +205,26 @@ function start() {
   console.log('[social/queue] BullMQ worker started (concurrency 5, exponential backoff, 4 attempts).');
 }
 
+// worker.close()/queue.close() wait on BullMQ's internal Redis commands,
+// which never resolve if the connection never came up in the first
+// place (ioredis's retryStrategy above keeps it retrying indefinitely,
+// by design, for a Redis that comes up later). Without a timeout here,
+// every `node --watch` restart during local dev without Redis running
+// — an explicitly supported setup, see README — hung for the full 10s
+// of server.js's shutdown force-exit instead of a normal fast restart.
+// Timing out and disconnecting directly is safe either way: there's
+// nothing queued server-side to lose by tearing down a connection that
+// was never serving requests.
 async function stop() {
-  if (worker) { await worker.close(); worker = null; }
-  if (queue) { await queue.close(); queue = null; }
+  const CLOSE_TIMEOUT_MS = 3000;
+  await Promise.all([
+    worker ? withTimeout(worker.close(), CLOSE_TIMEOUT_MS, 'worker.close() timed out')
+      .catch(err => console.warn(`[social/queue] ${err.message} — Redis was likely never reachable.`)) : null,
+    queue ? withTimeout(queue.close(), CLOSE_TIMEOUT_MS, 'queue.close() timed out')
+      .catch(err => console.warn(`[social/queue] ${err.message} — Redis was likely never reachable.`)) : null
+  ]);
+  worker = null;
+  queue = null;
   if (connection) { connection.disconnect(); connection = null; }
 }
 

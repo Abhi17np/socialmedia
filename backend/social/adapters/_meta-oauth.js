@@ -33,7 +33,7 @@ const GRAPH_VERSION = 'v21.0';
 const GRAPH_BASE = `https://graph.facebook.com/${GRAPH_VERSION}`;
 
 function redirectUriFor(platform) {
-  const base = process.env.BACKEND_PUBLIC_URL || 'http://localhost:5000';
+  const base = process.env.BACKEND_PUBLIC_URL || 'http://localhost:5001';
   return `${base}/api/social/callback/${platform}`;
 }
 

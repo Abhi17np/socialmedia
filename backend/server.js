@@ -91,14 +91,74 @@ tenantRouter.use(teamRoutes);
 tenantRouter.use('/ai', aiLimiter, aiRoutes);
 app.use(API_PREFIX, tenantRouter);
 
-const PORT = process.env.PORT || 5000;
-app.listen(PORT, () => {
+// Last middleware in the chain: anything a route throws synchronously
+// lands here as a 500 instead of escaping to the process. lib/query.js's
+// scoped() used to throw a TypeError on every tenant route, and with no
+// handler mounted that single bad call killed the server outright —
+// `node --watch` then sat at "Waiting for file changes" and the whole
+// API stayed down until someone noticed.
+// eslint-disable-next-line no-unused-vars -- Express needs the 4-arg shape
+app.use((err, req, res, next) => {
+  (req.log || logger).error({ err }, 'Unhandled error in request');
+  if (res.headersSent) return next(err);
+  res.status(500).json({ error: 'Something went wrong.' });
+});
+
+// A rejected promise in a background sweep or a BullMQ job has no request
+// to attach to, and Node's default for an unhandled rejection is to
+// terminate. Log it and keep serving; the pollers already tolerate a
+// failed sweep.
+process.on('unhandledRejection', (reason) => {
+  logger.error({ err: reason }, 'Unhandled promise rejection — continuing.');
+});
+
+const PORT = process.env.PORT || 5001;
+const server = app.listen(PORT, () => {
   logger.info(`Social Hub API listening on port ${PORT} (routes under ${API_PREFIX})`);
   socialScheduler.start();
   socialPollers.start();
 });
 
-process.on('SIGTERM', async () => {
-  await socialScheduler.stop();
-  process.exit(0);
-});
+// Tear down in the reverse order we started, and don't exit until the
+// listener has actually released the port. The previous version called
+// process.exit(0) straight after scheduler.stop() and never touched
+// `server` or the pollers — so the port stayed bound into the next tick.
+// That is precisely what `node --watch` trips over: it SIGTERMs this
+// process, immediately re-spawns, and the replacement dies with
+// EADDRINUSE, leaving the watcher parked at "Waiting for file changes
+// before restarting" with nothing serving the API. Every edit to a
+// backend file silently took the whole backend down.
+let shuttingDown = false;
+async function shutdown(signal) {
+  if (shuttingDown) return; // a second Ctrl-C shouldn't re-enter this
+  shuttingDown = true;
+  logger.info(`${signal} received — shutting down.`);
+
+  // A hung Redis close or a browser keep-alive socket must not be able to
+  // block the restart indefinitely.
+  const forceExit = setTimeout(() => {
+    logger.warn('Graceful shutdown timed out after 10s — exiting anyway.');
+    process.exit(1);
+  }, 10_000).unref();
+
+  try {
+    socialPollers.stop();           // the mentions + analytics setIntervals
+    await socialScheduler.stop();   // sweep interval, then BullMQ worker/queue and Redis
+    const closed = new Promise((resolve, reject) => server.close(err => (err ? reject(err) : resolve())));
+    // server.close() only stops new connections; without this it waits on
+    // idle keep-alives the dashboard leaves open and never resolves.
+    server.closeAllConnections?.();
+    await closed;
+    clearTimeout(forceExit);
+    logger.info('Shutdown complete — port released.');
+    process.exit(0);
+  } catch (err) {
+    logger.error({ err }, 'Shutdown failed');
+    process.exit(1);
+  }
+}
+
+// SIGINT as well: Ctrl-C used to leave the BullMQ worker and both pollers
+// running until the shell reaped them.
+process.on('SIGTERM', () => shutdown('SIGTERM'));
+process.on('SIGINT', () => shutdown('SIGINT'));

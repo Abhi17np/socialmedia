@@ -11,7 +11,7 @@
 const { OAuth2Client } = require('google-auth-library');
 
 function redirectUriFor(platform) {
-  const base = process.env.BACKEND_PUBLIC_URL || 'http://localhost:5000';
+  const base = process.env.BACKEND_PUBLIC_URL || 'http://localhost:5001';
   return `${base}/api/social/callback/${platform}`;
 }
 

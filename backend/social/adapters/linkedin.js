@@ -46,7 +46,7 @@ const PLATFORM = 'linkedin';
 const SCOPES = ['openid', 'profile', 'email', 'w_member_social'];
 
 function redirectUri() {
-  const base = process.env.BACKEND_PUBLIC_URL || 'http://localhost:5000';
+  const base = process.env.BACKEND_PUBLIC_URL || 'http://localhost:5001';
   return `${base}/api/social/callback/${PLATFORM}`;
 }
 

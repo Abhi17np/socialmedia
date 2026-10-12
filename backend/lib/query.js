@@ -8,11 +8,53 @@
  * tenant-scoped query reads the same way, and client.from('mentions')
  * with no scoped() wrapper anywhere in a route is the review smell to
  * catch.
+ *
+ * The filter cannot be attached eagerly. client.from(table) hands back a
+ * PostgrestQueryBuilder, which only exposes select/insert/update/upsert/
+ * delete; .eq() lives on the PostgrestFilterBuilder those return. The
+ * first version of this file did `client.from(table).eq(...)` directly,
+ * which threw "client.from(...).eq is not a function" on every single
+ * tenant-scoped route — and because nothing above it caught the throw,
+ * it took the whole process down rather than failing one request.
+ *
+ * So scoped() returns a thin proxy that defers the tenant filter to the
+ * exact moment one can be applied: the builder a verb returns.
  */
+
+// Verbs whose return value is a filter builder — the tenant predicate
+// goes on immediately, before any caller-supplied .eq()/.order()/.range().
+const FILTERABLE = new Set(['select', 'update', 'delete']);
+
+// Writes can't be filtered, only stamped, and getting that wrong writes
+// a row into the wrong tenant. Rather than guess, refuse: callers insert
+// through client.from(table) with an explicit tenant_id in the payload,
+// which keeps the decision visible at the call site.
+const WRITES = new Set(['insert', 'upsert']);
 
 function scoped(client, tenantId, table) {
   if (!tenantId) throw new Error(`scoped() called without a tenantId for table "${table}" — check tenant middleware ran first.`);
-  return client.from(table).eq('tenant_id', tenantId);
+
+  const builder = client.from(table);
+
+  return new Proxy(builder, {
+    get(target, prop, receiver) {
+      const value = Reflect.get(target, prop, receiver);
+      if (typeof value !== 'function') return value;
+
+      if (FILTERABLE.has(prop)) {
+        return (...args) => Reflect.apply(value, target, args).eq('tenant_id', tenantId);
+      }
+
+      if (WRITES.has(prop)) {
+        throw new Error(
+          `scoped() cannot ${String(prop)} into "${table}" — a tenant filter can't be applied to a write. ` +
+          `Use client.from('${table}').${String(prop)}({ tenant_id, ... }) so the tenant is explicit in the payload.`
+        );
+      }
+
+      return value.bind(target);
+    }
+  });
 }
 
 module.exports = { scoped };
