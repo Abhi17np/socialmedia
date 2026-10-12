@@ -36,7 +36,11 @@ export default function PlatformDashboard({ token }) {
   const [query, setQuery] = useState('');
 
   const authFetch = useCallback(
-    (url) => fetch(url, { headers: { Authorization: `Bearer ${token}` } }),
+    (url, options = {}) => {
+      const headers = { ...options.headers, Authorization: `Bearer ${token}` };
+      if (options.body && !headers['Content-Type']) headers['Content-Type'] = 'application/json';
+      return fetch(url, { ...options, headers });
+    },
     [token]
   );
 
@@ -51,6 +55,26 @@ export default function PlatformDashboard({ token }) {
   }, [authFetch]);
 
   useEffect(load, [load]);
+
+  // The commercial gate itself: Sales Hub / Marketing Hub are fully
+  // built and shipped to every tenant already — this toggle is the only
+  // thing that makes either one reachable (middleware/hubs.js's
+  // requireHub 403s everything under them until this flips). Deliberately
+  // not a tenant self-service setting — "first paying customer" is
+  // Infopace's own call, made here.
+  const toggleHub = async (tenant, hub) => {
+    const next = !(tenant.hubsEnabled && tenant.hubsEnabled[hub]);
+    setTenants((prev) => prev.map((t) => (t.id === tenant.id ? { ...t, hubsEnabled: { ...t.hubsEnabled, [hub]: next } } : t))); // optimistic
+    try {
+      const res = await authFetch(`${API_BASE}/platform/tenants/${tenant.id}/hubs`, { method: 'PATCH', body: JSON.stringify({ [hub]: next }) });
+      const body = await res.json();
+      if (!res.ok) throw new Error(body.error || 'Could not update Hub access.');
+      setTenants((prev) => prev.map((t) => (t.id === tenant.id ? { ...t, hubsEnabled: body.tenant.hubs_enabled } : t)));
+    } catch (err) {
+      setError(err.message);
+      load(); // revert the optimistic update on failure
+    }
+  };
 
   const handleLogout = () => {
     localStorage.removeItem('platform_token');
@@ -130,6 +154,7 @@ export default function PlatformDashboard({ token }) {
                       <Th align="right">Posts (mo.)</Th>
                       <Th align="right">WhatsApp (mo.)</Th>
                       <Th align="right">AI drafts (mo.)</Th>
+                      <Th>Hubs</Th>
                       <Th align="right">Created</Th>
                     </tr>
                   </thead>
@@ -159,6 +184,15 @@ export default function PlatformDashboard({ token }) {
                         </Td>
                         <Td align="right">
                           <UsageCell used={t.aiGenerationsThisMonth} limit={t.aiGenerationsLimit} />
+                        </Td>
+                        <Td>
+                          <div className="flex items-center gap-1.5">
+                            {['sales', 'marketing'].map((hub) => (
+                              <button key={hub} onClick={() => toggleHub(t, hub)} title={`Click to ${t.hubsEnabled?.[hub] ? 'disable' : 'enable'} ${hub} for this tenant`}>
+                                <Chip tone={t.hubsEnabled?.[hub] ? 'success' : 'neutral'}>{hub}</Chip>
+                              </button>
+                            ))}
+                          </div>
                         </Td>
                         <Td align="right">
                           <span className="text-muted">
