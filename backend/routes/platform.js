@@ -11,11 +11,12 @@ const { validate } = require('../middleware/validate');
 const { loginSchema } = require('../lib/schemas');
 const { limitsFor } = require('../lib/plans');
 const { currentPeriod } = require('../lib/entitlements');
+const { authLimiter } = require('../lib/rateLimiters');
 
 const publicRouter = express.Router();
 const protectedRouter = express.Router();
 
-publicRouter.post('/platform/login', validate(loginSchema), async (req, res) => {
+publicRouter.post('/platform/login', authLimiter, validate(loginSchema), async (req, res) => {
   const { email, password } = req.body;
   const client = getSocialClient();
   if (!client) return res.status(503).json({ error: 'Database not configured.' });

@@ -8,6 +8,7 @@ const email = require('../lib/email');
 const { scoped } = require('../lib/query');
 const { asyncHandler } = require('../lib/asyncHandler');
 const { recordAudit } = require('../lib/audit');
+const { authLimiter } = require('../lib/rateLimiters');
 
 const RESET_TOKEN_TTL_MS = 60 * 60 * 1000; // 1 hour
 const VERIFY_TOKEN_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
@@ -22,7 +23,7 @@ function slugify(name) {
 // one atomic call — see create_tenant_with_owner() in
 // migrations/001_tenants_users.sql for why this can't be two separate
 // .insert() calls from here.
-router.post('/auth/signup', validate(signupSchema), async (req, res) => {
+router.post('/auth/signup', authLimiter, validate(signupSchema), async (req, res) => {
   const { tenantName, email, password } = req.body;
   const client = getSocialClient();
   if (!client) return res.status(503).json({ error: 'Database not configured.' });
@@ -51,7 +52,7 @@ router.post('/auth/signup', validate(signupSchema), async (req, res) => {
   }
 });
 
-router.post('/auth/login', validate(loginSchema), async (req, res) => {
+router.post('/auth/login', authLimiter, validate(loginSchema), async (req, res) => {
   const { email, password } = req.body;
   const client = getSocialClient();
   if (!client) return res.status(503).json({ error: 'Database not configured.' });
@@ -96,7 +97,7 @@ router.post('/auth/login', validate(loginSchema), async (req, res) => {
 // an account is a user-enumeration leak. An unconfigured SMTP setup is
 // an ops signal, not tied to any particular email, so it's safe to
 // surface as a real 503 without weakening that.
-router.post('/auth/forgot-password', validate(forgotPasswordSchema), async (req, res) => {
+router.post('/auth/forgot-password', authLimiter, validate(forgotPasswordSchema), async (req, res) => {
   const { email: rawEmail } = req.body;
   const client = getSocialClient();
   if (!client) return res.status(503).json({ error: 'Database not configured.' });
@@ -117,7 +118,7 @@ router.post('/auth/forgot-password', validate(forgotPasswordSchema), async (req,
   }
 });
 
-router.post('/auth/reset-password', validate(resetPasswordSchema), async (req, res) => {
+router.post('/auth/reset-password', authLimiter, validate(resetPasswordSchema), async (req, res) => {
   const { token, newPassword } = req.body;
   const client = getSocialClient();
   if (!client) return res.status(503).json({ error: 'Database not configured.' });
@@ -139,7 +140,7 @@ router.post('/auth/reset-password', validate(resetPasswordSchema), async (req, r
 // Signup never sends this on its own (no SMTP step wired into the
 // signup flow yet) — this is the verify-side mechanics, ready for
 // whenever a "verify your email" send is added to signup.
-router.get('/auth/verify-email', async (req, res) => {
+router.get('/auth/verify-email', authLimiter, async (req, res) => {
   const client = getSocialClient();
   if (!client) return res.status(503).json({ error: 'Database not configured.' });
   const token = req.query.token;

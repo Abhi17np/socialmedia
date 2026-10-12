@@ -3,7 +3,6 @@ const cors = require('cors');
 const helmet = require('helmet');
 const dotenv = require('dotenv');
 const pinoHttp = require('pino-http');
-const rateLimit = require('express-rate-limit');
 dotenv.config();
 
 const { logger } = require('./lib/logger');
@@ -49,29 +48,14 @@ app.use(pinoHttp({ logger })); // attaches req.log + req.id to every request, pu
 // parsed JSON.
 app.use(express.json({ verify: (req, res, buf) => { req.rawBody = buf; } }));
 
-// express-rate-limit's own default is a plain-text body ("Too many
-// requests, please try again later."), not JSON — every frontend page
-// does `const data = await res.json()` unconditionally, so a 429 with a
-// text/html body crashed with a raw "Unexpected token 'T' ... is not
-// valid JSON" instead of surfacing a real error message. Passing an
-// object as `message` makes express-rate-limit call res.send() with it,
-// which sends real JSON — matching the { error } shape every other
-// failure path in this API already uses.
-const rateLimited = { error: 'Too many requests — please slow down and try again in a few minutes.' };
-
-// Auth endpoints get their own, much stricter limit — the thing being
-// protected here is credential brute-forcing, not general API abuse.
-const authLimiter = rateLimit({ windowMs: 15 * 60 * 1000, limit: 20, standardHeaders: true, legacyHeaders: false, message: rateLimited });
-// Everything else an authenticated tenant calls. Deliberately NOT applied
-// to the public webhook/OAuth-callback routes below — Meta and Razorpay
-// retry their own webhooks on failure, and rate-limiting a payment
-// provider's retries would make their outages worse, not better.
-const apiLimiter = rateLimit({ windowMs: 15 * 60 * 1000, limit: 600, standardHeaders: true, legacyHeaders: false, message: rateLimited });
-// AI Assist calls real, metered Anthropic spend per request — the
-// monthly plan cap (lib/plans.js) catches sustained overuse, but a burst
-// within a single month shouldn't be free to run up; much tighter than
-// apiLimiter on purpose.
-const aiLimiter = rateLimit({ windowMs: 15 * 60 * 1000, limit: 30, standardHeaders: true, legacyHeaders: false, message: rateLimited });
+// authLimiter is intentionally NOT mounted here as a blanket middleware
+// — it's applied per-route inside routes/auth.js and routes/platform.js
+// instead. See lib/rateLimiters.js's header comment for why: a blanket
+// `app.use(API_PREFIX, authLimiter, router)` ran authLimiter for every
+// request matching the bare `/api/v1` prefix, not just the auth routes,
+// because Express falls through to the next app.use() layer whenever
+// the mounted router has no matching route of its own.
+const { apiLimiter, aiLimiter, platformLimiter } = require('./lib/rateLimiters');
 
 app.get(`${API_PREFIX}/health`, (req, res) => res.json({ status: 'ok' }));
 
@@ -82,8 +66,8 @@ app.get(`${API_PREFIX}/health`, (req, res) => res.json({ status: 'ok' }));
 // otherwise applies to every route registered after it under this
 // prefix, regardless of path — health and these public routes have to
 // come first.
-app.use(API_PREFIX, authLimiter, authRoutes.router);
-app.use(API_PREFIX, authLimiter, platformRoutes.publicRouter);
+app.use(API_PREFIX, authRoutes.router);
+app.use(API_PREFIX, platformRoutes.publicRouter);
 app.use(API_PREFIX, socialRoutes.publicRouter);
 app.use(API_PREFIX, billingRoutes.publicRouter);
 
@@ -96,13 +80,10 @@ app.use(API_PREFIX, billingRoutes.publicRouter);
 // this — two routers both mounted at the bare API_PREFIX — was broken:
 // a blanket `.use(requireAuth)` on one runs for every request matching
 // that prefix regardless of which router's own routes would have
-// handled it, since Express can't know that in advance.)
-app.use(
-  `${API_PREFIX}/platform`,
-  requirePlatformAdmin,
-  rateLimit({ windowMs: 15 * 60 * 1000, limit: 600, standardHeaders: true, legacyHeaders: false, message: rateLimited }),
-  platformRoutes.protectedRouter
-);
+// handled it, since Express can't know that in advance.) platformLimiter
+// is safe as a blanket mount here specifically because nothing else is
+// ever mounted at this exact sub-path — unlike authLimiter above.
+app.use(`${API_PREFIX}/platform`, requirePlatformAdmin, platformLimiter, platformRoutes.protectedRouter);
 
 const tenantRouter = express.Router();
 tenantRouter.use(requireAuth, apiLimiter);
@@ -138,53 +119,62 @@ process.on('unhandledRejection', (reason) => {
   logger.error({ err: reason }, 'Unhandled promise rejection — continuing.');
 });
 
-const PORT = process.env.PORT || 5001;
-const server = app.listen(PORT, () => {
-  logger.info(`Social Hub API listening on port ${PORT} (routes under ${API_PREFIX})`);
-  socialScheduler.start();
-  socialPollers.start();
-});
+// Everything below only runs when this file is executed directly (`node
+// server.js` / `node --watch server.js`), not when it's require()'d —
+// test/*.test.js files require() this module to get `app` for supertest
+// without binding a real port or starting the scheduler/pollers/BullMQ
+// worker as a side effect of running the test suite.
+if (require.main === module) {
+  const PORT = process.env.PORT || 5001;
+  const server = app.listen(PORT, () => {
+    logger.info(`Social Hub API listening on port ${PORT} (routes under ${API_PREFIX})`);
+    socialScheduler.start();
+    socialPollers.start();
+  });
 
-// Tear down in the reverse order we started, and don't exit until the
-// listener has actually released the port. The previous version called
-// process.exit(0) straight after scheduler.stop() and never touched
-// `server` or the pollers — so the port stayed bound into the next tick.
-// That is precisely what `node --watch` trips over: it SIGTERMs this
-// process, immediately re-spawns, and the replacement dies with
-// EADDRINUSE, leaving the watcher parked at "Waiting for file changes
-// before restarting" with nothing serving the API. Every edit to a
-// backend file silently took the whole backend down.
-let shuttingDown = false;
-async function shutdown(signal) {
-  if (shuttingDown) return; // a second Ctrl-C shouldn't re-enter this
-  shuttingDown = true;
-  logger.info(`${signal} received — shutting down.`);
+  // Tear down in the reverse order we started, and don't exit until the
+  // listener has actually released the port. The previous version called
+  // process.exit(0) straight after scheduler.stop() and never touched
+  // `server` or the pollers — so the port stayed bound into the next tick.
+  // That is precisely what `node --watch` trips over: it SIGTERMs this
+  // process, immediately re-spawns, and the replacement dies with
+  // EADDRINUSE, leaving the watcher parked at "Waiting for file changes
+  // before restarting" with nothing serving the API. Every edit to a
+  // backend file silently took the whole backend down.
+  let shuttingDown = false;
+  const shutdown = async (signal) => {
+    if (shuttingDown) return; // a second Ctrl-C shouldn't re-enter this
+    shuttingDown = true;
+    logger.info(`${signal} received — shutting down.`);
 
-  // A hung Redis close or a browser keep-alive socket must not be able to
-  // block the restart indefinitely.
-  const forceExit = setTimeout(() => {
-    logger.warn('Graceful shutdown timed out after 10s — exiting anyway.');
-    process.exit(1);
-  }, 10_000).unref();
+    // A hung Redis close or a browser keep-alive socket must not be able
+    // to block the restart indefinitely.
+    const forceExit = setTimeout(() => {
+      logger.warn('Graceful shutdown timed out after 10s — exiting anyway.');
+      process.exit(1);
+    }, 10_000).unref();
 
-  try {
-    socialPollers.stop();           // the mentions + analytics setIntervals
-    await socialScheduler.stop();   // sweep interval, then BullMQ worker/queue and Redis
-    const closed = new Promise((resolve, reject) => server.close(err => (err ? reject(err) : resolve())));
-    // server.close() only stops new connections; without this it waits on
-    // idle keep-alives the dashboard leaves open and never resolves.
-    server.closeAllConnections?.();
-    await closed;
-    clearTimeout(forceExit);
-    logger.info('Shutdown complete — port released.');
-    process.exit(0);
-  } catch (err) {
-    logger.error({ err }, 'Shutdown failed');
-    process.exit(1);
-  }
+    try {
+      socialPollers.stop();           // the mentions + analytics setIntervals
+      await socialScheduler.stop();   // sweep interval, then BullMQ worker/queue and Redis
+      const closed = new Promise((resolve, reject) => server.close(err => (err ? reject(err) : resolve())));
+      // server.close() only stops new connections; without this it waits
+      // on idle keep-alives the dashboard leaves open and never resolves.
+      server.closeAllConnections?.();
+      await closed;
+      clearTimeout(forceExit);
+      logger.info('Shutdown complete — port released.');
+      process.exit(0);
+    } catch (err) {
+      logger.error({ err }, 'Shutdown failed');
+      process.exit(1);
+    }
+  };
+
+  // SIGINT as well: Ctrl-C used to leave the BullMQ worker and both
+  // pollers running until the shell reaped them.
+  process.on('SIGTERM', () => shutdown('SIGTERM'));
+  process.on('SIGINT', () => shutdown('SIGINT'));
 }
 
-// SIGINT as well: Ctrl-C used to leave the BullMQ worker and both pollers
-// running until the shell reaped them.
-process.on('SIGTERM', () => shutdown('SIGTERM'));
-process.on('SIGINT', () => shutdown('SIGINT'));
+module.exports = app;

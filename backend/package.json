@@ -30,6 +30,7 @@
     "zod": "^3.23.8"
   },
   "devDependencies": {
-    "pino-pretty": "^11.3.0"
+    "pino-pretty": "^11.3.0",
+    "supertest": "^7.3.1"
   }
 }
