@@ -52,7 +52,7 @@ frontend/              Next.js (App Router) — real per-page URLs, not a single
 1. Create one Supabase (Postgres) project. Run `backend/migrations/*.sql` against it, in order.
 2. `cp backend/.env.example backend/.env` and fill in: `SUPABASE_URL_SOCIAL`/`SUPABASE_KEY_SOCIAL`, `JWT_SECRET` (generate, don't reuse a default), `SOCIAL_TOKEN_ENCRYPTION_KEY`, Redis, and the platform OAuth credentials for whichever channels you're connecting first.
 3. `npm run install:all`
-4. `npm run dev` — backend on :5000, frontend on :5174 (set `NEXT_PUBLIC_API_BASE` in `frontend/.env.local` if the backend isn't on localhost — Next.js only inlines `NEXT_PUBLIC_`-prefixed env vars into the client bundle).
+4. `npm run dev` — backend on :5000, frontend on :3000 (Next.js's own default; set `NEXT_PUBLIC_API_BASE` in `frontend/.env.local` if the backend isn't on localhost — Next.js only inlines `NEXT_PUBLIC_`-prefixed env vars into the client bundle).
 5. Platform admin console (Infopace-internal, not customer-facing): seed a row in `platform_admins` (migrations/006) with a bcrypt password hash, then visit `/platform`.
 
 ## What's deliberately not here yet
