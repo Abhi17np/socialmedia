@@ -169,7 +169,28 @@ publicRouter.post('/social/webhook/whatsapp', async (req, res) => {
         const value = change.value || {};
         const phoneNumberId = value.metadata && value.metadata.phone_number_id;
         const messages = value.messages || [];
-        if (!phoneNumberId || messages.length === 0) continue; // also covers status-update payloads
+        const statuses = value.statuses || [];
+        if (!phoneNumberId || (messages.length === 0 && statuses.length === 0)) continue;
+
+        // Delivery-status events for broadcast campaign sends
+        // (migrations/012_whatsapp_broadcast.sql) — sent/delivered/read/
+        // failed, keyed by the message id this app got back from
+        // sendTemplate() at enqueue time. No tenant/account lookup
+        // needed here: mark_whatsapp_recipient_status finds the
+        // recipient row directly by external_message_id, which is
+        // already unique across the whole app.
+        for (const status of statuses) {
+          if (!status.id || !status.status) continue;
+          const errorMessage = status.errors && status.errors[0] && status.errors[0].title;
+          await client.rpc('mark_whatsapp_recipient_status', {
+            p_external_message_id: status.id,
+            p_status: status.status,
+            p_error: errorMessage || null
+          }).then(({ error }) => {
+            if (error) console.error(`[social] mark_whatsapp_recipient_status failed for ${status.id}:`, error.message);
+          });
+        }
+        if (messages.length === 0) continue;
 
         // Unscoped by tenant_id here deliberately — this is the one
         // lookup in the whole app that has to find the tenant, not

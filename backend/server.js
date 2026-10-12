@@ -14,8 +14,10 @@ const billingRoutes = require('./routes/billing');
 const teamRoutes = require('./routes/team');
 const platformRoutes = require('./routes/platform');
 const aiRoutes = require('./routes/ai');
+const whatsappRoutes = require('./routes/whatsapp');
 const socialScheduler = require('./social/scheduler');
 const socialPollers = require('./social/pollers');
+const broadcastQueue = require('./social/broadcastQueue');
 
 // Versioned from day one — nothing in production depends on an
 // unversioned path yet, which is exactly the window in which this is
@@ -91,6 +93,7 @@ tenantRouter.use(authRoutes.protectedRouter);
 tenantRouter.use(socialRoutes.protectedRouter);
 tenantRouter.use(billingRoutes.protectedRouter);
 tenantRouter.use(teamRoutes);
+tenantRouter.use(whatsappRoutes);
 // Scoped to '/ai' specifically (not a blanket tenantRouter.use()) so
 // aiLimiter's much tighter cap only governs AI Assist calls, not every
 // route registered after it — the same mounting-order lesson server.js
@@ -129,6 +132,7 @@ if (require.main === module) {
     logger.info(`Social Hub API listening on port ${PORT} (routes under ${API_PREFIX})`);
     socialScheduler.start();
     socialPollers.start();
+    broadcastQueue.start();
   });
 
   // Tear down in the reverse order we started, and don't exit until the
@@ -156,6 +160,7 @@ if (require.main === module) {
     try {
       socialPollers.stop();           // the mentions + analytics setIntervals
       await socialScheduler.stop();   // sweep interval, then BullMQ worker/queue and Redis
+      await broadcastQueue.stop();    // the WhatsApp broadcast worker/queue and its own Redis connection
       const closed = new Promise((resolve, reject) => server.close(err => (err ? reject(err) : resolve())));
       // server.close() only stops new connections; without this it waits
       // on idle keep-alives the dashboard leaves open and never resolves.

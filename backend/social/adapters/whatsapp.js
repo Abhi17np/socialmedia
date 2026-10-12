@@ -13,11 +13,13 @@
  * out of its account picker explicitly, since "schedule a broadcast post"
  * isn't a real WhatsApp Business operation the way it is for the other
  * platforms (outbound messages here are either a reply within an open
- * customer conversation, or a pre-approved template message, which this
- * adapter doesn't build).
+ * customer conversation, via sendReply(), or a pre-approved template
+ * message, via sendTemplate() — see routes/whatsapp.js and
+ * social/broadcastQueue.js for the campaign pipeline that uses it).
  *
- * What this adapter does provide is conversation messaging: sendReply()
- * for outbound, and inbound messages land via a webhook (see
+ * What this adapter provides: conversation messaging (sendReply()),
+ * template broadcast sending (sendTemplate(), submitTemplate(),
+ * fetchTemplateStatuses()), and inbound messages land via a webhook (see
  * routes/social.js's /social/webhook/whatsapp), not a poll — the Cloud
  * API has no "list all conversations" endpoint the way Messenger's
  * /page-id/conversations does, so fetchInbox() here is a stub (same
@@ -171,16 +173,112 @@ async function fetchInbox() {
   return [];
 }
 
+/**
+ * The WABA id is only ever used transiently during connect/embedded
+ * signup (to find a phone number) — unlike externalAccountId
+ * (phone_number_id), it is never persisted on social_accounts. Template
+ * management operates at the WABA level (POST/GET .../message_templates),
+ * so every function below that needs one re-derives it from the phone
+ * number id it already has, rather than requiring a schema change just
+ * to cache an id that rarely changes and costs one cheap Graph call.
+ */
+async function resolveWabaId(account) {
+  const data = await metaOAuth.graphFetch(`/${account.externalAccountId}`, {
+    access_token: account.accessToken,
+    fields: 'whatsapp_business_account'
+  });
+  const wabaId = data.whatsapp_business_account && data.whatsapp_business_account.id;
+  if (!wabaId) throw new Error(`Could not resolve the WhatsApp Business Account for phone number id ${account.externalAccountId}.`);
+  return wabaId;
+}
+
+/**
+ * Registers a new template with Meta for approval. This call itself
+ * works today, in Development Mode, with no App Review needed — it's
+ * the template content that then goes through Meta's own (separate)
+ * review queue, tracked by whatsapp_templates.approval_status, which
+ * fetchTemplateStatuses() below syncs. Submitting does NOT require the
+ * app to have cleared Advanced Access for any permission; what IS
+ * blocked without further Meta approval is actually delivering an
+ * approved template to real, non-test recipients at production volume
+ * — see routes/whatsapp.js's header comment for the full split.
+ */
+async function submitTemplate(account, template) {
+  const wabaId = await resolveWabaId(account);
+  const hasPlaceholders = /\{\{\d+\}\}/.test(template.body_text);
+  const components = [{ type: 'BODY', text: template.body_text }];
+  if (hasPlaceholders && Array.isArray(template.variable_samples) && template.variable_samples.length > 0) {
+    components[0].example = { body_text: [template.variable_samples] };
+  }
+
+  const data = await metaOAuth.graphPostJson(`/${wabaId}/message_templates`, account.accessToken, {
+    name: template.name,
+    language: template.language,
+    category: template.category.toUpperCase(),
+    components
+  });
+  return { metaTemplateId: data.id, status: (data.status || 'PENDING').toLowerCase() };
+}
+
+/**
+ * Pulls current approval status for every template under this WABA —
+ * called on demand (GET /whatsapp/templates/sync) rather than polled,
+ * since Meta's own review turnaround is hours/days, not seconds.
+ */
+async function fetchTemplateStatuses(account) {
+  const wabaId = await resolveWabaId(account);
+  const data = await metaOAuth.graphFetchAll(`/${wabaId}/message_templates`, {
+    access_token: account.accessToken,
+    fields: 'id,name,language,status,category,rejected_reason'
+  });
+  return data.map(t => ({
+    metaTemplateId: t.id,
+    name: t.name,
+    language: t.language,
+    status: (t.status || 'PENDING').toLowerCase(),
+    rejectedReason: t.rejected_reason || null
+  }));
+}
+
+/**
+ * Sends a pre-approved template message — the only outbound WhatsApp
+ * message type valid OUTSIDE the 24h customer-service window sendReply()
+ * is restricted to, which is exactly why broadcast/campaign sending
+ * needs this instead of sendReply(). variableValues fills the template's
+ * {{1}}, {{2}}... body placeholders, in order; an empty array is valid
+ * for a template with no placeholders.
+ */
+async function sendTemplate(account, toPhone, template, variableValues = []) {
+  const components = variableValues.length > 0
+    ? [{ type: 'body', parameters: variableValues.map(v => ({ type: 'text', text: String(v) })) }]
+    : [];
+
+  const data = await metaOAuth.graphPostJson(`/${account.externalAccountId}/messages`, account.accessToken, {
+    messaging_product: 'whatsapp',
+    to: toPhone,
+    type: 'template',
+    template: {
+      name: template.name,
+      language: { code: template.language },
+      ...(components.length > 0 ? { components } : {})
+    }
+  });
+  return { externalId: (data.messages && data.messages[0] && data.messages[0].id) || null };
+}
+
 module.exports = {
   isConfigured,
   connect,
   completeEmbeddedSignup,
   sendReply,
+  sendTemplate,
+  submitTemplate,
+  fetchTemplateStatuses,
   fetchInbox,
   refreshAccessToken,
   metadata: {
     name: 'WhatsApp',
     platform: PLATFORM,
-    description: 'Customer conversation messaging via the WhatsApp Business Platform (Cloud API) — inbound messages via webhook, outbound replies from the Inbox. No post publishing.'
+    description: 'Customer conversation messaging via the WhatsApp Business Platform (Cloud API) — inbound messages via webhook, outbound replies from the Inbox, template broadcasts from campaigns. No post publishing.'
   }
 };

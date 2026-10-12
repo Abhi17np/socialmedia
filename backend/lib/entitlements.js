@@ -12,7 +12,8 @@ const { scoped } = require('./query');
 const USAGE_COLUMN = {
   postsPerMonth: 'posts_published',
   whatsappMessagesPerMonth: 'whatsapp_messages',
-  aiGenerationsPerMonth: 'ai_generations'
+  aiGenerationsPerMonth: 'ai_generations',
+  whatsappBroadcastSendsPerMonth: 'whatsapp_broadcast_sends'
 };
 
 function currentPeriod() {
