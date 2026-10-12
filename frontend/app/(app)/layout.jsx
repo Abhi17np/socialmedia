@@ -2,7 +2,8 @@
 
 import { useState, useCallback, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { Share2, LogOut, WifiOff } from 'lucide-react';
+import Link from 'next/link';
+import { Share2, LogOut, WifiOff, Settings } from 'lucide-react';
 import SocialNav from '../../src/social/SocialNav';
 import { AuthContext } from '../../src/AuthContext';
 import { API_BASE } from '../../src/apiBase';
@@ -106,6 +107,9 @@ export default function AppShellLayout({ children }) {
               {me?.tenant && <div style={{ fontSize: '0.75rem', color: 'var(--sidebar-text-muted)' }}>{me.tenant.name} · {me.tenant.plan}</div>}
             </div>
           </div>
+          <Link href="/account" className="btn btn-secondary btn-sm" style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem', marginTop: '0.5rem' }}>
+            <Settings size={14} /> Account
+          </Link>
           <button className="btn btn-secondary btn-sm" onClick={handleLogout} style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem', marginTop: '0.5rem' }}>
             <LogOut size={14} /> Log out
           </button>

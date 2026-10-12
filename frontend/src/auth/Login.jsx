@@ -117,7 +117,8 @@ export default function Login() {
               </button>
             </form>
 
-            <div className="auth-footer">
+            <div className="auth-footer" style={{ flexDirection: 'column', gap: '0.5rem' }}>
+              <Link href="/forgot-password" className="auth-toggle-link">Forgot your password?</Link>
               <span>
                 No account yet?{' '}
                 <Link href="/signup" className="auth-toggle-link">Create a workspace</Link>
