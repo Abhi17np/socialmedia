@@ -1,0 +1,50 @@
+'use client';
+
+import Link from 'next/link';
+import { usePathname, useSearchParams } from 'next/navigation';
+import { KanbanSquare, Building2, Users, ListChecks } from 'lucide-react';
+import { atLeast } from '../roleRank';
+
+// Sales Hub's own sidebar — these used to be a horizontal tab row
+// inside SalesHub.jsx itself; promoted to real sidebar nav items (the
+// HubSpot pattern: Contacts/Companies/Deals are sidebar items, not
+// in-page tabs) driven by a ?tab= query param so each section stays
+// linkable/bookmarkable. SalesHub.jsx reads the same param.
+const ITEMS = [
+  { tab: 'pipeline', icon: KanbanSquare, label: 'Pipeline', minRole: 'viewer' },
+  { tab: 'companies', icon: Building2, label: 'Companies', minRole: 'viewer' },
+  { tab: 'contacts', icon: Users, label: 'Leads', minRole: 'viewer' },
+  { tab: 'activities', icon: ListChecks, label: 'Activities', minRole: 'viewer' }
+];
+
+function SalesNav({ role }) {
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+  const activeTab = searchParams.get('tab') || 'pipeline';
+
+  return (
+    <nav className="px-2 py-1 flex flex-col gap-0.5">
+      <div className="eyebrow px-2 pt-3 pb-1">Sales Hub</div>
+      {ITEMS.filter((i) => atLeast(role, i.minRole)).map(({ tab, icon: Icon, label }) => {
+        const active = pathname === '/sales' && activeTab === tab;
+        return (
+          <Link
+            key={tab}
+            href={`/sales?tab=${tab}`}
+            aria-current={active ? 'page' : undefined}
+            className={
+              active
+                ? 'h-8 px-2.5 rounded-ui flex items-center gap-2.5 bg-canvas text-brand font-medium border border-hairline'
+                : 'h-8 px-2.5 rounded-ui flex items-center gap-2.5 text-muted border border-transparent hover:text-ink hover:bg-canvas transition-colors'
+            }
+          >
+            <Icon size={17} className="shrink-0" />
+            <span className="truncate text-xs">{label}</span>
+          </Link>
+        );
+      })}
+    </nav>
+  );
+}
+
+export default SalesNav;

@@ -1,8 +1,9 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { Suspense, useEffect, useState } from 'react';
+import { useSearchParams } from 'next/navigation';
 import {
-  RefreshCw, Plus, Building2, Users, KanbanSquare, ListChecks,
+  RefreshCw, Plus, Building2, Users, ListChecks, KanbanSquare,
   Phone, Mail, Calendar, StickyNote, CheckSquare, IndianRupee
 } from 'lucide-react';
 import { API_BASE } from '../apiBase';
@@ -10,17 +11,10 @@ import { atLeast } from '../roleRank';
 import { Page, PageBar, PageBody } from '../ui/page';
 import {
   Button, IconButton, Panel, PanelHeader, Table, Th, Td, Input, Textarea, Select, Field,
-  Banner, Modal, Drawer, EmptyState, Skeleton, Chip, FilterPill, Avatar
+  Banner, Modal, Drawer, EmptyState, Skeleton, Chip, Avatar
 } from '../ui';
 
 const SALES_API_BASE = `${API_BASE}/sales`;
-
-const TABS = [
-  { key: 'pipeline', label: 'Pipeline', icon: KanbanSquare },
-  { key: 'companies', label: 'Companies', icon: Building2 },
-  { key: 'contacts', label: 'Leads', icon: Users },
-  { key: 'activities', label: 'Activities', icon: ListChecks }
-];
 
 const ACTIVITY_ICON = { call: Phone, email: Mail, meeting: Calendar, note: StickyNote, task: CheckSquare };
 const LEAD_STATUS_TONE = { new: 'neutral', contacted: 'info', qualified: 'brand', unqualified: 'danger', customer: 'success' };
@@ -35,9 +29,15 @@ function money(amount, currency) {
  * success states. If a tenant's Sales Hub isn't enabled yet, every call
  * here 403s with HUB_NOT_ENABLED and this screen shows that plainly
  * rather than pretending the feature works.
+ *
+ * Section (Pipeline/Companies/Leads/Activities) is driven by the
+ * sidebar now (src/sales/SalesNav.jsx), via a ?tab= query param instead
+ * of an in-page tab row — useSearchParams() needs a Suspense boundary
+ * around it, hence the wrapper default export below.
  */
-function SalesHub({ authFetch, role }) {
-  const [tab, setTab] = useState('pipeline');
+function SalesHubInner({ authFetch, role }) {
+  const searchParams = useSearchParams();
+  const tab = searchParams.get('tab') || 'pipeline';
   const [gateError, setGateError] = useState(null);
   const canManage = atLeast(role, 'member');
   const canDelete = atLeast(role, 'admin');
@@ -64,16 +64,7 @@ function SalesHub({ authFetch, role }) {
 
   return (
     <Page>
-      <PageBar title="Sales Hub">
-        <div className="flex items-center gap-1 ml-2">
-          {TABS.map((t) => (
-            <FilterPill key={t.key} active={tab === t.key} onClick={() => setTab(t.key)}>
-              <t.icon size={12} />
-              {t.label}
-            </FilterPill>
-          ))}
-        </div>
-      </PageBar>
+      <PageBar title="Sales Hub" />
       <PageBody>
         {tab === 'pipeline' && <PipelineTab authFetch={authFetch} canManage={canManage} />}
         {tab === 'companies' && <CompaniesTab authFetch={authFetch} canManage={canManage} canDelete={canDelete} />}
@@ -81,6 +72,14 @@ function SalesHub({ authFetch, role }) {
         {tab === 'activities' && <ActivitiesTab authFetch={authFetch} canManage={canManage} canDelete={canDelete} />}
       </PageBody>
     </Page>
+  );
+}
+
+function SalesHub(props) {
+  return (
+    <Suspense fallback={null}>
+      <SalesHubInner {...props} />
+    </Suspense>
   );
 }
 

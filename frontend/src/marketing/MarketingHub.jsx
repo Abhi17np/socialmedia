@@ -1,6 +1,7 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { Suspense, useEffect, useState } from 'react';
+import { useSearchParams } from 'next/navigation';
 import {
   RefreshCw, Plus, Megaphone, Zap, Link2, CalendarDays, MessageCircle
 } from 'lucide-react';
@@ -9,17 +10,12 @@ import { atLeast } from '../roleRank';
 import { Page, PageBar, PageBody } from '../ui/page';
 import {
   Button, IconButton, Panel, PanelHeader, Table, Th, Td, Input, Textarea, Select, Field,
-  Banner, Modal, Drawer, EmptyState, Skeleton, Chip, FilterPill, StatStrip, Stat
+  Banner, Modal, Drawer, EmptyState, Skeleton, Chip, StatStrip, Stat
 } from '../ui';
 
 const MKT_API_BASE = `${API_BASE}/marketing`;
 const WA_API_BASE = `${API_BASE}/whatsapp`;
 const SOCIAL_API_BASE = `${API_BASE}/social`;
-
-const TABS = [
-  { key: 'campaigns', label: 'Campaigns', icon: Megaphone },
-  { key: 'automation', label: 'Automation', icon: Zap }
-];
 
 const CAMPAIGN_TONE = { draft: 'neutral', active: 'info', completed: 'success', archived: 'neutral' };
 const TRIGGER_LABELS = {
@@ -39,8 +35,9 @@ const ACTION_LABELS = { add_tag: 'Add a tag', remove_tag: 'Remove a tag', create
  * email/SMS channel wired up in this app, so a campaign's reach is
  * exactly what its linked real sends report, nothing invented.
  */
-function MarketingHub({ authFetch, role }) {
-  const [tab, setTab] = useState('campaigns');
+function MarketingHubInner({ authFetch, role }) {
+  const searchParams = useSearchParams();
+  const tab = searchParams.get('tab') || 'campaigns';
   const [gateError, setGateError] = useState(null);
   const canManage = atLeast(role, 'member');
   const canAdmin = atLeast(role, 'admin');
@@ -67,21 +64,20 @@ function MarketingHub({ authFetch, role }) {
 
   return (
     <Page>
-      <PageBar title="Marketing Hub">
-        <div className="flex items-center gap-1 ml-2">
-          {TABS.map((t) => (
-            <FilterPill key={t.key} active={tab === t.key} onClick={() => setTab(t.key)}>
-              <t.icon size={12} />
-              {t.label}
-            </FilterPill>
-          ))}
-        </div>
-      </PageBar>
+      <PageBar title="Marketing Hub" />
       <PageBody>
         {tab === 'campaigns' && <CampaignsTab authFetch={authFetch} canManage={canManage} canAdmin={canAdmin} />}
         {tab === 'automation' && <AutomationTab authFetch={authFetch} canAdmin={canAdmin} />}
       </PageBody>
     </Page>
+  );
+}
+
+function MarketingHub(props) {
+  return (
+    <Suspense fallback={null}>
+      <MarketingHubInner {...props} />
+    </Suspense>
   );
 }
 
