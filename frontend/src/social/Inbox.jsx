@@ -1,10 +1,10 @@
 'use client';
 
 import React, { useEffect, useState } from 'react';
-import { RefreshCw, AtSign, MessageSquare, ExternalLink, UserCircle2, Reply, MessageSquareText, Sparkles } from 'lucide-react';
+import { RefreshCw, ExternalLink, UserCircle2, Reply, MessageSquareText, Sparkles } from 'lucide-react';
 import { SOCIAL_API_BASE, PLATFORM_LABELS, PLATFORM_COLORS, AVAILABLE_PLATFORMS } from './api';
 import { API_BASE } from '../apiBase';
-import { PlatformFilterTabs } from './PlatformIcon';
+import { PlatformFilterTabs, PlatformIcon } from './PlatformIcon';
 import ContactTimeline from './ContactTimeline';
 import SavedReplies from './SavedReplies';
 import { atLeast } from '../roleRank';
@@ -225,7 +225,7 @@ function Inbox({ authFetch, role }) {
                     {initials(item.author)}
                   </div>
                   <div className="inbox-platform-badge" style={{ background: PLATFORM_COLORS[item.platform] || 'var(--text-muted)' }}>
-                    {item.source === 'mention' ? <AtSign size={9} /> : <MessageSquare size={9} />}
+                    <PlatformIcon platform={item.platform} size={10} />
                   </div>
                 </div>
 
@@ -264,7 +264,7 @@ function Inbox({ authFetch, role }) {
 
                 <div className="inbox-col-platform">
                   <div className="inbox-platform-icon" style={{ background: PLATFORM_COLORS[item.platform] || 'var(--text-muted)' }}>
-                    {item.source === 'mention' ? <AtSign size={13} /> : <MessageSquare size={13} />}
+                    <PlatformIcon platform={item.platform} size={15} />
                   </div>
                   <div>
                     <div className="inbox-platform-name">{PLATFORM_LABELS[item.platform] || item.platform}</div>
