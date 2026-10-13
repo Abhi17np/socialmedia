@@ -24,6 +24,7 @@ const { recomputeLeadScore } = require('../lib/leadScoring');
 const { parseCsvToObjects, toCsv } = require('../lib/csv');
 const {
   companySchema, contactSchema, updateContactSchema, dealSchema, moveDealStageSchema, salesActivitySchema,
+  dealContactSchema,
   updatePipelineSchema, dealStageSchema, updateDealStageSchema, reorderStagesSchema,
   salesTargetSchema, updateSalesTargetSchema, leadScoringRuleSchema, updateLeadScoringRuleSchema,
   contactBulkActionSchema, companyBulkActionSchema,
@@ -37,6 +38,24 @@ const csvUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 
 function addToGroup(map, key, item) {
   if (!map.has(key)) map.set(key, []);
   map.get(key).push(item);
+}
+
+// Keeps deal_contacts.is_primary consistent with the legacy single
+// deals.contact_id column whenever that column is set — clears any
+// existing primary flag first so the partial unique index
+// (idx_deal_contacts_one_primary) never sees two true rows for the
+// same deal at once, then marks/links the given contact as primary.
+// Passing a falsy contactId just clears the primary flag (the deal's
+// primary contact was unset).
+async function upsertPrimaryDealContact(client, tenantId, dealId, contactId) {
+  await client.from('deal_contacts').update({ is_primary: false }).eq('tenant_id', tenantId).eq('deal_id', dealId).eq('is_primary', true);
+  if (!contactId) return;
+  const { data: existing } = await client.from('deal_contacts').select('id').eq('tenant_id', tenantId).eq('deal_id', dealId).eq('contact_id', contactId).maybeSingle();
+  if (existing) {
+    await client.from('deal_contacts').update({ is_primary: true }).eq('id', existing.id);
+  } else {
+    await client.from('deal_contacts').insert({ tenant_id: tenantId, deal_id: dealId, contact_id: contactId, is_primary: true });
+  }
 }
 
 function requireSocialClient(res) {
@@ -654,7 +673,7 @@ router.get('/sales/deals', requireHub('sales'), asyncHandler(async (req, res) =>
 router.post('/sales/deals', requireHub('sales'), requireRole('member'), validate(dealSchema), asyncHandler(async (req, res) => {
   const client = requireSocialClient(res);
   if (!client) return;
-  const { name, pipelineId, stageId, amount, currency, contactId, companyId, ownerId, expectedCloseDate, customFields } = req.body;
+  const { name, pipelineId, stageId, amount, currency, contactId, companyId, ownerId, expectedCloseDate, forecastCategory, customFields } = req.body;
 
   const { data: stage } = await scoped(client, req.tenantId, 'deal_stages').select('id, pipeline_id').eq('id', stageId).maybeSingle();
   if (!stage || stage.pipeline_id !== pipelineId) return res.status(400).json({ error: 'stageId must belong to pipelineId.' });
@@ -662,9 +681,11 @@ router.post('/sales/deals', requireHub('sales'), requireRole('member'), validate
   const { data, error } = await client.from('deals').insert({
     tenant_id: req.tenantId, pipeline_id: pipelineId, stage_id: stageId, name, amount, currency,
     contact_id: contactId || null, company_id: companyId || null, owner_id: ownerId || null, expected_close_date: expectedCloseDate || null,
-    custom_fields: customFields || {}
+    forecast_category: forecastCategory || 'pipeline', custom_fields: customFields || {}
   }).select('*').single();
   if (error) throw error;
+
+  if (contactId) await upsertPrimaryDealContact(client, req.tenantId, data.id, contactId);
 
   await recordAudit(client, { tenantId: req.tenantId, actorUserId: req.userId, action: 'sales.deal_created', targetType: 'deal', targetId: data.id, metadata: { name, amount } });
   res.status(201).json({ deal: data });
@@ -677,18 +698,45 @@ router.get('/sales/deals/:id', requireHub('sales'), asyncHandler(async (req, res
   if (error) throw error;
   if (!deal) return res.status(404).json({ error: 'Deal not found.' });
 
-  const [{ data: activities }, { data: history }] = await Promise.all([
+  const [
+    { data: activities }, { data: history }, { data: stages }, { data: dealContactLinks }, { data: owner }, { data: company }
+  ] = await Promise.all([
     scoped(client, req.tenantId, 'sales_activities').select('*').eq('deal_id', deal.id).order('created_at', { ascending: false }),
-    scoped(client, req.tenantId, 'deal_stage_history').select('*').eq('deal_id', deal.id).order('changed_at', { ascending: false })
+    scoped(client, req.tenantId, 'deal_stage_history').select('*').eq('deal_id', deal.id).order('changed_at', { ascending: false }),
+    scoped(client, req.tenantId, 'deal_stages').select('id, name').eq('pipeline_id', deal.pipeline_id),
+    scoped(client, req.tenantId, 'deal_contacts').select('*').eq('deal_id', deal.id),
+    deal.owner_id ? scoped(client, req.tenantId, 'users').select('id, email').eq('id', deal.owner_id).maybeSingle() : Promise.resolve({ data: null }),
+    deal.company_id ? scoped(client, req.tenantId, 'companies').select('id, name, domain, industry').eq('id', deal.company_id).maybeSingle() : Promise.resolve({ data: null })
   ]);
-  res.json({ deal, activities: activities || [], history: history || [] });
+
+  const contactIds = [...new Set((dealContactLinks || []).map((l) => l.contact_id))];
+  const { data: linkedContactRows } = contactIds.length
+    ? await scoped(client, req.tenantId, 'contacts').select('id, display_name, phone, email, job_title').in('id', contactIds)
+    : { data: [] };
+  const contactById = new Map((linkedContactRows || []).map((c) => [c.id, c]));
+  const contacts = (dealContactLinks || []).map((l) => ({
+    linkId: l.id, contactId: l.contact_id, role: l.role, isPrimary: l.is_primary,
+    ...(contactById.get(l.contact_id) || { display_name: '(deleted contact)' })
+  }));
+
+  const stageNameById = new Map((stages || []).map((s) => [s.id, s.name]));
+  const historyOut = (history || []).map((h) => ({
+    ...h,
+    from_stage_name: h.from_stage_id ? stageNameById.get(h.from_stage_id) || null : null,
+    to_stage_name: stageNameById.get(h.to_stage_id) || null
+  }));
+
+  res.json({
+    deal, activities: activities || [], history: historyOut, contacts,
+    company: company || null, owner: owner || null
+  });
 }));
 
 router.patch('/sales/deals/:id', requireHub('sales'), requireRole('member'), asyncHandler(async (req, res) => {
   const client = requireSocialClient(res);
   if (!client) return;
   const patch = {};
-  for (const [bodyKey, column] of [['name', 'name'], ['amount', 'amount'], ['currency', 'currency'], ['contactId', 'contact_id'], ['companyId', 'company_id'], ['ownerId', 'owner_id'], ['expectedCloseDate', 'expected_close_date'], ['customFields', 'custom_fields']]) {
+  for (const [bodyKey, column] of [['name', 'name'], ['amount', 'amount'], ['currency', 'currency'], ['contactId', 'contact_id'], ['companyId', 'company_id'], ['ownerId', 'owner_id'], ['expectedCloseDate', 'expected_close_date'], ['forecastCategory', 'forecast_category'], ['customFields', 'custom_fields']]) {
     if (req.body[bodyKey] !== undefined) patch[column] = req.body[bodyKey];
   }
   if (Object.keys(patch).length === 0) return res.status(400).json({ error: 'Nothing to update.' });
@@ -696,7 +744,39 @@ router.patch('/sales/deals/:id', requireHub('sales'), requireRole('member'), asy
 
   const { data, error } = await scoped(client, req.tenantId, 'deals').update(patch).eq('id', req.params.id).select('*').single();
   if (error || !data) return res.status(404).json({ error: 'Deal not found.' });
+
+  if (req.body.contactId !== undefined) await upsertPrimaryDealContact(client, req.tenantId, data.id, req.body.contactId);
+
   res.json({ deal: data });
+}));
+
+router.post('/sales/deals/:id/contacts', requireHub('sales'), requireRole('member'), validate(dealContactSchema), asyncHandler(async (req, res) => {
+  const client = requireSocialClient(res);
+  if (!client) return;
+  const { data: deal } = await scoped(client, req.tenantId, 'deals').select('id').eq('id', req.params.id).maybeSingle();
+  if (!deal) return res.status(404).json({ error: 'Deal not found.' });
+  const { data: contact } = await scoped(client, req.tenantId, 'contacts').select('id').eq('id', req.body.contactId).maybeSingle();
+  if (!contact) return res.status(400).json({ error: 'contactId does not belong to this tenant.' });
+
+  if (req.body.isPrimary) {
+    await client.from('deal_contacts').update({ is_primary: false }).eq('tenant_id', req.tenantId).eq('deal_id', deal.id).eq('is_primary', true);
+  }
+  const { data, error } = await client.from('deal_contacts').insert({
+    tenant_id: req.tenantId, deal_id: deal.id, contact_id: req.body.contactId, role: req.body.role || null, is_primary: !!req.body.isPrimary
+  }).select('*').single();
+  if (error) {
+    if (error.code === '23505') return res.status(409).json({ error: 'This contact is already linked to this deal.' });
+    throw error;
+  }
+  res.status(201).json({ dealContact: data });
+}));
+
+router.delete('/sales/deals/:id/contacts/:contactId', requireHub('sales'), requireRole('member'), asyncHandler(async (req, res) => {
+  const client = requireSocialClient(res);
+  if (!client) return;
+  const { error } = await scoped(client, req.tenantId, 'deal_contacts').delete().eq('deal_id', req.params.id).eq('contact_id', req.params.contactId);
+  if (error) throw error;
+  res.json({ success: true });
 }));
 
 router.post('/sales/deals/:id/move', requireHub('sales'), requireRole('member'), validate(moveDealStageSchema), asyncHandler(async (req, res) => {
@@ -918,9 +998,21 @@ router.get('/sales/dashboard', requireHub('sales'), asyncHandler(async (req, res
     return { ...t, actualAmount, attainmentPct: targetAmount > 0 ? Math.round((actualAmount / targetAmount) * 1000) / 10 : null };
   });
 
+  // Forecast categories (Salesforce/HubSpot pattern): how much of the
+  // open pipeline the team actually believes will close, broken down
+  // by confidence — separate from pipelineValue, which is every open
+  // deal's raw worth regardless of category. 'omitted' deals are
+  // deliberately left out of this breakdown (that's what the category
+  // means), not out of pipelineValue.
+  const forecastByCategory = { pipeline: 0, best_case: 0, commit: 0 };
+  for (const d of openDeals) {
+    const cat = d.forecast_category || 'pipeline';
+    if (cat in forecastByCategory) forecastByCategory[cat] += Number(d.amount);
+  }
+
   res.json({
     range: { from, to },
-    revenue, lostAmount, pipelineValue, weightedForecast, conversionRate,
+    revenue, lostAmount, pipelineValue, weightedForecast, conversionRate, forecastByCategory,
     wonCount: wonDeals.length, lostCount: lostDeals.length, openCount: openDeals.length,
     overdueActivitiesCount: overdueActivitiesCount || 0,
     targets: targetsOut,

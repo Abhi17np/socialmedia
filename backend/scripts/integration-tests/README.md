@@ -75,6 +75,7 @@ node scripts/integration-tests/sales-dashboard.js
 node scripts/integration-tests/sales-lead-scoring.js
 node scripts/integration-tests/sales-bulk-import.js
 node scripts/integration-tests/sales-custom-fields.js
+node scripts/integration-tests/sales-deal-relationships.js
 node scripts/integration-tests/marketing-routes.js
 ```
 

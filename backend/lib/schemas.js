@@ -185,6 +185,8 @@ const updateContactSchema = z.object({
   customFields: customFieldsValue()
 }).refine(v => Object.keys(v).length > 0, { message: 'Nothing to update.' });
 
+const FORECAST_CATEGORIES = ['pipeline', 'best_case', 'commit', 'omitted'];
+
 const dealSchema = z.object({
   name: z.string().trim().min(1).max(200),
   pipelineId: z.string().uuid(),
@@ -195,12 +197,19 @@ const dealSchema = z.object({
   companyId: optionalUuid(),
   ownerId: optionalUuid(),
   expectedCloseDate: z.string().trim().max(10).optional(),
+  forecastCategory: z.enum(FORECAST_CATEGORIES).optional(),
   customFields: customFieldsValue()
 });
 
 const moveDealStageSchema = z.object({
   stageId: z.string().uuid(),
   lostReason: z.string().trim().min(1).max(500).optional()
+});
+
+const dealContactSchema = z.object({
+  contactId: z.string().uuid(),
+  role: z.string().trim().max(100).optional(),
+  isPrimary: z.boolean().optional().default(false)
 });
 
 const updatePipelineSchema = z.object({
@@ -333,6 +342,7 @@ module.exports = {
   INTERACTION_STATUSES, INTERACTION_PRIORITIES, changePasswordSchema, forgotPasswordSchema, resetPasswordSchema,
   updateHubsSchema, templateSchema, segmentSchema, whatsappCampaignSchema,
   companySchema, contactSchema, updateContactSchema, dealSchema, moveDealStageSchema, salesActivitySchema,
+  dealContactSchema, FORECAST_CATEGORIES,
   updatePipelineSchema, dealStageSchema, updateDealStageSchema, reorderStagesSchema,
   salesTargetSchema, updateSalesTargetSchema,
   leadScoringRuleSchema, updateLeadScoringRuleSchema, LEAD_SCORING_CONDITION_TYPES,
