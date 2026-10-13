@@ -8,8 +8,20 @@ import {
 } from '../ui';
 import { money, downloadViaAuthFetch } from './format';
 import { useTeamMembers } from './useTeamMembers';
+import { useSavedViews, SavedViewsBar, ColumnsMenu } from './SavedViews';
 
 const LEAD_STATUS_TONE = { new: 'neutral', contacted: 'info', qualified: 'brand', unqualified: 'danger', customer: 'success' };
+const COLUMNS = [
+  { key: 'name', label: 'Name', required: true },
+  { key: 'industry', label: 'Industry' },
+  { key: 'domain', label: 'Domain' },
+  { key: 'owner', label: 'Owner' }
+];
+const SORT_OPTIONS = [
+  { value: '', label: 'Newest first' },
+  { value: 'name_asc', label: 'Name (A–Z)' },
+  { value: 'name_desc', label: 'Name (Z–A)' }
+];
 
 function CompaniesTab({ authFetch, SALES_API_BASE, canManage, canDelete, openId }) {
   const [companies, setCompanies] = useState(null);
@@ -17,6 +29,9 @@ function CompaniesTab({ authFetch, SALES_API_BASE, canManage, canDelete, openId 
   const [total, setTotal] = useState(null);
   const [search, setSearch] = useState('');
   const [searchInput, setSearchInput] = useState('');
+  const [sort, setSort] = useState('');
+  const [visibleColumns, setVisibleColumns] = useState(COLUMNS.map((c) => c.key));
+  const [activeViewId, setActiveViewId] = useState(null);
   const PAGE_SIZE = 50;
   const [error, setError] = useState(null);
   const [notice, setNotice] = useState(null);
@@ -35,18 +50,31 @@ function CompaniesTab({ authFetch, SALES_API_BASE, canManage, canDelete, openId 
   const load = () => {
     const params = new URLSearchParams({ page: String(page), pageSize: String(PAGE_SIZE) });
     if (search.trim()) params.set('search', search.trim());
+    if (sort) params.set('sort', sort);
     authFetch(`${SALES_API_BASE}/companies?${params}`).then((r) => r.json())
       .then((d) => { setCompanies(d.companies || []); setTotal(d.total ?? null); })
       .catch((e) => setError(e.message));
   };
-  useEffect(load, [page, search]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(load, [page, search, sort]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { if (openId) openDetail({ id: openId }); }, [openId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const onSearchChange = (value) => {
     setSearchInput(value);
+    setActiveViewId(null);
     clearTimeout(searchDebounce.current);
     searchDebounce.current = setTimeout(() => { setPage(1); setSearch(value); }, 300);
   };
+
+  const savedViews = useSavedViews(authFetch, SALES_API_BASE, 'companies');
+  const applyView = (view) => {
+    setActiveViewId(view.id);
+    setSearchInput(view.filters?.search || '');
+    setSearch(view.filters?.search || '');
+    setSort(view.sort || '');
+    setVisibleColumns(view.visible_columns || COLUMNS.map((c) => c.key));
+    setPage(1);
+  };
+  const saveCurrentView = (name) => savedViews.create(name, { filters: { search }, sort, visibleColumns });
 
   const create = async () => {
     try {
@@ -183,6 +211,15 @@ function CompaniesTab({ authFetch, SALES_API_BASE, canManage, canDelete, openId 
             </div>
           }
         />
+        <div className="px-4 py-2 border-b border-hairline flex items-center justify-between gap-2 flex-wrap">
+          <SavedViewsBar views={savedViews.views} activeViewId={activeViewId} onApply={applyView} onSaveCurrent={saveCurrentView} onDelete={savedViews.remove} />
+          <div className="flex items-center gap-1.5">
+            <Select className="h-7 w-36" value={sort} onChange={(e) => { setActiveViewId(null); setSort(e.target.value); }}>
+              {SORT_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+            </Select>
+            <ColumnsMenu columns={COLUMNS} visible={visibleColumns} onChange={(cols) => { setActiveViewId(null); setVisibleColumns(cols); }} />
+          </div>
+        </div>
         {companies === null ? (
           <div className="p-4 space-y-3"><Skeleton className="h-9" /><Skeleton className="h-9" /></div>
         ) : companies.length === 0 ? (
@@ -193,7 +230,10 @@ function CompaniesTab({ authFetch, SALES_API_BASE, canManage, canDelete, openId 
               <thead>
                 <tr>
                   {canManage && <Th><Checkbox checked={companies.length > 0 && companies.every((c) => selected.has(c.id))} onChange={toggleSelectAll} /></Th>}
-                  <Th>Name</Th><Th>Industry</Th><Th>Domain</Th><Th>Owner</Th>
+                  <Th>Name</Th>
+                  {visibleColumns.includes('industry') && <Th>Industry</Th>}
+                  {visibleColumns.includes('domain') && <Th>Domain</Th>}
+                  {visibleColumns.includes('owner') && <Th>Owner</Th>}
                 </tr>
               </thead>
               <tbody>
@@ -201,9 +241,9 @@ function CompaniesTab({ authFetch, SALES_API_BASE, canManage, canDelete, openId 
                   <tr key={c.id} className="hover:bg-canvas transition-colors">
                     {canManage && <Td onClick={(e) => e.stopPropagation()}><Checkbox checked={selected.has(c.id)} onChange={() => toggleSelect(c.id)} /></Td>}
                     <Td className="cursor-pointer" onClick={() => openDetail(c)}><span className="font-medium">{c.name}</span></Td>
-                    <Td className="cursor-pointer" onClick={() => openDetail(c)}>{c.industry || '—'}</Td>
-                    <Td className="cursor-pointer" onClick={() => openDetail(c)}>{c.domain || '—'}</Td>
-                    <Td>{c.owner_id ? memberEmail(c.owner_id) : '—'}</Td>
+                    {visibleColumns.includes('industry') && <Td className="cursor-pointer" onClick={() => openDetail(c)}>{c.industry || '—'}</Td>}
+                    {visibleColumns.includes('domain') && <Td className="cursor-pointer" onClick={() => openDetail(c)}>{c.domain || '—'}</Td>}
+                    {visibleColumns.includes('owner') && <Td>{c.owner_id ? memberEmail(c.owner_id) : '—'}</Td>}
                   </tr>
                 ))}
               </tbody>

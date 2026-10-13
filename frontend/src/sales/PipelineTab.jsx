@@ -11,6 +11,7 @@ import {
 } from '../ui';
 import { money, moneyByCurrency } from './format';
 import DealDetailDrawer from './DealDetailDrawer';
+import { useSavedViews, SavedViewsBar, ColumnsMenu } from './SavedViews';
 
 // Kanban genuinely needs every open deal in the pipeline at once — stage
 // totals/weighted amounts and drag targets would silently be wrong if
@@ -18,6 +19,22 @@ import DealDetailDrawer from './DealDetailDrawer';
 // cap (not a silent truncation): if a pipeline ever exceeds it, a
 // banner says so explicitly instead of quietly dropping deals.
 const KANBAN_PAGE_SIZE = 200;
+
+const DEAL_COLUMNS = [
+  { key: 'name', label: 'Deal', required: true },
+  { key: 'companyContact', label: 'Company / contact' },
+  { key: 'owner', label: 'Owner' },
+  { key: 'stage', label: 'Stage' },
+  { key: 'amount', label: 'Amount' },
+  { key: 'closeDate', label: 'Expected close' }
+];
+const DEAL_SORT_OPTIONS = [
+  { value: '', label: 'Newest first' },
+  { value: 'name_asc', label: 'Name (A–Z)' },
+  { value: 'amount_desc', label: 'Amount (high–low)' },
+  { value: 'amount_asc', label: 'Amount (low–high)' },
+  { value: 'expected_close_date_asc', label: 'Close date (soonest)' }
+];
 
 // ------------------------------------------------------------- Pipeline
 
@@ -332,6 +349,9 @@ function TableView({ pipeline, authFetch, SALES_API_BASE, canManage, onOpenDeal,
   const [total, setTotal] = useState(null);
   const [search, setSearch] = useState('');
   const [searchInput, setSearchInput] = useState('');
+  const [sort, setSort] = useState('');
+  const [visibleColumns, setVisibleColumns] = useState(DEAL_COLUMNS.map((c) => c.key));
+  const [activeViewId, setActiveViewId] = useState(null);
   const [error, setError] = useState(null);
   const [lostMove, setLostMove] = useState(null);
   const [lostReason, setLostReason] = useState('');
@@ -341,17 +361,30 @@ function TableView({ pipeline, authFetch, SALES_API_BASE, canManage, onOpenDeal,
   const load = () => {
     const params = new URLSearchParams({ pipelineId: pipeline.id, page: String(page), pageSize: String(TABLE_PAGE_SIZE) });
     if (search.trim()) params.set('search', search.trim());
+    if (sort) params.set('sort', sort);
     authFetch(`${SALES_API_BASE}/deals?${params}`).then((r) => r.json())
       .then((d) => { setDeals(d.deals || []); setTotal(d.total ?? null); })
       .catch((e) => setError(e.message));
   };
-  useEffect(load, [pipeline.id, page, search]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(load, [pipeline.id, page, search, sort]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const onSearchChange = (value) => {
     setSearchInput(value);
+    setActiveViewId(null);
     clearTimeout(searchDebounce.current);
     searchDebounce.current = setTimeout(() => { setPage(1); setSearch(value); }, 300);
   };
+
+  const savedViews = useSavedViews(authFetch, SALES_API_BASE, 'deals');
+  const applyView = (view) => {
+    setActiveViewId(view.id);
+    setSearchInput(view.filters?.search || '');
+    setSearch(view.filters?.search || '');
+    setSort(view.sort || '');
+    setVisibleColumns(view.visible_columns || DEAL_COLUMNS.map((c) => c.key));
+    setPage(1);
+  };
+  const saveCurrentView = (name) => savedViews.create(name, { filters: { search }, sort, visibleColumns });
 
   const applyMove = async (deal, stageId, lostReasonValue) => {
     setDeals((prev) => prev.map((d) => (d.id === deal.id ? { ...d, stage_id: stageId } : d))); // optimistic
@@ -389,20 +422,29 @@ function TableView({ pipeline, authFetch, SALES_API_BASE, canManage, onOpenDeal,
   return (
     <div className="flex flex-col gap-2">
       {error && <Banner tone="danger">{error}</Banner>}
-      <div className="flex items-center justify-between">
-        <Input icon={Search} placeholder="Search deals…" value={searchInput} onChange={(e) => onSearchChange(e.target.value)} className="h-8 w-56" />
-        {total !== null && <span className="text-[11px] text-subtle">{total} total</span>}
+      <div className="flex items-center justify-between gap-2 flex-wrap">
+        <div className="flex items-center gap-2">
+          <Input icon={Search} placeholder="Search deals…" value={searchInput} onChange={(e) => onSearchChange(e.target.value)} className="h-8 w-56" />
+          {total !== null && <span className="text-[11px] text-subtle">{total} total</span>}
+        </div>
+        <div className="flex items-center gap-1.5">
+          <Select className="h-7 w-44" value={sort} onChange={(e) => { setActiveViewId(null); setSort(e.target.value); }}>
+            {DEAL_SORT_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+          </Select>
+          <ColumnsMenu columns={DEAL_COLUMNS} visible={visibleColumns} onChange={(cols) => { setActiveViewId(null); setVisibleColumns(cols); }} />
+        </div>
       </div>
+      <SavedViewsBar views={savedViews.views} activeViewId={activeViewId} onApply={applyView} onSaveCurrent={saveCurrentView} onDelete={savedViews.remove} />
       <div className="bg-card border border-hairline rounded-card overflow-hidden">
         <table className="w-full text-xs">
           <thead>
             <tr className="border-b border-hairline text-left">
               <th className="px-3 py-2 font-medium text-subtle">Deal</th>
-              <th className="px-3 py-2 font-medium text-subtle">Company / contact</th>
-              <th className="px-3 py-2 font-medium text-subtle">Owner</th>
-              <th className="px-3 py-2 font-medium text-subtle">Stage</th>
-              <th className="px-3 py-2 font-medium text-subtle text-right">Amount</th>
-              <th className="px-3 py-2 font-medium text-subtle">Expected close</th>
+              {visibleColumns.includes('companyContact') && <th className="px-3 py-2 font-medium text-subtle">Company / contact</th>}
+              {visibleColumns.includes('owner') && <th className="px-3 py-2 font-medium text-subtle">Owner</th>}
+              {visibleColumns.includes('stage') && <th className="px-3 py-2 font-medium text-subtle">Stage</th>}
+              {visibleColumns.includes('amount') && <th className="px-3 py-2 font-medium text-subtle text-right">Amount</th>}
+              {visibleColumns.includes('closeDate') && <th className="px-3 py-2 font-medium text-subtle">Expected close</th>}
               <th className="px-3 py-2 font-medium text-subtle"> </th>
             </tr>
           </thead>
@@ -421,21 +463,25 @@ function TableView({ pipeline, authFetch, SALES_API_BASE, canManage, onOpenDeal,
                       <StaleBadge isStale={deal.isStale} />
                     </div>
                   </td>
-                  <td className="px-3 py-2 text-muted truncate max-w-[180px]">
-                    {deal.companyName}{deal.companyName && deal.contactName ? ' · ' : ''}{deal.contactName}{!deal.companyName && !deal.contactName && '—'}
-                  </td>
-                  <td className="px-3 py-2 text-muted truncate max-w-[160px]">{deal.ownerEmail || '—'}</td>
-                  <td className="px-3 py-2" onClick={(e) => e.stopPropagation()}>
-                    {canManage ? (
-                      <Select className="h-7" value={deal.stage_id} onChange={(e) => moveDeal(deal, e.target.value)}>
-                        {pipeline.stages.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
-                      </Select>
-                    ) : (
-                      <Chip tone={stage?.is_won ? 'success' : stage?.is_lost ? 'danger' : 'neutral'}>{stage?.name || '—'}</Chip>
-                    )}
-                  </td>
-                  <td className="px-3 py-2 text-right tabular-nums">{money(deal.amount, deal.currency)}</td>
-                  <td className="px-3 py-2 text-muted">{deal.expected_close_date || '—'}</td>
+                  {visibleColumns.includes('companyContact') && (
+                    <td className="px-3 py-2 text-muted truncate max-w-[180px]">
+                      {deal.companyName}{deal.companyName && deal.contactName ? ' · ' : ''}{deal.contactName}{!deal.companyName && !deal.contactName && '—'}
+                    </td>
+                  )}
+                  {visibleColumns.includes('owner') && <td className="px-3 py-2 text-muted truncate max-w-[160px]">{deal.ownerEmail || '—'}</td>}
+                  {visibleColumns.includes('stage') && (
+                    <td className="px-3 py-2" onClick={(e) => e.stopPropagation()}>
+                      {canManage ? (
+                        <Select className="h-7" value={deal.stage_id} onChange={(e) => moveDeal(deal, e.target.value)}>
+                          {pipeline.stages.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+                        </Select>
+                      ) : (
+                        <Chip tone={stage?.is_won ? 'success' : stage?.is_lost ? 'danger' : 'neutral'}>{stage?.name || '—'}</Chip>
+                      )}
+                    </td>
+                  )}
+                  {visibleColumns.includes('amount') && <td className="px-3 py-2 text-right tabular-nums">{money(deal.amount, deal.currency)}</td>}
+                  {visibleColumns.includes('closeDate') && <td className="px-3 py-2 text-muted">{deal.expected_close_date || '—'}</td>}
                   <td className="px-3 py-2">
                     {deal.status !== 'open' && <Chip tone={deal.status === 'won' ? 'success' : 'danger'}>{deal.status}</Chip>}
                   </td>

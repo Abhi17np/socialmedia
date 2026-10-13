@@ -187,6 +187,23 @@ const updateContactSchema = z.object({
 
 const FORECAST_CATEGORIES = ['pipeline', 'best_case', 'commit', 'omitted'];
 
+const SAVED_VIEW_LIST_TYPES = ['companies', 'contacts', 'deals'];
+
+const savedViewSchema = z.object({
+  listType: z.enum(SAVED_VIEW_LIST_TYPES),
+  name: z.string().trim().min(1).max(100),
+  filters: z.record(z.string(), z.any()).optional().default({}),
+  sort: z.string().trim().max(50).optional(),
+  visibleColumns: z.array(z.string().trim().max(50)).max(30).optional()
+});
+
+const updateSavedViewSchema = z.object({
+  name: z.string().trim().min(1).max(100).optional(),
+  filters: z.record(z.string(), z.any()).optional(),
+  sort: z.string().trim().max(50).nullable().optional(),
+  visibleColumns: z.array(z.string().trim().max(50)).max(30).nullable().optional()
+}).refine(v => Object.keys(v).length > 0, { message: 'Nothing to update.' });
+
 const dealSchema = z.object({
   name: z.string().trim().min(1).max(200),
   pipelineId: z.string().uuid(),
@@ -388,5 +405,6 @@ module.exports = {
   contactBulkActionSchema, companyBulkActionSchema,
   customFieldDefinitionSchema, updateCustomFieldDefinitionSchema, CUSTOM_FIELD_ENTITY_TYPES, CUSTOM_FIELD_TYPES,
   sequenceSchema, updateSequenceSchema, sequenceStepSchema, sequenceEnrollSchema, SEQUENCE_ACTION_TYPES,
+  savedViewSchema, updateSavedViewSchema, SAVED_VIEW_LIST_TYPES,
   marketingCampaignSchema, automationRuleSchema
 };

@@ -9,9 +9,25 @@ import {
 import { useTeamMembers } from './useTeamMembers';
 import { downloadViaAuthFetch } from './format';
 import ContactDetailDrawer from './ContactDetailDrawer';
+import { useSavedViews, SavedViewsBar, ColumnsMenu } from './SavedViews';
 
 const LEAD_STATUS_TONE = { new: 'neutral', contacted: 'info', qualified: 'brand', unqualified: 'danger', customer: 'success' };
 const LEAD_STATUSES = ['new', 'contacted', 'qualified', 'unqualified', 'customer'];
+const COLUMNS = [
+  { key: 'name', label: 'Name', required: true },
+  { key: 'phone', label: 'Phone' },
+  { key: 'email', label: 'Email' },
+  { key: 'owner', label: 'Owner' },
+  { key: 'score', label: 'Score' },
+  { key: 'status', label: 'Status' }
+];
+const SORT_OPTIONS = [
+  { value: '', label: 'Newest first' },
+  { value: 'display_name_asc', label: 'Name (A–Z)' },
+  { value: 'display_name_desc', label: 'Name (Z–A)' },
+  { value: 'lead_score_desc', label: 'Highest score' },
+  { value: 'lead_score_asc', label: 'Lowest score' }
+];
 
 function ContactsTab({ authFetch, SALES_API_BASE, canManage, openId }) {
   const [contacts, setContacts] = useState(null);
@@ -19,6 +35,9 @@ function ContactsTab({ authFetch, SALES_API_BASE, canManage, openId }) {
   const [total, setTotal] = useState(null);
   const [search, setSearch] = useState('');
   const [searchInput, setSearchInput] = useState('');
+  const [sort, setSort] = useState('');
+  const [visibleColumns, setVisibleColumns] = useState(COLUMNS.map((c) => c.key));
+  const [activeViewId, setActiveViewId] = useState(null);
   const PAGE_SIZE = 50;
   const [error, setError] = useState(null);
   const [notice, setNotice] = useState(null);
@@ -37,18 +56,31 @@ function ContactsTab({ authFetch, SALES_API_BASE, canManage, openId }) {
   const load = () => {
     const params = new URLSearchParams({ page: String(page), pageSize: String(PAGE_SIZE) });
     if (search.trim()) params.set('search', search.trim());
+    if (sort) params.set('sort', sort);
     authFetch(`${SALES_API_BASE}/contacts?${params}`).then((r) => r.json())
       .then((d) => { setContacts(d.contacts || []); setTotal(d.total ?? null); })
       .catch((e) => setError(e.message));
   };
-  useEffect(load, [page, search]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(load, [page, search, sort]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { if (openId) setOpenContactId(openId); }, [openId]);
 
   const onSearchChange = (value) => {
     setSearchInput(value);
+    setActiveViewId(null);
     clearTimeout(searchDebounce.current);
     searchDebounce.current = setTimeout(() => { setPage(1); setSearch(value); }, 300);
   };
+
+  const savedViews = useSavedViews(authFetch, SALES_API_BASE, 'contacts');
+  const applyView = (view) => {
+    setActiveViewId(view.id);
+    setSearchInput(view.filters?.search || '');
+    setSearch(view.filters?.search || '');
+    setSort(view.sort || '');
+    setVisibleColumns(view.visible_columns || COLUMNS.map((c) => c.key));
+    setPage(1);
+  };
+  const saveCurrentView = (name) => savedViews.create(name, { filters: { search }, sort, visibleColumns });
 
   const create = async () => {
     try {
@@ -166,6 +198,15 @@ function ContactsTab({ authFetch, SALES_API_BASE, canManage, openId }) {
             </div>
           }
         />
+        <div className="px-4 py-2 border-b border-hairline flex items-center justify-between gap-2 flex-wrap">
+          <SavedViewsBar views={savedViews.views} activeViewId={activeViewId} onApply={applyView} onSaveCurrent={saveCurrentView} onDelete={savedViews.remove} />
+          <div className="flex items-center gap-1.5">
+            <Select className="h-7 w-36" value={sort} onChange={(e) => { setActiveViewId(null); setSort(e.target.value); }}>
+              {SORT_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+            </Select>
+            <ColumnsMenu columns={COLUMNS} visible={visibleColumns} onChange={(cols) => { setActiveViewId(null); setVisibleColumns(cols); }} />
+          </div>
+        </div>
         {contacts === null ? (
           <div className="p-4 space-y-3"><Skeleton className="h-9" /><Skeleton className="h-9" /></div>
         ) : contacts.length === 0 ? (
@@ -176,7 +217,12 @@ function ContactsTab({ authFetch, SALES_API_BASE, canManage, openId }) {
               <thead>
                 <tr>
                   {canManage && <Th><Checkbox checked={contacts.length > 0 && contacts.every((c) => selected.has(c.id))} onChange={toggleSelectAll} /></Th>}
-                  <Th>Name</Th><Th>Phone</Th><Th>Email</Th><Th>Owner</Th><Th align="right">Score</Th><Th>Status</Th>
+                  <Th>Name</Th>
+                  {visibleColumns.includes('phone') && <Th>Phone</Th>}
+                  {visibleColumns.includes('email') && <Th>Email</Th>}
+                  {visibleColumns.includes('owner') && <Th>Owner</Th>}
+                  {visibleColumns.includes('score') && <Th align="right">Score</Th>}
+                  {visibleColumns.includes('status') && <Th>Status</Th>}
                 </tr>
               </thead>
               <tbody>
@@ -184,19 +230,21 @@ function ContactsTab({ authFetch, SALES_API_BASE, canManage, openId }) {
                   <tr key={c.id} className="hover:bg-canvas transition-colors">
                     {canManage && <Td onClick={(e) => e.stopPropagation()}><Checkbox checked={selected.has(c.id)} onChange={() => toggleSelect(c.id)} /></Td>}
                     <Td className="cursor-pointer" onClick={() => setOpenContactId(c.id)}><span className="flex items-center gap-2"><Avatar name={c.display_name} size={24} />{c.display_name}</span></Td>
-                    <Td className="cursor-pointer" onClick={() => setOpenContactId(c.id)}>{c.phone || '—'}</Td>
-                    <Td className="cursor-pointer" onClick={() => setOpenContactId(c.id)}>{c.email || '—'}</Td>
-                    <Td className="cursor-pointer" onClick={() => setOpenContactId(c.id)}>{c.owner_id ? memberEmail(c.owner_id) : '—'}</Td>
-                    <Td align="right"><span className={c.lead_score > 0 ? 'text-success font-medium' : c.lead_score < 0 ? 'text-danger font-medium' : 'text-muted'}>{c.lead_score}</span></Td>
-                    <Td onClick={(e) => e.stopPropagation()}>
-                      {canManage ? (
-                        <Select className="h-7" value={c.lead_status} onChange={(e) => changeStatus(c, e.target.value)}>
-                          {LEAD_STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
-                        </Select>
-                      ) : (
-                        <Chip tone={LEAD_STATUS_TONE[c.lead_status]}>{c.lead_status}</Chip>
-                      )}
-                    </Td>
+                    {visibleColumns.includes('phone') && <Td className="cursor-pointer" onClick={() => setOpenContactId(c.id)}>{c.phone || '—'}</Td>}
+                    {visibleColumns.includes('email') && <Td className="cursor-pointer" onClick={() => setOpenContactId(c.id)}>{c.email || '—'}</Td>}
+                    {visibleColumns.includes('owner') && <Td className="cursor-pointer" onClick={() => setOpenContactId(c.id)}>{c.owner_id ? memberEmail(c.owner_id) : '—'}</Td>}
+                    {visibleColumns.includes('score') && <Td align="right"><span className={c.lead_score > 0 ? 'text-success font-medium' : c.lead_score < 0 ? 'text-danger font-medium' : 'text-muted'}>{c.lead_score}</span></Td>}
+                    {visibleColumns.includes('status') && (
+                      <Td onClick={(e) => e.stopPropagation()}>
+                        {canManage ? (
+                          <Select className="h-7" value={c.lead_status} onChange={(e) => changeStatus(c, e.target.value)}>
+                            {LEAD_STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
+                          </Select>
+                        ) : (
+                          <Chip tone={LEAD_STATUS_TONE[c.lead_status]}>{c.lead_status}</Chip>
+                        )}
+                      </Td>
+                    )}
                   </tr>
                 ))}
               </tbody>

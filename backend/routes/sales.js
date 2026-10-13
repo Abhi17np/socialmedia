@@ -29,7 +29,8 @@ const {
   salesTargetSchema, updateSalesTargetSchema, leadScoringRuleSchema, updateLeadScoringRuleSchema,
   contactBulkActionSchema, companyBulkActionSchema,
   customFieldDefinitionSchema, updateCustomFieldDefinitionSchema, automationRuleSchema,
-  sequenceSchema, updateSequenceSchema, sequenceStepSchema, sequenceEnrollSchema
+  sequenceSchema, updateSequenceSchema, sequenceStepSchema, sequenceEnrollSchema,
+  savedViewSchema, updateSavedViewSchema
 } = require('../lib/schemas');
 
 const router = express.Router();
@@ -74,6 +75,18 @@ function pageParams(req) {
   return { page, pageSize, from: (page - 1) * pageSize, to: (page - 1) * pageSize + pageSize - 1 };
 }
 
+// Whitelisted sort columns only — `sort` is a user-controlled query
+// param, never interpolated as a raw column name. Falls back to the
+// existing default (newest first, id as a stable tiebreaker) for an
+// unrecognized or absent value rather than erroring.
+function applySort(query, sortParam, allowedColumns) {
+  const match = typeof sortParam === 'string' && /^([a-z_]+)_(asc|desc)$/.exec(sortParam);
+  if (match && allowedColumns.includes(match[1])) {
+    return query.order(match[1], { ascending: match[2] === 'asc' }).order('id', { ascending: true });
+  }
+  return query.order('created_at', { ascending: false }).order('id', { ascending: true });
+}
+
 // -------------------------------------------------------------
 // Companies
 // -------------------------------------------------------------
@@ -82,7 +95,8 @@ router.get('/sales/companies', requireHub('sales'), asyncHandler(async (req, res
   const client = requireSocialClient(res);
   if (!client) return;
   const { page, pageSize, from, to } = pageParams(req);
-  let query = scoped(client, req.tenantId, 'companies').select('*', { count: 'exact' }).order('created_at', { ascending: false }).order('id', { ascending: true }).range(from, to);
+  let query = scoped(client, req.tenantId, 'companies').select('*', { count: 'exact' });
+  query = applySort(query, req.query.sort, ['name', 'industry', 'created_at']).range(from, to);
   if (req.query.search) query = query.ilike('name', `%${req.query.search}%`);
   const { data, error, count } = await query;
   if (error) throw error;
@@ -255,7 +269,8 @@ router.get('/sales/contacts', requireHub('sales'), asyncHandler(async (req, res)
   const client = requireSocialClient(res);
   if (!client) return;
   const { page, pageSize, from, to } = pageParams(req);
-  let query = scoped(client, req.tenantId, 'contacts').select('*', { count: 'exact' }).order('created_at', { ascending: false }).order('id', { ascending: true }).range(from, to);
+  let query = scoped(client, req.tenantId, 'contacts').select('*', { count: 'exact' });
+  query = applySort(query, req.query.sort, ['display_name', 'lead_score', 'created_at']).range(from, to);
   if (req.query.leadStatus) query = query.eq('lead_status', req.query.leadStatus);
   if (req.query.companyId) query = query.eq('company_id', req.query.companyId);
   if (req.query.search) query = query.or(`display_name.ilike.%${req.query.search}%,phone.ilike.%${req.query.search}%,email.ilike.%${req.query.search}%`);
@@ -661,7 +676,8 @@ router.get('/sales/deals', requireHub('sales'), asyncHandler(async (req, res) =>
   const client = requireSocialClient(res);
   if (!client) return;
   const { page, pageSize, from, to } = pageParams(req);
-  let query = scoped(client, req.tenantId, 'deals').select('*', { count: 'exact' }).order('created_at', { ascending: false }).order('id', { ascending: true }).range(from, to);
+  let query = scoped(client, req.tenantId, 'deals').select('*', { count: 'exact' });
+  query = applySort(query, req.query.sort, ['name', 'amount', 'expected_close_date', 'created_at']).range(from, to);
   if (req.query.pipelineId) query = query.eq('pipeline_id', req.query.pipelineId);
   if (req.query.stageId) query = query.eq('stage_id', req.query.stageId);
   if (req.query.status) query = query.eq('status', req.query.status);
@@ -1464,6 +1480,57 @@ router.patch('/sales/sequence-enrollments/:id', requireHub('sales'), requireRole
   const { data, error } = await scoped(client, req.tenantId, 'sequence_enrollments').update(patch).eq('id', req.params.id).select('*').single();
   if (error || !data) return res.status(404).json({ error: 'Enrollment not found.' });
   res.json({ enrollment: data });
+}));
+
+// -------------------------------------------------------------
+// Saved views — per-user filter/sort/column-visibility presets for the
+// Companies/Leads/Deals lists. Personal, not shared: every query below
+// is scoped to req.userId as well as the tenant, so one rep's saved
+// views are invisible to (and unreachable by) another.
+// -------------------------------------------------------------
+
+router.get('/sales/saved-views', requireHub('sales'), asyncHandler(async (req, res) => {
+  const client = requireSocialClient(res);
+  if (!client) return;
+  if (!req.query.listType) return res.status(400).json({ error: 'listType query param is required.' });
+  const { data, error } = await scoped(client, req.tenantId, 'sales_saved_views')
+    .select('*').eq('owner_id', req.userId).eq('list_type', req.query.listType).order('created_at', { ascending: true });
+  if (error) throw error;
+  res.json({ views: data || [] });
+}));
+
+router.post('/sales/saved-views', requireHub('sales'), validate(savedViewSchema), asyncHandler(async (req, res) => {
+  const client = requireSocialClient(res);
+  if (!client) return;
+  const { data, error } = await client.from('sales_saved_views').insert({
+    tenant_id: req.tenantId, owner_id: req.userId, list_type: req.body.listType, name: req.body.name,
+    filters: req.body.filters, sort: req.body.sort || null, visible_columns: req.body.visibleColumns || null
+  }).select('*').single();
+  if (error) throw error;
+  res.status(201).json({ view: data });
+}));
+
+router.patch('/sales/saved-views/:id', requireHub('sales'), validate(updateSavedViewSchema), asyncHandler(async (req, res) => {
+  const client = requireSocialClient(res);
+  if (!client) return;
+  const patch = {};
+  if (req.body.name !== undefined) patch.name = req.body.name;
+  if (req.body.filters !== undefined) patch.filters = req.body.filters;
+  if (req.body.sort !== undefined) patch.sort = req.body.sort;
+  if (req.body.visibleColumns !== undefined) patch.visible_columns = req.body.visibleColumns;
+  patch.updated_at = new Date().toISOString();
+  const { data, error } = await scoped(client, req.tenantId, 'sales_saved_views')
+    .update(patch).eq('id', req.params.id).eq('owner_id', req.userId).select('*').single();
+  if (error || !data) return res.status(404).json({ error: 'Saved view not found.' });
+  res.json({ view: data });
+}));
+
+router.delete('/sales/saved-views/:id', requireHub('sales'), asyncHandler(async (req, res) => {
+  const client = requireSocialClient(res);
+  if (!client) return;
+  const { error } = await scoped(client, req.tenantId, 'sales_saved_views').delete().eq('id', req.params.id).eq('owner_id', req.userId);
+  if (error) throw error;
+  res.json({ success: true });
 }));
 
 module.exports = router;
