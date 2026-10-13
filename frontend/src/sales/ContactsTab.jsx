@@ -8,6 +8,7 @@ import {
 } from '../ui';
 import { useTeamMembers } from './useTeamMembers';
 import { downloadViaAuthFetch } from './format';
+import ContactDetailDrawer from './ContactDetailDrawer';
 
 const LEAD_STATUS_TONE = { new: 'neutral', contacted: 'info', qualified: 'brand', unqualified: 'danger', customer: 'success' };
 const LEAD_STATUSES = ['new', 'contacted', 'qualified', 'unqualified', 'customer'];
@@ -22,6 +23,7 @@ function ContactsTab({ authFetch, SALES_API_BASE, canManage }) {
   const [bulkTag, setBulkTag] = useState('');
   const [bulkOwnerId, setBulkOwnerId] = useState('');
   const [duplicates, setDuplicates] = useState(null);
+  const [openContactId, setOpenContactId] = useState(null);
   const fileInputRef = useRef(null);
   const members = useTeamMembers(authFetch);
   const memberEmail = (id) => members.find((m) => m.id === id)?.email || '—';
@@ -152,12 +154,12 @@ function ContactsTab({ authFetch, SALES_API_BASE, canManage }) {
               {contacts.map((c) => (
                 <tr key={c.id} className="hover:bg-canvas transition-colors">
                   {canManage && <Td onClick={(e) => e.stopPropagation()}><Checkbox checked={selected.has(c.id)} onChange={() => toggleSelect(c.id)} /></Td>}
-                  <Td><span className="flex items-center gap-2"><Avatar name={c.display_name} size={24} />{c.display_name}</span></Td>
-                  <Td>{c.phone || '—'}</Td>
-                  <Td>{c.email || '—'}</Td>
-                  <Td>{c.owner_id ? memberEmail(c.owner_id) : '—'}</Td>
+                  <Td className="cursor-pointer" onClick={() => setOpenContactId(c.id)}><span className="flex items-center gap-2"><Avatar name={c.display_name} size={24} />{c.display_name}</span></Td>
+                  <Td className="cursor-pointer" onClick={() => setOpenContactId(c.id)}>{c.phone || '—'}</Td>
+                  <Td className="cursor-pointer" onClick={() => setOpenContactId(c.id)}>{c.email || '—'}</Td>
+                  <Td className="cursor-pointer" onClick={() => setOpenContactId(c.id)}>{c.owner_id ? memberEmail(c.owner_id) : '—'}</Td>
                   <Td align="right"><span className={c.lead_score > 0 ? 'text-success font-medium' : c.lead_score < 0 ? 'text-danger font-medium' : 'text-muted'}>{c.lead_score}</span></Td>
-                  <Td>
+                  <Td onClick={(e) => e.stopPropagation()}>
                     {canManage ? (
                       <Select className="h-7" value={c.lead_status} onChange={(e) => changeStatus(c, e.target.value)}>
                         {LEAD_STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
@@ -201,6 +203,14 @@ function ContactsTab({ authFetch, SALES_API_BASE, canManage }) {
           )}
         </div>
       </Drawer>
+
+      {openContactId && (
+        <ContactDetailDrawer
+          contactId={openContactId} onClose={() => setOpenContactId(null)}
+          authFetch={authFetch} SALES_API_BASE={SALES_API_BASE} canManage={canManage}
+          onChanged={load}
+        />
+      )}
     </>
   );
 }

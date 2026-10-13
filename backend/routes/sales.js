@@ -211,11 +211,13 @@ router.get('/sales/companies/:id', requireHub('sales'), asyncHandler(async (req,
   if (error) throw error;
   if (!company) return res.status(404).json({ error: 'Company not found.' });
 
-  const [{ data: contacts }, { data: deals }] = await Promise.all([
+  const [{ data: contacts }, { data: deals }, { data: activities }, { data: owner }] = await Promise.all([
     scoped(client, req.tenantId, 'contacts').select('id, display_name, phone, email, job_title, lead_status').eq('company_id', company.id),
-    scoped(client, req.tenantId, 'deals').select('id, name, amount, status, stage_id').eq('company_id', company.id)
+    scoped(client, req.tenantId, 'deals').select('id, name, amount, status, stage_id').eq('company_id', company.id),
+    scoped(client, req.tenantId, 'sales_activities').select('*').eq('company_id', company.id).order('created_at', { ascending: false }),
+    company.owner_id ? scoped(client, req.tenantId, 'users').select('id, email').eq('id', company.owner_id).maybeSingle() : Promise.resolve({ data: null })
   ]);
-  res.json({ company, contacts: contacts || [], deals: deals || [] });
+  res.json({ company, contacts: contacts || [], deals: deals || [], activities: activities || [], owner: owner || null });
 }));
 
 router.patch('/sales/companies/:id', requireHub('sales'), requireRole('member'), validate(companySchema), asyncHandler(async (req, res) => {
@@ -423,11 +425,26 @@ router.get('/sales/contacts/:id', requireHub('sales'), asyncHandler(async (req, 
   if (error) throw error;
   if (!contact) return res.status(404).json({ error: 'Contact not found.' });
 
-  const [{ data: deals }, { data: activities }] = await Promise.all([
+  const [{ data: primaryDeals }, { data: activities }, { data: company }, { data: owner }, { data: dealContactLinks }] = await Promise.all([
     scoped(client, req.tenantId, 'deals').select('id, name, amount, status, stage_id').eq('contact_id', contact.id),
-    scoped(client, req.tenantId, 'sales_activities').select('*').eq('contact_id', contact.id).order('created_at', { ascending: false })
+    scoped(client, req.tenantId, 'sales_activities').select('*').eq('contact_id', contact.id).order('created_at', { ascending: false }),
+    contact.company_id ? scoped(client, req.tenantId, 'companies').select('id, name, domain, industry').eq('id', contact.company_id).maybeSingle() : Promise.resolve({ data: null }),
+    contact.owner_id ? scoped(client, req.tenantId, 'users').select('id, email').eq('id', contact.owner_id).maybeSingle() : Promise.resolve({ data: null }),
+    scoped(client, req.tenantId, 'deal_contacts').select('deal_id').eq('contact_id', contact.id)
   ]);
-  res.json({ contact, deals: deals || [], activities: activities || [] });
+
+  // A contact can be linked to a deal as a secondary contact (deal_contacts)
+  // without being that deal's primary contact_id — the detail view's deal
+  // list should show both, not just the ones where this is the primary.
+  const secondaryDealIds = (dealContactLinks || []).map((l) => l.deal_id).filter((id) => !(primaryDeals || []).some((d) => d.id === id));
+  const { data: secondaryDeals } = secondaryDealIds.length
+    ? await scoped(client, req.tenantId, 'deals').select('id, name, amount, status, stage_id').in('id', secondaryDealIds)
+    : { data: [] };
+
+  res.json({
+    contact, deals: [...(primaryDeals || []), ...(secondaryDeals || [])], activities: activities || [],
+    company: company || null, owner: owner || null
+  });
 }));
 
 router.patch('/sales/contacts/:id', requireHub('sales'), requireRole('member'), validate(updateContactSchema), asyncHandler(async (req, res) => {

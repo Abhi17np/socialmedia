@@ -17,6 +17,7 @@ function CompaniesTab({ authFetch, SALES_API_BASE, canManage, canDelete }) {
   const [notice, setNotice] = useState(null);
   const [open, setOpen] = useState(false);
   const [detail, setDetail] = useState(null);
+  const [detailForm, setDetailForm] = useState(null);
   const [form, setForm] = useState({ name: '', domain: '', industry: '', ownerId: '' });
   const [selected, setSelected] = useState(new Set());
   const [bulkOwnerId, setBulkOwnerId] = useState('');
@@ -44,7 +45,32 @@ function CompaniesTab({ authFetch, SALES_API_BASE, canManage, canDelete }) {
   const openDetail = async (company) => {
     const res = await authFetch(`${SALES_API_BASE}/companies/${company.id}`);
     const data = await res.json();
-    if (res.ok) setDetail(data);
+    if (res.ok) {
+      setDetail(data);
+      setDetailForm({
+        name: data.company.name, domain: data.company.domain || '', industry: data.company.industry || '',
+        size: data.company.size || '', phone: data.company.phone || '', address: data.company.address || '',
+        notes: data.company.notes || '', ownerId: data.company.owner_id || ''
+      });
+    }
+  };
+
+  // PATCH /sales/companies/:id validates against the full companySchema
+  // (name required) rather than a partial-update schema, so every save
+  // here resends the whole form, not just the field that changed.
+  const saveDetail = async (overrides) => {
+    const next = { ...detailForm, ...overrides };
+    setDetailForm(next);
+    if (!next.name.trim()) return;
+    try {
+      const res = await authFetch(`${SALES_API_BASE}/companies/${detail.company.id}`, { method: 'PATCH', body: JSON.stringify({ ...next, ownerId: next.ownerId || undefined, size: next.size || undefined }) });
+      const result = await res.json();
+      if (!res.ok) throw new Error(result.error || 'Could not save.');
+      setDetail((prev) => ({ ...prev, company: result.company }));
+      load();
+    } catch (err) {
+      setError(err.message);
+    }
   };
 
   const toggleSelect = (id) => setSelected((prev) => {
@@ -169,8 +195,31 @@ function CompaniesTab({ authFetch, SALES_API_BASE, canManage, canDelete }) {
       </Modal>
 
       <Drawer open={!!detail} onClose={() => setDetail(null)} title={detail?.company?.name} subtitle={detail?.company?.industry}>
-        {detail && (
+        {detail && detailForm && (
           <div className="p-4 flex flex-col gap-4">
+            <div className="grid grid-cols-2 gap-3">
+              <Field label="Name">
+                <Input value={detailForm.name} disabled={!canManage} onChange={(e) => setDetailForm({ ...detailForm, name: e.target.value })} onBlur={(e) => saveDetail({ name: e.target.value })} />
+              </Field>
+              <Field label="Industry">
+                <Input value={detailForm.industry} disabled={!canManage} onChange={(e) => setDetailForm({ ...detailForm, industry: e.target.value })} onBlur={(e) => saveDetail({ industry: e.target.value })} />
+              </Field>
+              <Field label="Domain">
+                <Input value={detailForm.domain} disabled={!canManage} onChange={(e) => setDetailForm({ ...detailForm, domain: e.target.value })} onBlur={(e) => saveDetail({ domain: e.target.value })} />
+              </Field>
+              <Field label="Phone">
+                <Input value={detailForm.phone} disabled={!canManage} onChange={(e) => setDetailForm({ ...detailForm, phone: e.target.value })} onBlur={(e) => saveDetail({ phone: e.target.value })} />
+              </Field>
+              <Field label="Owner" className="col-span-2">
+                <Select value={detailForm.ownerId} disabled={!canManage} onChange={(e) => saveDetail({ ownerId: e.target.value })}>
+                  <option value="">Unassigned</option>
+                  {members.map((m) => <option key={m.id} value={m.id}>{m.email}</option>)}
+                </Select>
+              </Field>
+              <Field label="Notes" className="col-span-2">
+                <Input value={detailForm.notes} disabled={!canManage} onChange={(e) => setDetailForm({ ...detailForm, notes: e.target.value })} onBlur={(e) => saveDetail({ notes: e.target.value })} />
+              </Field>
+            </div>
             <div>
               <div className="eyebrow mb-1.5">Contacts ({detail.contacts.length})</div>
               {detail.contacts.length === 0 ? <p className="text-xs text-muted">No contacts linked yet.</p> : (
@@ -187,6 +236,16 @@ function CompaniesTab({ authFetch, SALES_API_BASE, canManage, canDelete }) {
                 <div className="flex flex-col gap-1.5">
                   {detail.deals.map((d) => (
                     <div key={d.id} className="flex items-center justify-between text-xs"><span>{d.name}</span><span className="tabular-nums text-muted">{money(d.amount)}</span></div>
+                  ))}
+                </div>
+              )}
+            </div>
+            <div>
+              <div className="eyebrow mb-1.5">Activity timeline ({detail.activities?.length || 0})</div>
+              {!detail.activities || detail.activities.length === 0 ? <p className="text-xs text-muted">No calls, emails or notes logged yet.</p> : (
+                <div className="flex flex-col gap-1.5">
+                  {detail.activities.map((a) => (
+                    <div key={a.id} className="flex items-center justify-between text-xs"><span>{a.subject}</span><Chip tone={a.status === 'completed' ? 'success' : 'neutral'}>{a.status}</Chip></div>
                   ))}
                 </div>
               )}
