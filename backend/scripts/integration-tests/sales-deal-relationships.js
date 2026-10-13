@@ -131,8 +131,12 @@ async function main() {
 
   r = await api('/api/v1/sales/deals', {
     method: 'POST', auth: memberToken,
-    body: { name: 'Best case deal', pipelineId: pipeline.id, stageId: newStage.id, amount: 40000, forecastCategory: 'best_case' }
+    body: { name: 'Best case deal', pipelineId: pipeline.id, stageId: newStage.id, amount: 40000, contactId: secondaryContact.id, companyId: company.id, ownerId, forecastCategory: 'best_case' }
   });
+  assert.strictEqual(r.status, 201, JSON.stringify(r.data));
+  const bestCaseDeal = r.data.deal;
+
+  r = await api('/api/v1/sales/activities', { method: 'POST', auth: memberToken, body: { type: 'call', subject: 'Follow up', dealId: bestCaseDeal.id, dueAt: '2026-12-01T10:00:00Z' } });
   assert.strictEqual(r.status, 201, JSON.stringify(r.data));
 
   const now = new Date();
@@ -142,6 +146,18 @@ async function main() {
   assert.strictEqual(r.status, 200, JSON.stringify(r.data));
   assert.strictEqual(r.data.forecastByCategory.best_case, 40000, 'expected the new best_case deal counted: ' + JSON.stringify(r.data.forecastByCategory));
   console.log('✓ GET /sales/dashboard forecastByCategory reflects real open-deal amounts per category');
+
+  // --- GET /sales/deals list enrichment (company/contact/owner/next activity) ---
+
+  r = await api(`/api/v1/sales/deals?pipelineId=${pipeline.id}`, { auth: memberToken });
+  assert.strictEqual(r.status, 200, JSON.stringify(r.data));
+  const listedBestCase = r.data.deals.find((d) => d.id === bestCaseDeal.id);
+  assert.ok(listedBestCase, 'expected the best-case deal in the list');
+  assert.strictEqual(listedBestCase.companyName, 'Relationship Co');
+  assert.strictEqual(listedBestCase.contactName, 'Secondary Contact');
+  assert.strictEqual(listedBestCase.ownerEmail, (await api('/api/v1/team/members', { auth: adminToken })).data.members.find((m) => m.id === ownerId)?.email);
+  assert.strictEqual(listedBestCase.nextActivityDueAt, '2026-12-01T10:00:00+00:00');
+  console.log('✓ GET /sales/deals embeds companyName/contactName/ownerEmail/nextActivityDueAt for real deal-card rendering');
 
   console.log('\nALL SALES DEAL-RELATIONSHIPS/FORECAST-CATEGORY ASSERTIONS PASSED');
   process.exit(0);

@@ -70,7 +70,7 @@ function SalesHubInner({ authFetch, role }) {
       <PageBody>
         {tab === 'dashboard' && <DashboardTab authFetch={authFetch} SALES_API_BASE={SALES_API_BASE} />}
         {tab === 'workspace' && <WorkspaceTab authFetch={authFetch} SALES_API_BASE={SALES_API_BASE} />}
-        {tab === 'pipeline' && <PipelineTab authFetch={authFetch} SALES_API_BASE={SALES_API_BASE} canManage={canManage} canAdmin={canAdmin} />}
+        {tab === 'pipeline' && <PipelineTab authFetch={authFetch} SALES_API_BASE={SALES_API_BASE} canManage={canManage} canAdmin={canAdmin} canDelete={canDelete} />}
         {tab === 'companies' && <CompaniesTab authFetch={authFetch} SALES_API_BASE={SALES_API_BASE} canManage={canManage} canDelete={canDelete} />}
         {tab === 'contacts' && <ContactsTab authFetch={authFetch} SALES_API_BASE={SALES_API_BASE} canManage={canManage} />}
         {tab === 'activities' && <ActivitiesTab authFetch={authFetch} canManage={canManage} canDelete={canDelete} />}

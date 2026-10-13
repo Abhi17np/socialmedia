@@ -655,18 +655,44 @@ router.get('/sales/deals', requireHub('sales'), asyncHandler(async (req, res) =>
   // stored — nothing to keep in sync when a threshold changes or a deal
   // moves. Only open deals can be stale; won/lost deals are done.
   const stageIds = [...new Set((data || []).map((d) => d.stage_id))];
-  const { data: stages, error: stagesError } = stageIds.length
-    ? await scoped(client, req.tenantId, 'deal_stages').select('id, stale_after_days').in('id', stageIds)
-    : { data: [], error: null };
+  const companyIds = [...new Set((data || []).map((d) => d.company_id).filter(Boolean))];
+  const contactIds = [...new Set((data || []).map((d) => d.contact_id).filter(Boolean))];
+  const ownerIds = [...new Set((data || []).map((d) => d.owner_id).filter(Boolean))];
+  const dealIds = (data || []).map((d) => d.id);
+
+  const [
+    { data: stages, error: stagesError }, { data: companies }, { data: contacts }, { data: owners }, { data: openActivities }
+  ] = await Promise.all([
+    stageIds.length ? scoped(client, req.tenantId, 'deal_stages').select('id, stale_after_days').in('id', stageIds) : Promise.resolve({ data: [] }),
+    companyIds.length ? scoped(client, req.tenantId, 'companies').select('id, name').in('id', companyIds) : Promise.resolve({ data: [] }),
+    contactIds.length ? scoped(client, req.tenantId, 'contacts').select('id, display_name').in('id', contactIds) : Promise.resolve({ data: [] }),
+    ownerIds.length ? scoped(client, req.tenantId, 'users').select('id, email').in('id', ownerIds) : Promise.resolve({ data: [] }),
+    dealIds.length
+      ? scoped(client, req.tenantId, 'sales_activities').select('deal_id, due_at').eq('status', 'open').in('deal_id', dealIds).not('due_at', 'is', null).order('due_at')
+      : Promise.resolve({ data: [] })
+  ]);
   if (stagesError) throw stagesError;
   const staleAfterByStage = new Map((stages || []).map((s) => [s.id, s.stale_after_days]));
+  const companyNameById = new Map((companies || []).map((c) => [c.id, c.name]));
+  const contactNameById = new Map((contacts || []).map((c) => [c.id, c.display_name]));
+  const ownerEmailById = new Map((owners || []).map((u) => [u.id, u.email]));
+  const nextActivityByDeal = new Map();
+  for (const a of openActivities || []) {
+    if (!nextActivityByDeal.has(a.deal_id)) nextActivityByDeal.set(a.deal_id, a.due_at); // query is ordered by due_at ascending, so the first one seen per deal is the soonest
+  }
 
   const now = Date.now();
   const deals = (data || []).map((d) => {
     const staleAfterDays = staleAfterByStage.get(d.stage_id);
     const isStale = d.status === 'open' && staleAfterDays != null &&
       (now - new Date(d.updated_at).getTime()) > staleAfterDays * 86400000;
-    return { ...d, isStale };
+    return {
+      ...d, isStale,
+      companyName: d.company_id ? companyNameById.get(d.company_id) || null : null,
+      contactName: d.contact_id ? contactNameById.get(d.contact_id) || null : null,
+      ownerEmail: d.owner_id ? ownerEmailById.get(d.owner_id) || null : null,
+      nextActivityDueAt: nextActivityByDeal.get(d.id) || null
+    };
   });
   res.json({ deals });
 }));

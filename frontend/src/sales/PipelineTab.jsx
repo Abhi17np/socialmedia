@@ -3,17 +3,18 @@
 import { useEffect, useState } from 'react';
 import {
   RefreshCw, Plus, KanbanSquare, Table2, Settings2, Flame, GripVertical,
-  Trash2, ArrowUp, ArrowDown, IndianRupee
+  Trash2, ArrowUp, ArrowDown, IndianRupee, Building2, User, CalendarClock
 } from 'lucide-react';
 import {
   Button, IconButton, Select, Input, Field, Checkbox,
   Banner, Modal, Drawer, EmptyState, Skeleton, Chip
 } from '../ui';
 import { money } from './format';
+import DealDetailDrawer from './DealDetailDrawer';
 
 // ------------------------------------------------------------- Pipeline
 
-function PipelineTab({ authFetch, SALES_API_BASE, canManage, canAdmin }) {
+function PipelineTab({ authFetch, SALES_API_BASE, canManage, canAdmin, canDelete }) {
   const [pipelines, setPipelines] = useState(null);
   const [activePipelineId, setActivePipelineId] = useState(null);
   const [deals, setDeals] = useState(null);
@@ -27,6 +28,7 @@ function PipelineTab({ authFetch, SALES_API_BASE, canManage, canAdmin }) {
   const [stageEditorOpen, setStageEditorOpen] = useState(false);
   const [lostMove, setLostMove] = useState(null); // { deal, stage } | null
   const [lostReason, setLostReason] = useState('');
+  const [openDealId, setOpenDealId] = useState(null);
 
   const loadPipelines = () => {
     authFetch(`${SALES_API_BASE}/pipelines`).then((r) => r.json()).then((d) => {
@@ -144,9 +146,20 @@ function PipelineTab({ authFetch, SALES_API_BASE, canManage, canAdmin }) {
           newDealOpen={newDealOpen} setNewDealOpen={setNewDealOpen}
           dealForm={dealForm} setDealForm={setDealForm} createDeal={createDeal}
           draggingDeal={draggingDeal} setDraggingDeal={setDraggingDeal} moveDeal={moveDeal}
+          onOpenDeal={setOpenDealId}
         />
       ) : (
-        <TableView pipeline={pipeline} deals={deals} canManage={canManage} moveDeal={moveDeal} />
+        <TableView pipeline={pipeline} deals={deals} canManage={canManage} moveDeal={moveDeal} onOpenDeal={setOpenDealId} />
+      )}
+
+      {openDealId && (
+        <DealDetailDrawer
+          dealId={openDealId} onClose={() => setOpenDealId(null)}
+          authFetch={authFetch} SALES_API_BASE={SALES_API_BASE}
+          canManage={canManage} canDelete={canDelete}
+          pipelineStages={pipeline?.stages}
+          onChanged={() => loadDeals(activePipelineId)}
+        />
       )}
 
       <PipelineModal open={newPipelineOpen} name={pipelineName} setName={setPipelineName} onClose={() => setNewPipelineOpen(false)} onCreate={createPipeline} />
@@ -178,12 +191,36 @@ function StaleBadge({ isStale }) {
   return <span title="No activity in this stage for longer than its stale threshold"><Chip tone="danger"><Flame size={10} className="inline -mt-0.5 mr-0.5" />Stale</Chip></span>;
 }
 
-function KanbanView({ pipeline, deals, canManage, newDealOpen, setNewDealOpen, dealForm, setDealForm, createDeal, draggingDeal, setDraggingDeal, moveDeal }) {
+function DealMeta({ deal }) {
+  const hasMeta = deal.companyName || deal.contactName || deal.ownerEmail || deal.nextActivityDueAt;
+  if (!hasMeta) return null;
+  return (
+    <div className="flex flex-col gap-0.5 mt-1.5 text-[11px] text-muted">
+      {(deal.companyName || deal.contactName) && (
+        <div className="flex items-center gap-1 truncate">
+          {deal.companyName && <Building2 size={10} className="shrink-0" />}
+          <span className="truncate">{deal.companyName}{deal.companyName && deal.contactName ? ' · ' : ''}{deal.contactName}</span>
+        </div>
+      )}
+      <div className="flex items-center justify-between gap-1">
+        {deal.ownerEmail ? <span className="flex items-center gap-1 truncate"><User size={10} className="shrink-0" />{deal.ownerEmail}</span> : <span />}
+        {deal.nextActivityDueAt && (
+          <span className="flex items-center gap-1 shrink-0" title="Next scheduled activity">
+            <CalendarClock size={10} />{new Date(deal.nextActivityDueAt).toLocaleDateString()}
+          </span>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function KanbanView({ pipeline, deals, canManage, newDealOpen, setNewDealOpen, dealForm, setDealForm, createDeal, draggingDeal, setDraggingDeal, moveDeal, onOpenDeal }) {
   return (
     <div className="flex gap-3 overflow-x-auto pb-2">
       {pipeline.stages.map((stage) => {
         const stageDeals = deals.filter((d) => d.stage_id === stage.id);
         const total = stageDeals.reduce((sum, d) => sum + Number(d.amount || 0), 0);
+        const weighted = stageDeals.reduce((sum, d) => sum + Number(d.amount || 0) * ((stage.probability || 0) / 100), 0);
         return (
           <div
             key={stage.id}
@@ -191,12 +228,15 @@ function KanbanView({ pipeline, deals, canManage, newDealOpen, setNewDealOpen, d
             onDragOver={(e) => e.preventDefault()}
             onDrop={() => draggingDeal && moveDeal(draggingDeal, stage.id)}
           >
-            <div className="px-3 py-2.5 border-b border-hairline flex items-center justify-between">
+            <div className="px-3 py-2.5 border-b border-hairline">
               <div className="flex items-center gap-1.5 min-w-0">
                 <span className="text-xs font-semibold text-ink truncate">{stage.name}</span>
                 <span className="text-[11px] text-subtle shrink-0">{stageDeals.length}</span>
               </div>
-              <span className="text-[11px] tabular-nums text-muted shrink-0">{money(total)}</span>
+              <div className="flex items-center justify-between mt-0.5">
+                <span className="text-[11px] tabular-nums text-ink shrink-0">{money(total)}</span>
+                <span className="text-[10px] tabular-nums text-subtle shrink-0" title="Weighted by this stage's win probability">{money(weighted)} wtd</span>
+              </div>
             </div>
             <div className="p-2 flex flex-col gap-2 min-h-[80px]">
               {stageDeals.map((deal) => (
@@ -205,7 +245,8 @@ function KanbanView({ pipeline, deals, canManage, newDealOpen, setNewDealOpen, d
                   draggable={canManage}
                   onDragStart={() => setDraggingDeal(deal)}
                   onDragEnd={() => setDraggingDeal(null)}
-                  className="bg-card border border-hairline rounded-ui p-2.5 cursor-grab active:cursor-grabbing hover:border-brand transition-colors"
+                  onClick={() => onOpenDeal(deal.id)}
+                  className="bg-card border border-hairline rounded-ui p-2.5 cursor-pointer hover:border-brand transition-colors"
                 >
                   <div className="flex items-center justify-between gap-1.5">
                     <div className="text-xs font-medium text-ink truncate">{deal.name}</div>
@@ -214,6 +255,7 @@ function KanbanView({ pipeline, deals, canManage, newDealOpen, setNewDealOpen, d
                   <div className="flex items-center gap-1 mt-1 text-[11px] text-muted tabular-nums">
                     <IndianRupee size={10} />{money(deal.amount, deal.currency).replace(/^[^\d]+/, '')}
                   </div>
+                  <DealMeta deal={deal} />
                 </div>
               ))}
               {canManage && (
@@ -240,7 +282,7 @@ function KanbanView({ pipeline, deals, canManage, newDealOpen, setNewDealOpen, d
   );
 }
 
-function TableView({ pipeline, deals, canManage, moveDeal }) {
+function TableView({ pipeline, deals, canManage, moveDeal, onOpenDeal }) {
   const stageById = new Map(pipeline.stages.map((s) => [s.id, s]));
   return (
     <div className="bg-card border border-hairline rounded-card overflow-hidden">
@@ -248,6 +290,8 @@ function TableView({ pipeline, deals, canManage, moveDeal }) {
         <thead>
           <tr className="border-b border-hairline text-left">
             <th className="px-3 py-2 font-medium text-subtle">Deal</th>
+            <th className="px-3 py-2 font-medium text-subtle">Company / contact</th>
+            <th className="px-3 py-2 font-medium text-subtle">Owner</th>
             <th className="px-3 py-2 font-medium text-subtle">Stage</th>
             <th className="px-3 py-2 font-medium text-subtle text-right">Amount</th>
             <th className="px-3 py-2 font-medium text-subtle">Expected close</th>
@@ -256,18 +300,22 @@ function TableView({ pipeline, deals, canManage, moveDeal }) {
         </thead>
         <tbody>
           {deals.length === 0 ? (
-            <tr><td colSpan={5} className="px-3 py-8 text-center text-muted">No deals in this pipeline yet.</td></tr>
+            <tr><td colSpan={7} className="px-3 py-8 text-center text-muted">No deals in this pipeline yet.</td></tr>
           ) : deals.map((deal) => {
             const stage = stageById.get(deal.stage_id);
             return (
               <tr key={deal.id} className="border-b border-hairline last:border-b-0 hover:bg-canvas transition-colors">
-                <td className="px-3 py-2">
+                <td className="px-3 py-2 cursor-pointer" onClick={() => onOpenDeal(deal.id)}>
                   <div className="flex items-center gap-1.5">
                     <span className="font-medium text-ink">{deal.name}</span>
                     <StaleBadge isStale={deal.isStale} />
                   </div>
                 </td>
-                <td className="px-3 py-2">
+                <td className="px-3 py-2 text-muted truncate max-w-[180px]">
+                  {deal.companyName}{deal.companyName && deal.contactName ? ' · ' : ''}{deal.contactName}{!deal.companyName && !deal.contactName && '—'}
+                </td>
+                <td className="px-3 py-2 text-muted truncate max-w-[160px]">{deal.ownerEmail || '—'}</td>
+                <td className="px-3 py-2" onClick={(e) => e.stopPropagation()}>
                   {canManage ? (
                     <Select className="h-7" value={deal.stage_id} onChange={(e) => moveDeal(deal, e.target.value)}>
                       {pipeline.stages.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
