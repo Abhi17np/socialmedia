@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
 import Link from 'next/link';
 import {
@@ -9,7 +9,12 @@ import {
   CalendarDays,
   Inbox as InboxIcon,
   LineChart,
-  MoreHorizontal
+  MoreHorizontal,
+  ChevronsUpDown,
+  Moon,
+  Sun,
+  LogOut,
+  WifiOff
 } from 'lucide-react';
 import SocialNav from '../../src/social/SocialNav';
 import SalesNav from '../../src/sales/SalesNav';
@@ -31,9 +36,13 @@ import { Button } from '../../src/ui';
 // current route belongs to (hubForPathname) — Social Hub's own nav,
 // Sales Hub's own nav, or Marketing Hub's own nav — the HubSpot pattern
 // of "each hub owns its sidebar, settings lives behind one global
-// gear icon" (that gear, plus search/notifications/help/profile, all
-// live in TopBar now). Each page still supplies its own 56px PageBar
-// underneath this for page-specific title/search/actions.
+// gear icon" (that gear, plus search/notifications/help, live in
+// TopBar). The profile/account menu — email, tenant, theme, log out —
+// stays anchored at the bottom of the sidebar instead, the same
+// workspace-switcher-card spot it had before the redesign: it's
+// identity/account chrome, not a hub-switching concern, and keeping it
+// in the sidebar (rather than duplicating it into the top bar too)
+// means there's exactly one place it lives.
 //
 // Auth/session is unchanged by any of this: one tenant JWT
 // (authFetch/token below) already covers Social, Sales and Marketing
@@ -78,6 +87,8 @@ export default function AppShellLayout({ children }) {
   const [me, setMe] = useState(null);
   const [openCount, setOpenCount] = useState(0);
   const [theme, toggleTheme] = useTheme();
+  const [profileMenuOpen, setProfileMenuOpen] = useState(false);
+  const profileMenuRef = useRef(null);
 
   // Distinct from "no token" (redirect to /login) and from "a specific
   // request errored" (that page's own error state) — this means the
@@ -162,29 +173,29 @@ export default function AppShellLayout({ children }) {
       .catch(() => {});
   }, [token, authFetch, pathname]);
 
+  useEffect(() => {
+    if (!profileMenuOpen) return;
+    const onClick = (e) => {
+      if (profileMenuRef.current && !profileMenuRef.current.contains(e.target)) setProfileMenuOpen(false);
+    };
+    document.addEventListener('mousedown', onClick);
+    return () => document.removeEventListener('mousedown', onClick);
+  }, [profileMenuOpen]);
+
   if (!checkedStorage || !token) return null; // redirecting to /login, or still reading localStorage
 
   const role = me?.user?.role || 'viewer';
+  const email = me?.user?.email;
   const activeHub = hubForPathname(pathname);
 
   return (
     <div className="h-full flex flex-col bg-canvas text-ink">
-      <TopBar
-        authFetch={authFetch}
-        pathname={pathname}
-        me={me}
-        role={role}
-        openCount={openCount}
-        theme={theme}
-        toggleTheme={toggleTheme}
-        handleLogout={handleLogout}
-        serverUnreachable={serverUnreachable}
-      />
+      <TopBar authFetch={authFetch} pathname={pathname} me={me} role={role} openCount={openCount} />
 
       <div className="flex-1 flex min-h-0">
         {/* ---------------------------------------------- Navigation rail */}
-        <aside className="w-[248px] shrink-0 h-full bg-card border-r border-hairline flex-col z-20 hidden lg:flex">
-          <div className="flex flex-col min-h-0 h-full">
+        <aside className="w-[248px] shrink-0 h-full bg-card border-r border-hairline flex-col justify-between z-20 hidden lg:flex">
+          <div className="flex flex-col min-h-0">
             {activeHub === 'social' && (
               <div className="p-3 pb-1 shrink-0">
                 <Link
@@ -201,11 +212,64 @@ export default function AppShellLayout({ children }) {
               </div>
             )}
 
-            <div className="overflow-y-auto min-h-0 flex-1">
+            <div className="overflow-y-auto min-h-0">
               {activeHub === 'sales' && <SalesNav role={role} />}
               {activeHub === 'marketing' && <MarketingNav role={role} />}
               {activeHub === 'social' && <SocialNav role={role} openCount={openCount} />}
             </div>
+          </div>
+
+          {/* Profile/account menu — shared across every hub's sidebar,
+              not hub-specific, so it renders here rather than inside
+              SocialNav/SalesNav/MarketingNav. */}
+          <div className="p-3 border-t border-hairline shrink-0 relative" ref={profileMenuRef}>
+            {profileMenuOpen && (
+              <div
+                className="absolute bottom-[calc(100%-4px)] left-3 right-3 bg-card border border-hairline rounded-surface
+                           shadow-[var(--shadow-flyout)] p-1 z-30"
+              >
+                <button
+                  onClick={toggleTheme}
+                  className="w-full h-8 px-2 rounded-ui flex items-center gap-2 text-xs text-muted hover:text-ink hover:bg-canvas transition-colors"
+                >
+                  {theme === 'dark' ? <Sun size={15} /> : <Moon size={15} />}
+                  {theme === 'dark' ? 'Light theme' : 'Dark theme'}
+                </button>
+                <button
+                  onClick={handleLogout}
+                  className="w-full h-8 px-2 rounded-ui flex items-center gap-2 text-xs text-muted hover:text-ink hover:bg-canvas transition-colors"
+                >
+                  <LogOut size={15} />
+                  Log out
+                </button>
+              </div>
+            )}
+
+            <button
+              onClick={() => setProfileMenuOpen((v) => !v)}
+              className="w-full p-2 rounded-ui bg-canvas border border-hairline flex items-center justify-between gap-2 hover:bg-sunken transition-colors text-left"
+            >
+              <span className="flex items-center gap-2 min-w-0">
+                <span
+                  className={`w-7 h-7 rounded font-semibold text-[11px] flex items-center justify-center shrink-0 ${
+                    serverUnreachable ? 'bg-danger-subtle text-danger' : 'bg-brand/10 text-brand'
+                  }`}
+                >
+                  {serverUnreachable ? <WifiOff size={14} /> : email ? email[0].toUpperCase() : '·'}
+                </span>
+                <span className="flex flex-col min-w-0 leading-tight">
+                  <span className="font-medium text-xs text-ink truncate" title={email}>
+                    {serverUnreachable ? 'Can’t reach server' : email || 'Loading…'}
+                  </span>
+                  {me?.tenant && (
+                    <span className="text-[11px] text-muted truncate">
+                      {me.tenant.name} · {role}{me.tenant.plan && ` · ${me.tenant.plan}`}
+                    </span>
+                  )}
+                </span>
+              </span>
+              <ChevronsUpDown size={15} className="text-subtle shrink-0" />
+            </button>
           </div>
         </aside>
 
