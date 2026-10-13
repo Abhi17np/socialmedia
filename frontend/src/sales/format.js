@@ -5,6 +5,21 @@ export function money(amount, currency) {
   return new Intl.NumberFormat('en-IN', { style: 'currency', currency: currency || 'INR', maximumFractionDigits: 0 }).format(amount || 0);
 }
 
+// Deals aren't guaranteed to share a currency, so every dashboard
+// aggregate the backend sends is grouped as {currency: amount}, never
+// flattened into one number — summing ₹ and $ into a single total
+// would just be wrong. This renders that map as "₹1,00,000 + $500",
+// sorted by currency code so the order is stable across renders, and
+// falls back to a plain zero when the tenant has no deals at all.
+export function moneyByCurrency(amountsByCurrency) {
+  const entries = Object.entries(amountsByCurrency || {}).filter(([, amt]) => amt !== 0);
+  if (entries.length === 0) return money(0);
+  return entries
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([currency, amt]) => money(amt, currency))
+    .join(' + ');
+}
+
 // A GET /export route needs the Authorization header authFetch adds —
 // a plain <a href> or window.open() can't carry that, so the file has
 // to come back as a blob through authFetch and get "clicked" via a

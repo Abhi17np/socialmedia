@@ -1,7 +1,7 @@
 'use client';
 
 import React from 'react';
-import { AlertTriangle, CheckCircle2, Info, Loader2, X } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, Info, Loader2, X, ChevronLeft, ChevronRight } from 'lucide-react';
 
 /*
  * The component set DESIGN.md specifies, built once here so no screen
@@ -72,6 +72,7 @@ export function IconButton({ icon: Icon, label, size = 18, className, ...rest })
       className={cx(
         'w-8 h-8 rounded-ui border border-hairline bg-card text-muted',
         'hover:bg-sunken hover:text-ink flex items-center justify-center transition-colors shrink-0',
+        'disabled:opacity-40 disabled:pointer-events-none',
         className
       )}
       {...rest}
@@ -529,6 +530,26 @@ export function Td({ children, align = 'left', className, ...rest }) {
     >
       {children}
     </td>
+  );
+}
+
+// Server-side page/pageSize/total, as every main Sales Hub list route
+// now returns — shows the real range and total, not just "next/prev"
+// with no sense of scale, and disables itself correctly at either end.
+export function Pagination({ page, pageSize, total, onPageChange, className }) {
+  if (total === null || total === undefined) return null;
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
+  const from = total === 0 ? 0 : (page - 1) * pageSize + 1;
+  const to = Math.min(total, page * pageSize);
+  return (
+    <div className={cx('flex items-center justify-between px-4 h-11 border-t border-hairline text-xs text-muted', className)}>
+      <span>{total === 0 ? 'No results' : `${from}–${to} of ${total}`}</span>
+      <div className="flex items-center gap-1">
+        <IconButton icon={ChevronLeft} label="Previous page" size={14} disabled={page <= 1} onClick={() => onPageChange(page - 1)} />
+        <span className="tabular-nums px-1">Page {page} of {totalPages}</span>
+        <IconButton icon={ChevronRight} label="Next page" size={14} disabled={page >= totalPages} onClick={() => onPageChange(page + 1)} />
+      </div>
+    </div>
   );
 }
 

@@ -1,10 +1,10 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { Plus, Building2, Upload, Download, Copy } from 'lucide-react';
+import { Plus, Building2, Upload, Download, Copy, Search } from 'lucide-react';
 import {
   Button, Panel, PanelHeader, Table, Th, Td, Input, Select, Field,
-  Banner, Modal, Drawer, EmptyState, Skeleton, Chip, Checkbox
+  Banner, Modal, Drawer, EmptyState, Skeleton, Chip, Checkbox, Pagination
 } from '../ui';
 import { money, downloadViaAuthFetch } from './format';
 import { useTeamMembers } from './useTeamMembers';
@@ -13,6 +13,11 @@ const LEAD_STATUS_TONE = { new: 'neutral', contacted: 'info', qualified: 'brand'
 
 function CompaniesTab({ authFetch, SALES_API_BASE, canManage, canDelete, openId }) {
   const [companies, setCompanies] = useState(null);
+  const [page, setPage] = useState(1);
+  const [total, setTotal] = useState(null);
+  const [search, setSearch] = useState('');
+  const [searchInput, setSearchInput] = useState('');
+  const PAGE_SIZE = 50;
   const [error, setError] = useState(null);
   const [notice, setNotice] = useState(null);
   const [open, setOpen] = useState(false);
@@ -23,21 +28,34 @@ function CompaniesTab({ authFetch, SALES_API_BASE, canManage, canDelete, openId 
   const [bulkOwnerId, setBulkOwnerId] = useState('');
   const [duplicates, setDuplicates] = useState(null);
   const fileInputRef = useRef(null);
+  const searchDebounce = useRef(null);
   const members = useTeamMembers(authFetch);
   const memberEmail = (id) => members.find((m) => m.id === id)?.email || '—';
 
-  const load = () => { authFetch(`${SALES_API_BASE}/companies`).then((r) => r.json()).then((d) => setCompanies(d.companies || [])).catch((e) => setError(e.message)); };
-  useEffect(load, []); // eslint-disable-line react-hooks/exhaustive-deps
+  const load = () => {
+    const params = new URLSearchParams({ page: String(page), pageSize: String(PAGE_SIZE) });
+    if (search.trim()) params.set('search', search.trim());
+    authFetch(`${SALES_API_BASE}/companies?${params}`).then((r) => r.json())
+      .then((d) => { setCompanies(d.companies || []); setTotal(d.total ?? null); })
+      .catch((e) => setError(e.message));
+  };
+  useEffect(load, [page, search]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { if (openId) openDetail({ id: openId }); }, [openId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const onSearchChange = (value) => {
+    setSearchInput(value);
+    clearTimeout(searchDebounce.current);
+    searchDebounce.current = setTimeout(() => { setPage(1); setSearch(value); }, 300);
+  };
 
   const create = async () => {
     try {
       const res = await authFetch(`${SALES_API_BASE}/companies`, { method: 'POST', body: JSON.stringify({ ...form, ownerId: form.ownerId || undefined }) });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Could not create company.');
-      setCompanies((prev) => [data.company, ...(prev || [])]);
       setOpen(false);
       setForm({ name: '', domain: '', industry: '', ownerId: '' });
+      if (page !== 1) setPage(1); else load();
     } catch (err) {
       setError(err.message);
     }
@@ -79,7 +97,16 @@ function CompaniesTab({ authFetch, SALES_API_BASE, canManage, canDelete, openId 
     if (next.has(id)) next.delete(id); else next.add(id);
     return next;
   });
-  const toggleSelectAll = () => setSelected((prev) => (prev.size === (companies || []).length ? new Set() : new Set((companies || []).map((c) => c.id))));
+  // Selecting "all" only ever affects the current page's rows — other
+  // pages' selections (if any) are preserved, not wiped out, since
+  // `selected` persists across page navigation by design.
+  const toggleSelectAll = () => setSelected((prev) => {
+    const pageIds = (companies || []).map((c) => c.id);
+    const allSelected = pageIds.length > 0 && pageIds.every((id) => prev.has(id));
+    const next = new Set(prev);
+    pageIds.forEach((id) => (allSelected ? next.delete(id) : next.add(id)));
+    return next;
+  });
 
   const bulkAction = async (action, value) => {
     try {
@@ -144,8 +171,10 @@ function CompaniesTab({ authFetch, SALES_API_BASE, canManage, canDelete, openId 
       <Panel className="overflow-hidden">
         <PanelHeader
           title="Companies"
+          meta={total !== null ? `${total} total` : undefined}
           action={
             <div className="flex items-center gap-1.5">
+              <Input icon={Search} placeholder="Search companies…" value={searchInput} onChange={(e) => onSearchChange(e.target.value)} className="h-8 w-48" />
               <Button size="sm" icon={Copy} onClick={loadDuplicates}>Find duplicates</Button>
               <Button size="sm" icon={Download} onClick={exportCsv}>Export</Button>
               {canManage && <Button size="sm" icon={Upload} onClick={() => fileInputRef.current?.click()}>Import</Button>}
@@ -157,27 +186,30 @@ function CompaniesTab({ authFetch, SALES_API_BASE, canManage, canDelete, openId 
         {companies === null ? (
           <div className="p-4 space-y-3"><Skeleton className="h-9" /><Skeleton className="h-9" /></div>
         ) : companies.length === 0 ? (
-          <EmptyState icon={Building2} title="No companies yet" description="Track the organizations your contacts belong to." />
+          <EmptyState icon={Building2} title={search ? 'No companies match your search' : 'No companies yet'} description={search ? 'Try a different name or domain.' : 'Track the organizations your contacts belong to.'} />
         ) : (
-          <Table>
-            <thead>
-              <tr>
-                {canManage && <Th><Checkbox checked={selected.size === companies.length} onChange={toggleSelectAll} /></Th>}
-                <Th>Name</Th><Th>Industry</Th><Th>Domain</Th><Th>Owner</Th>
-              </tr>
-            </thead>
-            <tbody>
-              {companies.map((c) => (
-                <tr key={c.id} className="hover:bg-canvas transition-colors">
-                  {canManage && <Td onClick={(e) => e.stopPropagation()}><Checkbox checked={selected.has(c.id)} onChange={() => toggleSelect(c.id)} /></Td>}
-                  <Td className="cursor-pointer" onClick={() => openDetail(c)}><span className="font-medium">{c.name}</span></Td>
-                  <Td className="cursor-pointer" onClick={() => openDetail(c)}>{c.industry || '—'}</Td>
-                  <Td className="cursor-pointer" onClick={() => openDetail(c)}>{c.domain || '—'}</Td>
-                  <Td>{c.owner_id ? memberEmail(c.owner_id) : '—'}</Td>
+          <>
+            <Table>
+              <thead>
+                <tr>
+                  {canManage && <Th><Checkbox checked={companies.length > 0 && companies.every((c) => selected.has(c.id))} onChange={toggleSelectAll} /></Th>}
+                  <Th>Name</Th><Th>Industry</Th><Th>Domain</Th><Th>Owner</Th>
                 </tr>
-              ))}
-            </tbody>
-          </Table>
+              </thead>
+              <tbody>
+                {companies.map((c) => (
+                  <tr key={c.id} className="hover:bg-canvas transition-colors">
+                    {canManage && <Td onClick={(e) => e.stopPropagation()}><Checkbox checked={selected.has(c.id)} onChange={() => toggleSelect(c.id)} /></Td>}
+                    <Td className="cursor-pointer" onClick={() => openDetail(c)}><span className="font-medium">{c.name}</span></Td>
+                    <Td className="cursor-pointer" onClick={() => openDetail(c)}>{c.industry || '—'}</Td>
+                    <Td className="cursor-pointer" onClick={() => openDetail(c)}>{c.domain || '—'}</Td>
+                    <Td>{c.owner_id ? memberEmail(c.owner_id) : '—'}</Td>
+                  </tr>
+                ))}
+              </tbody>
+            </Table>
+            <Pagination page={page} pageSize={PAGE_SIZE} total={total} onPageChange={setPage} />
+          </>
         )}
       </Panel>
 

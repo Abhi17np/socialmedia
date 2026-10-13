@@ -144,8 +144,8 @@ async function main() {
   const to = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 0)).toISOString().slice(0, 10);
   r = await api(`/api/v1/sales/dashboard?from=${from}&to=${to}`, { auth: memberToken });
   assert.strictEqual(r.status, 200, JSON.stringify(r.data));
-  assert.strictEqual(r.data.forecastByCategory.best_case, 40000, 'expected the new best_case deal counted: ' + JSON.stringify(r.data.forecastByCategory));
-  console.log('✓ GET /sales/dashboard forecastByCategory reflects real open-deal amounts per category');
+  assert.strictEqual(r.data.forecastByCategoryByCurrency.INR.best_case, 40000, 'expected the new best_case deal counted: ' + JSON.stringify(r.data.forecastByCategoryByCurrency));
+  console.log('✓ GET /sales/dashboard forecastByCategoryByCurrency reflects real open-deal amounts per category, grouped by currency');
 
   // --- GET /sales/deals list enrichment (company/contact/owner/next activity) ---
 

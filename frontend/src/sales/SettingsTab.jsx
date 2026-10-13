@@ -260,7 +260,7 @@ function TargetsPanel({ authFetch, SALES_API_BASE }) {
   const [targets, setTargets] = useState(null);
   const [error, setError] = useState(null);
   const [open, setOpen] = useState(false);
-  const [form, setForm] = useState({ ownerId: '', periodStart: '', periodEnd: '', targetAmount: '' });
+  const [form, setForm] = useState({ ownerId: '', periodStart: '', periodEnd: '', targetAmount: '', currency: 'INR' });
   const members = useTeamMembers(authFetch);
   const memberEmail = (id) => members.find((m) => m.id === id)?.email || '—';
 
@@ -271,13 +271,13 @@ function TargetsPanel({ authFetch, SALES_API_BASE }) {
     try {
       const res = await authFetch(`${SALES_API_BASE}/targets`, {
         method: 'POST',
-        body: JSON.stringify({ ownerId: form.ownerId || undefined, periodStart: form.periodStart, periodEnd: form.periodEnd, targetAmount: Number(form.targetAmount) })
+        body: JSON.stringify({ ownerId: form.ownerId || undefined, periodStart: form.periodStart, periodEnd: form.periodEnd, targetAmount: Number(form.targetAmount), currency: form.currency })
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Could not create target.');
       setTargets((prev) => [data.target, ...(prev || [])]);
       setOpen(false);
-      setForm({ ownerId: '', periodStart: '', periodEnd: '', targetAmount: '' });
+      setForm({ ownerId: '', periodStart: '', periodEnd: '', targetAmount: '', currency: 'INR' });
     } catch (err) {
       setError(err.message);
     }

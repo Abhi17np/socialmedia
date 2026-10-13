@@ -1,10 +1,10 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { Plus, Users, Upload, Download, Copy } from 'lucide-react';
+import { Plus, Users, Upload, Download, Copy, Search } from 'lucide-react';
 import {
   Button, Panel, PanelHeader, Table, Th, Td, Input, Select, Field,
-  Banner, Modal, EmptyState, Skeleton, Chip, Checkbox, Drawer, Avatar
+  Banner, Modal, EmptyState, Skeleton, Chip, Checkbox, Drawer, Avatar, Pagination
 } from '../ui';
 import { useTeamMembers } from './useTeamMembers';
 import { downloadViaAuthFetch } from './format';
@@ -15,6 +15,11 @@ const LEAD_STATUSES = ['new', 'contacted', 'qualified', 'unqualified', 'customer
 
 function ContactsTab({ authFetch, SALES_API_BASE, canManage, openId }) {
   const [contacts, setContacts] = useState(null);
+  const [page, setPage] = useState(1);
+  const [total, setTotal] = useState(null);
+  const [search, setSearch] = useState('');
+  const [searchInput, setSearchInput] = useState('');
+  const PAGE_SIZE = 50;
   const [error, setError] = useState(null);
   const [notice, setNotice] = useState(null);
   const [open, setOpen] = useState(false);
@@ -25,21 +30,34 @@ function ContactsTab({ authFetch, SALES_API_BASE, canManage, openId }) {
   const [duplicates, setDuplicates] = useState(null);
   const [openContactId, setOpenContactId] = useState(null);
   const fileInputRef = useRef(null);
+  const searchDebounce = useRef(null);
   const members = useTeamMembers(authFetch);
   const memberEmail = (id) => members.find((m) => m.id === id)?.email || '—';
 
-  const load = () => { authFetch(`${SALES_API_BASE}/contacts`).then((r) => r.json()).then((d) => setContacts(d.contacts || [])).catch((e) => setError(e.message)); };
-  useEffect(load, []); // eslint-disable-line react-hooks/exhaustive-deps
+  const load = () => {
+    const params = new URLSearchParams({ page: String(page), pageSize: String(PAGE_SIZE) });
+    if (search.trim()) params.set('search', search.trim());
+    authFetch(`${SALES_API_BASE}/contacts?${params}`).then((r) => r.json())
+      .then((d) => { setContacts(d.contacts || []); setTotal(d.total ?? null); })
+      .catch((e) => setError(e.message));
+  };
+  useEffect(load, [page, search]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { if (openId) setOpenContactId(openId); }, [openId]);
+
+  const onSearchChange = (value) => {
+    setSearchInput(value);
+    clearTimeout(searchDebounce.current);
+    searchDebounce.current = setTimeout(() => { setPage(1); setSearch(value); }, 300);
+  };
 
   const create = async () => {
     try {
       const res = await authFetch(`${SALES_API_BASE}/contacts`, { method: 'POST', body: JSON.stringify({ ...form, ownerId: form.ownerId || undefined }) });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Could not create lead.');
-      setContacts((prev) => [data.contact, ...(prev || [])]);
       setOpen(false);
       setForm({ displayName: '', phone: '', email: '', ownerId: '' });
+      if (page !== 1) setPage(1); else load();
     } catch (err) {
       setError(err.message);
     }
@@ -61,7 +79,15 @@ function ContactsTab({ authFetch, SALES_API_BASE, canManage, openId }) {
     if (next.has(id)) next.delete(id); else next.add(id);
     return next;
   });
-  const toggleSelectAll = () => setSelected((prev) => (prev.size === (contacts || []).length ? new Set() : new Set((contacts || []).map((c) => c.id))));
+  // "Select all" only touches the current page's rows — selections made
+  // on other pages are preserved, since `selected` persists across pages.
+  const toggleSelectAll = () => setSelected((prev) => {
+    const pageIds = (contacts || []).map((c) => c.id);
+    const allSelected = pageIds.length > 0 && pageIds.every((id) => prev.has(id));
+    const next = new Set(prev);
+    pageIds.forEach((id) => (allSelected ? next.delete(id) : next.add(id)));
+    return next;
+  });
 
   const bulkAction = async (action, value) => {
     try {
@@ -128,9 +154,10 @@ function ContactsTab({ authFetch, SALES_API_BASE, canManage, openId }) {
       <Panel className="overflow-hidden">
         <PanelHeader
           title="Leads"
-          meta="Every contact across your channels, with CRM status and lead score"
+          meta={total !== null ? `${total} total` : undefined}
           action={
             <div className="flex items-center gap-1.5">
+              <Input icon={Search} placeholder="Search leads…" value={searchInput} onChange={(e) => onSearchChange(e.target.value)} className="h-8 w-48" />
               <Button size="sm" icon={Copy} onClick={loadDuplicates}>Find duplicates</Button>
               <Button size="sm" icon={Download} onClick={exportCsv}>Export</Button>
               {canManage && <Button size="sm" icon={Upload} onClick={() => fileInputRef.current?.click()}>Import</Button>}
@@ -142,37 +169,40 @@ function ContactsTab({ authFetch, SALES_API_BASE, canManage, openId }) {
         {contacts === null ? (
           <div className="p-4 space-y-3"><Skeleton className="h-9" /><Skeleton className="h-9" /></div>
         ) : contacts.length === 0 ? (
-          <EmptyState icon={Users} title="No leads yet" description="Leads also appear here automatically from inbound WhatsApp, Instagram and Facebook messages." />
+          <EmptyState icon={Users} title={search ? 'No leads match your search' : 'No leads yet'} description={search ? 'Try a different name, phone or email.' : 'Leads also appear here automatically from inbound WhatsApp, Instagram and Facebook messages.'} />
         ) : (
-          <Table>
-            <thead>
-              <tr>
-                {canManage && <Th><Checkbox checked={selected.size === contacts.length} onChange={toggleSelectAll} /></Th>}
-                <Th>Name</Th><Th>Phone</Th><Th>Email</Th><Th>Owner</Th><Th align="right">Score</Th><Th>Status</Th>
-              </tr>
-            </thead>
-            <tbody>
-              {contacts.map((c) => (
-                <tr key={c.id} className="hover:bg-canvas transition-colors">
-                  {canManage && <Td onClick={(e) => e.stopPropagation()}><Checkbox checked={selected.has(c.id)} onChange={() => toggleSelect(c.id)} /></Td>}
-                  <Td className="cursor-pointer" onClick={() => setOpenContactId(c.id)}><span className="flex items-center gap-2"><Avatar name={c.display_name} size={24} />{c.display_name}</span></Td>
-                  <Td className="cursor-pointer" onClick={() => setOpenContactId(c.id)}>{c.phone || '—'}</Td>
-                  <Td className="cursor-pointer" onClick={() => setOpenContactId(c.id)}>{c.email || '—'}</Td>
-                  <Td className="cursor-pointer" onClick={() => setOpenContactId(c.id)}>{c.owner_id ? memberEmail(c.owner_id) : '—'}</Td>
-                  <Td align="right"><span className={c.lead_score > 0 ? 'text-success font-medium' : c.lead_score < 0 ? 'text-danger font-medium' : 'text-muted'}>{c.lead_score}</span></Td>
-                  <Td onClick={(e) => e.stopPropagation()}>
-                    {canManage ? (
-                      <Select className="h-7" value={c.lead_status} onChange={(e) => changeStatus(c, e.target.value)}>
-                        {LEAD_STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
-                      </Select>
-                    ) : (
-                      <Chip tone={LEAD_STATUS_TONE[c.lead_status]}>{c.lead_status}</Chip>
-                    )}
-                  </Td>
+          <>
+            <Table>
+              <thead>
+                <tr>
+                  {canManage && <Th><Checkbox checked={contacts.length > 0 && contacts.every((c) => selected.has(c.id))} onChange={toggleSelectAll} /></Th>}
+                  <Th>Name</Th><Th>Phone</Th><Th>Email</Th><Th>Owner</Th><Th align="right">Score</Th><Th>Status</Th>
                 </tr>
-              ))}
-            </tbody>
-          </Table>
+              </thead>
+              <tbody>
+                {contacts.map((c) => (
+                  <tr key={c.id} className="hover:bg-canvas transition-colors">
+                    {canManage && <Td onClick={(e) => e.stopPropagation()}><Checkbox checked={selected.has(c.id)} onChange={() => toggleSelect(c.id)} /></Td>}
+                    <Td className="cursor-pointer" onClick={() => setOpenContactId(c.id)}><span className="flex items-center gap-2"><Avatar name={c.display_name} size={24} />{c.display_name}</span></Td>
+                    <Td className="cursor-pointer" onClick={() => setOpenContactId(c.id)}>{c.phone || '—'}</Td>
+                    <Td className="cursor-pointer" onClick={() => setOpenContactId(c.id)}>{c.email || '—'}</Td>
+                    <Td className="cursor-pointer" onClick={() => setOpenContactId(c.id)}>{c.owner_id ? memberEmail(c.owner_id) : '—'}</Td>
+                    <Td align="right"><span className={c.lead_score > 0 ? 'text-success font-medium' : c.lead_score < 0 ? 'text-danger font-medium' : 'text-muted'}>{c.lead_score}</span></Td>
+                    <Td onClick={(e) => e.stopPropagation()}>
+                      {canManage ? (
+                        <Select className="h-7" value={c.lead_status} onChange={(e) => changeStatus(c, e.target.value)}>
+                          {LEAD_STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
+                        </Select>
+                      ) : (
+                        <Chip tone={LEAD_STATUS_TONE[c.lead_status]}>{c.lead_status}</Chip>
+                      )}
+                    </Td>
+                  </tr>
+                ))}
+              </tbody>
+            </Table>
+            <Pagination page={page} pageSize={PAGE_SIZE} total={total} onPageChange={setPage} />
+          </>
         )}
       </Panel>
 

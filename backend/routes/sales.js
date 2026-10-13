@@ -23,7 +23,7 @@ const { fireTrigger, retryRun } = require('../lib/automation');
 const { recomputeLeadScore } = require('../lib/leadScoring');
 const { parseCsvToObjects, toCsv } = require('../lib/csv');
 const {
-  companySchema, contactSchema, updateContactSchema, dealSchema, moveDealStageSchema, salesActivitySchema,
+  companySchema, contactSchema, updateContactSchema, dealSchema, updateDealSchema, moveDealStageSchema, salesActivitySchema,
   dealContactSchema,
   updatePipelineSchema, dealStageSchema, updateDealStageSchema, reorderStagesSchema,
   salesTargetSchema, updateSalesTargetSchema, leadScoringRuleSchema, updateLeadScoringRuleSchema,
@@ -82,7 +82,7 @@ router.get('/sales/companies', requireHub('sales'), asyncHandler(async (req, res
   const client = requireSocialClient(res);
   if (!client) return;
   const { page, pageSize, from, to } = pageParams(req);
-  let query = scoped(client, req.tenantId, 'companies').select('*', { count: 'exact' }).order('created_at', { ascending: false }).range(from, to);
+  let query = scoped(client, req.tenantId, 'companies').select('*', { count: 'exact' }).order('created_at', { ascending: false }).order('id', { ascending: true }).range(from, to);
   if (req.query.search) query = query.ilike('name', `%${req.query.search}%`);
   const { data, error, count } = await query;
   if (error) throw error;
@@ -255,7 +255,7 @@ router.get('/sales/contacts', requireHub('sales'), asyncHandler(async (req, res)
   const client = requireSocialClient(res);
   if (!client) return;
   const { page, pageSize, from, to } = pageParams(req);
-  let query = scoped(client, req.tenantId, 'contacts').select('*', { count: 'exact' }).order('created_at', { ascending: false }).range(from, to);
+  let query = scoped(client, req.tenantId, 'contacts').select('*', { count: 'exact' }).order('created_at', { ascending: false }).order('id', { ascending: true }).range(from, to);
   if (req.query.leadStatus) query = query.eq('lead_status', req.query.leadStatus);
   if (req.query.companyId) query = query.eq('company_id', req.query.companyId);
   if (req.query.search) query = query.or(`display_name.ilike.%${req.query.search}%,phone.ilike.%${req.query.search}%,email.ilike.%${req.query.search}%`);
@@ -660,13 +660,13 @@ router.post('/sales/pipelines/:pipelineId/stages/reorder', requireHub('sales'), 
 router.get('/sales/deals', requireHub('sales'), asyncHandler(async (req, res) => {
   const client = requireSocialClient(res);
   if (!client) return;
-  let query = scoped(client, req.tenantId, 'deals').select('*').order('created_at', { ascending: false });
+  const { page, pageSize, from, to } = pageParams(req);
+  let query = scoped(client, req.tenantId, 'deals').select('*', { count: 'exact' }).order('created_at', { ascending: false }).order('id', { ascending: true }).range(from, to);
   if (req.query.pipelineId) query = query.eq('pipeline_id', req.query.pipelineId);
   if (req.query.stageId) query = query.eq('stage_id', req.query.stageId);
   if (req.query.status) query = query.eq('status', req.query.status);
   if (req.query.search) query = query.ilike('name', `%${req.query.search}%`);
-  if (req.query.pageSize) query = query.limit(Number(req.query.pageSize));
-  const { data, error } = await query;
+  const { data, error, count } = await query;
   if (error) throw error;
 
   // Stale ("rotting", Pipedrive's term) is computed here at query time
@@ -713,7 +713,7 @@ router.get('/sales/deals', requireHub('sales'), asyncHandler(async (req, res) =>
       nextActivityDueAt: nextActivityByDeal.get(d.id) || null
     };
   });
-  res.json({ deals });
+  res.json({ deals, page, pageSize, total: count });
 }));
 
 router.post('/sales/deals', requireHub('sales'), requireRole('member'), validate(dealSchema), asyncHandler(async (req, res) => {
@@ -778,7 +778,7 @@ router.get('/sales/deals/:id', requireHub('sales'), asyncHandler(async (req, res
   });
 }));
 
-router.patch('/sales/deals/:id', requireHub('sales'), requireRole('member'), asyncHandler(async (req, res) => {
+router.patch('/sales/deals/:id', requireHub('sales'), requireRole('member'), validate(updateDealSchema), asyncHandler(async (req, res) => {
   const client = requireSocialClient(res);
   if (!client) return;
   const patch = {};
@@ -943,7 +943,7 @@ router.post('/sales/targets', requireHub('sales'), requireRole('admin'), validat
   if (!client) return;
   const { data, error } = await client.from('sales_targets').insert({
     tenant_id: req.tenantId, owner_id: req.body.ownerId || null, period_start: req.body.periodStart,
-    period_end: req.body.periodEnd, target_amount: req.body.targetAmount
+    period_end: req.body.periodEnd, target_amount: req.body.targetAmount, currency: req.body.currency
   }).select('*').single();
   if (error) {
     if (error.code === '23514') return res.status(400).json({ error: 'periodEnd must not be before periodStart.' });
@@ -956,7 +956,7 @@ router.patch('/sales/targets/:id', requireHub('sales'), requireRole('admin'), va
   const client = requireSocialClient(res);
   if (!client) return;
   const patch = {};
-  for (const [bodyKey, column] of [['ownerId', 'owner_id'], ['periodStart', 'period_start'], ['periodEnd', 'period_end'], ['targetAmount', 'target_amount']]) {
+  for (const [bodyKey, column] of [['ownerId', 'owner_id'], ['periodStart', 'period_start'], ['periodEnd', 'period_end'], ['targetAmount', 'target_amount'], ['currency', 'currency']]) {
     if (req.body[bodyKey] !== undefined) patch[column] = req.body[bodyKey];
   }
   patch.updated_at = new Date().toISOString();
@@ -986,6 +986,25 @@ function defaultMonthRange() {
   return { from: from.toISOString().slice(0, 10), to: to.toISOString().slice(0, 10) };
 }
 
+// Deals aren't guaranteed to share a currency (deals.currency is
+// free-form, default INR but not enforced single-valued per tenant).
+// Summing across currencies into one number is simply wrong — ₹100 +
+// $100 is not "200" of anything. Every monetary rollup below groups by
+// currency instead; with no configured conversion-rate source, that's
+// the only honest option (see SALES_HUB_IMPLEMENTATION.md).
+function sumByCurrency(items, amountOf, currencyOf = (d) => d.currency || 'INR') {
+  const out = {};
+  for (const item of items) {
+    const cur = currencyOf(item);
+    out[cur] = (out[cur] || 0) + amountOf(item);
+  }
+  return out;
+}
+
+function addToCurrencyMap(map, currency, amount) {
+  map[currency] = (map[currency] || 0) + amount;
+}
+
 router.get('/sales/dashboard', requireHub('sales'), asyncHandler(async (req, res) => {
   const client = requireSocialClient(res);
   if (!client) return;
@@ -1011,13 +1030,15 @@ router.get('/sales/dashboard', requireHub('sales'), asyncHandler(async (req, res
   const wonDeals = (deals || []).filter((d) => d.status === 'won' && inRange(d.closed_at));
   const lostDeals = (deals || []).filter((d) => d.status === 'lost' && inRange(d.closed_at));
   const openDeals = (deals || []).filter((d) => d.status === 'open');
+  const weightedForecastDeals = openDeals.filter((d) => inRange(d.expected_close_date));
 
-  const revenue = wonDeals.reduce((sum, d) => sum + Number(d.amount), 0);
-  const lostAmount = lostDeals.reduce((sum, d) => sum + Number(d.amount), 0);
-  const pipelineValue = openDeals.reduce((sum, d) => sum + Number(d.amount), 0);
-  const weightedForecast = openDeals
-    .filter((d) => inRange(d.expected_close_date))
-    .reduce((sum, d) => sum + Number(d.amount) * ((probabilityByStage.get(d.stage_id) || 0) / 100), 0);
+  const revenueByCurrency = sumByCurrency(wonDeals, (d) => Number(d.amount));
+  const lostAmountByCurrency = sumByCurrency(lostDeals, (d) => Number(d.amount));
+  const pipelineValueByCurrency = sumByCurrency(openDeals, (d) => Number(d.amount));
+  const weightedForecastByCurrency = sumByCurrency(
+    weightedForecastDeals, (d) => Number(d.amount) * ((probabilityByStage.get(d.stage_id) || 0) / 100)
+  );
+  const currenciesInPlay = [...new Set((deals || []).map((d) => d.currency || 'INR'))].sort();
   const conversionRate = (wonDeals.length + lostDeals.length) > 0 ? wonDeals.length / (wonDeals.length + lostDeals.length) : null;
 
   const { count: overdueActivitiesCount, error: overdueError } = await scoped(client, req.tenantId, 'sales_activities')
@@ -1029,16 +1050,21 @@ router.get('/sales/dashboard', requireHub('sales'), asyncHandler(async (req, res
     if (!d.owner_id) continue;
     const row = performanceByOwner.get(d.owner_id) || {
       ownerId: d.owner_id, ownerEmail: userEmailById.get(d.owner_id) || null,
-      wonCount: 0, wonAmount: 0, openCount: 0, openValue: 0
+      wonCount: 0, wonAmountByCurrency: {}, openCount: 0, openValueByCurrency: {}
     };
-    if (d.status === 'won' && inRange(d.closed_at)) { row.wonCount += 1; row.wonAmount += Number(d.amount); }
-    if (d.status === 'open') { row.openCount += 1; row.openValue += Number(d.amount); }
+    const currency = d.currency || 'INR';
+    if (d.status === 'won' && inRange(d.closed_at)) { row.wonCount += 1; addToCurrencyMap(row.wonAmountByCurrency, currency, Number(d.amount)); }
+    if (d.status === 'open') { row.openCount += 1; addToCurrencyMap(row.openValueByCurrency, currency, Number(d.amount)); }
     performanceByOwner.set(d.owner_id, row);
   }
 
+  // Each target now carries its own currency (migration 020) — actual
+  // revenue only counts deals in that same currency, so a USD target
+  // isn't silently "met" by INR deals closing.
   const targetsOut = (targets || []).map((t) => {
+    const targetCurrency = t.currency || 'INR';
     const actualAmount = (deals || [])
-      .filter((d) => d.status === 'won' && inRange(d.closed_at) && (!t.owner_id || d.owner_id === t.owner_id))
+      .filter((d) => d.status === 'won' && inRange(d.closed_at) && (!t.owner_id || d.owner_id === t.owner_id) && (d.currency || 'INR') === targetCurrency)
       .reduce((sum, d) => sum + Number(d.amount), 0);
     const targetAmount = Number(t.target_amount);
     return { ...t, actualAmount, attainmentPct: targetAmount > 0 ? Math.round((actualAmount / targetAmount) * 1000) / 10 : null };
@@ -1049,16 +1075,22 @@ router.get('/sales/dashboard', requireHub('sales'), asyncHandler(async (req, res
   // by confidence — separate from pipelineValue, which is every open
   // deal's raw worth regardless of category. 'omitted' deals are
   // deliberately left out of this breakdown (that's what the category
-  // means), not out of pipelineValue.
-  const forecastByCategory = { pipeline: 0, best_case: 0, commit: 0 };
+  // means), not out of pipelineValue. Grouped by currency for the same
+  // reason as everything else above.
+  const forecastByCategoryByCurrency = {};
   for (const d of openDeals) {
     const cat = d.forecast_category || 'pipeline';
-    if (cat in forecastByCategory) forecastByCategory[cat] += Number(d.amount);
+    if (!['pipeline', 'best_case', 'commit'].includes(cat)) continue;
+    const currency = d.currency || 'INR';
+    if (!forecastByCategoryByCurrency[currency]) forecastByCategoryByCurrency[currency] = { pipeline: 0, best_case: 0, commit: 0 };
+    forecastByCategoryByCurrency[currency][cat] += Number(d.amount);
   }
 
   res.json({
     range: { from, to },
-    revenue, lostAmount, pipelineValue, weightedForecast, conversionRate, forecastByCategory,
+    currencies: currenciesInPlay,
+    revenueByCurrency, lostAmountByCurrency, pipelineValueByCurrency, weightedForecastByCurrency,
+    conversionRate, forecastByCategoryByCurrency,
     wonCount: wonDeals.length, lostCount: lostDeals.length, openCount: openDeals.length,
     overdueActivitiesCount: overdueActivitiesCount || 0,
     targets: targetsOut,

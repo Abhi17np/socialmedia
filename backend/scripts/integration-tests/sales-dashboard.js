@@ -85,26 +85,30 @@ async function main() {
 
   r = await api(`/api/v1/sales/dashboard?from=${from}&to=${to}`, { auth: repToken });
   assert.strictEqual(r.status, 200, JSON.stringify(r.data));
-  assert.strictEqual(r.data.revenue, 10000, 'revenue must equal the won deal amount');
-  assert.strictEqual(r.data.lostAmount, 4000);
-  assert.strictEqual(r.data.pipelineValue, 6000, 'pipelineValue must equal the one open deal');
+  // Every monetary rollup is grouped by currency (never summed across
+  // currencies) — all these deals are INR (the untouched default), so
+  // each map has exactly one key, but it's still a map, not a scalar.
+  assert.strictEqual(r.data.revenueByCurrency.INR, 10000, 'revenue must equal the won deal amount');
+  assert.strictEqual(r.data.lostAmountByCurrency.INR, 4000);
+  assert.strictEqual(r.data.pipelineValueByCurrency.INR, 6000, 'pipelineValue must equal the one open deal');
+  assert.deepStrictEqual(r.data.currencies, ['INR']);
   assert.strictEqual(r.data.wonCount, 1);
   assert.strictEqual(r.data.lostCount, 1);
   assert.strictEqual(r.data.conversionRate, 0.5, 'conversionRate = 1 won / (1 won + 1 lost)');
   const repPerf = r.data.teamPerformance.find((p) => p.ownerId === repId);
   assert.ok(repPerf, 'teamPerformance must include the rep');
-  assert.strictEqual(repPerf.wonAmount, 10000);
-  assert.strictEqual(repPerf.openValue, 6000);
-  console.log('✓ GET /sales/dashboard computes revenue, pipelineValue, conversionRate, teamPerformance from real deals');
+  assert.strictEqual(repPerf.wonAmountByCurrency.INR, 10000);
+  assert.strictEqual(repPerf.openValueByCurrency.INR, 6000);
+  console.log('✓ GET /sales/dashboard computes revenue, pipelineValue, conversionRate, teamPerformance from real deals, grouped by currency');
 
   // New stage has probability 10% (seeded default) — weightedForecast includes
   // only the open deal with an expectedCloseDate in range: 6000 * 0.10 = 600
-  assert.strictEqual(r.data.weightedForecast, 600, 'weightedForecast must be amount * stage probability for in-range open deals');
+  assert.strictEqual(r.data.weightedForecastByCurrency.INR, 600, 'weightedForecast must be amount * stage probability for in-range open deals');
   console.log('✓ weightedForecast is probability-weighted, not a flat sum');
 
   // --- Sales targets ---
 
-  r = await api('/api/v1/sales/targets', { method: 'POST', auth: adminToken, body: { periodStart: from, periodEnd: to, targetAmount: 20000 } });
+  r = await api('/api/v1/sales/targets', { method: 'POST', auth: adminToken, body: { periodStart: from, periodEnd: to, targetAmount: 20000, currency: 'INR' } });
   assert.strictEqual(r.status, 201, JSON.stringify(r.data));
   console.log('✓ admin created a team-wide sales target');
 
@@ -134,6 +138,18 @@ async function main() {
   assert.strictEqual(r.data.overdueActivities[0].subject, 'Overdue follow-up');
   assert.strictEqual(r.data.openDealsCount, 1, 'workspace must count this rep\'s one open deal');
   console.log('✓ GET /sales/workspace surfaces overdue activities and open-deal count for the current user');
+
+  // --- Mixed-currency reporting (the actual bug this round fixes) ---
+  // A USD deal must appear under its own currency, never folded into the
+  // INR total — added last so it doesn't disturb the open-deal-count
+  // assertion above, which is scoped to the three original INR deals.
+  r = await api('/api/v1/sales/deals', { method: 'POST', auth: repToken, body: { name: 'USD open deal', pipelineId: pipeline.id, stageId: newStage.id, amount: 500, currency: 'USD', ownerId: repId } });
+  assert.strictEqual(r.status, 201, JSON.stringify(r.data));
+  r = await api(`/api/v1/sales/dashboard?from=${from}&to=${to}`, { auth: repToken });
+  assert.strictEqual(r.data.pipelineValueByCurrency.INR, 6000, 'adding a USD deal must not change the INR pipeline total');
+  assert.strictEqual(r.data.pipelineValueByCurrency.USD, 500, 'the USD deal must appear under its own currency');
+  assert.deepStrictEqual(r.data.currencies.slice().sort(), ['INR', 'USD']);
+  console.log('✓ a mixed-currency deal is grouped under its own currency, never summed into another currency\'s total');
 
   console.log('\nALL SALES DASHBOARD/WORKSPACE/TARGETS ASSERTIONS PASSED');
   process.exit(0);

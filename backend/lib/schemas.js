@@ -201,6 +201,18 @@ const dealSchema = z.object({
   customFields: customFieldsValue()
 });
 
+const updateDealSchema = z.object({
+  name: z.string().trim().min(1).max(200).optional(),
+  amount: z.number().min(0).max(1e12).optional(),
+  currency: z.string().trim().length(3).optional(),
+  contactId: nullableOptionalUuid(),
+  companyId: nullableOptionalUuid(),
+  ownerId: nullableOptionalUuid(),
+  expectedCloseDate: z.string().trim().max(10).nullable().optional(),
+  forecastCategory: z.enum(FORECAST_CATEGORIES).optional(),
+  customFields: customFieldsValue()
+}).refine(v => Object.keys(v).length > 0, { message: 'Nothing to update.' });
+
 const moveDealStageSchema = z.object({
   stageId: z.string().uuid(),
   lostReason: z.string().trim().min(1).max(500).optional()
@@ -288,14 +300,16 @@ const salesTargetSchema = z.object({
   ownerId: nullableOptionalUuid(),
   periodStart: z.string().trim().min(1).max(10),
   periodEnd: z.string().trim().min(1).max(10),
-  targetAmount: z.number().min(0).max(1e12)
+  targetAmount: z.number().min(0).max(1e12),
+  currency: z.string().trim().length(3).optional().default('INR')
 });
 
 const updateSalesTargetSchema = z.object({
   ownerId: nullableOptionalUuid(),
   periodStart: z.string().trim().min(1).max(10).optional(),
   periodEnd: z.string().trim().min(1).max(10).optional(),
-  targetAmount: z.number().min(0).max(1e12).optional()
+  targetAmount: z.number().min(0).max(1e12).optional(),
+  currency: z.string().trim().length(3).optional()
 }).refine(v => Object.keys(v).length > 0, { message: 'Nothing to update.' });
 
 const marketingCampaignSchema = z.object({
@@ -366,7 +380,7 @@ module.exports = {
   savedReplySchema, draftPostSchema, whatsappEmbeddedSignupSchema, inboxReplySchema, updateInteractionSchema,
   INTERACTION_STATUSES, INTERACTION_PRIORITIES, changePasswordSchema, forgotPasswordSchema, resetPasswordSchema,
   updateHubsSchema, templateSchema, segmentSchema, whatsappCampaignSchema,
-  companySchema, contactSchema, updateContactSchema, dealSchema, moveDealStageSchema, salesActivitySchema,
+  companySchema, contactSchema, updateContactSchema, dealSchema, updateDealSchema, moveDealStageSchema, salesActivitySchema,
   dealContactSchema, FORECAST_CATEGORIES,
   updatePipelineSchema, dealStageSchema, updateDealStageSchema, reorderStagesSchema,
   salesTargetSchema, updateSalesTargetSchema,

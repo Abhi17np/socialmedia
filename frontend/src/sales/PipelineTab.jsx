@@ -1,16 +1,23 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   RefreshCw, Plus, KanbanSquare, Table2, Settings2, Flame, GripVertical,
-  Trash2, ArrowUp, ArrowDown, IndianRupee, Building2, User, CalendarClock
+  Trash2, ArrowUp, ArrowDown, IndianRupee, Building2, User, CalendarClock, Search
 } from 'lucide-react';
 import {
   Button, IconButton, Select, Input, Field, Checkbox,
-  Banner, Modal, Drawer, EmptyState, Skeleton, Chip
+  Banner, Modal, Drawer, EmptyState, Skeleton, Chip, Pagination
 } from '../ui';
-import { money } from './format';
+import { money, moneyByCurrency } from './format';
 import DealDetailDrawer from './DealDetailDrawer';
+
+// Kanban genuinely needs every open deal in the pipeline at once — stage
+// totals/weighted amounts and drag targets would silently be wrong if
+// any stage's deals were paginated away. 200 is a generous, documented
+// cap (not a silent truncation): if a pipeline ever exceeds it, a
+// banner says so explicitly instead of quietly dropping deals.
+const KANBAN_PAGE_SIZE = 200;
 
 // ------------------------------------------------------------- Pipeline
 
@@ -18,6 +25,7 @@ function PipelineTab({ authFetch, SALES_API_BASE, canManage, canAdmin, canDelete
   const [pipelines, setPipelines] = useState(null);
   const [activePipelineId, setActivePipelineId] = useState(null);
   const [deals, setDeals] = useState(null);
+  const [dealsTotal, setDealsTotal] = useState(null);
   const [error, setError] = useState(null);
   const [view, setView] = useState('kanban');
   const [newPipelineOpen, setNewPipelineOpen] = useState(false);
@@ -39,7 +47,9 @@ function PipelineTab({ authFetch, SALES_API_BASE, canManage, canAdmin, canDelete
 
   const loadDeals = (pipelineId) => {
     if (!pipelineId) return;
-    authFetch(`${SALES_API_BASE}/deals?pipelineId=${pipelineId}`).then((r) => r.json()).then((d) => setDeals(d.deals || [])).catch((e) => setError(e.message));
+    authFetch(`${SALES_API_BASE}/deals?pipelineId=${pipelineId}&pageSize=${KANBAN_PAGE_SIZE}`).then((r) => r.json())
+      .then((d) => { setDeals(d.deals || []); setDealsTotal(d.total ?? null); })
+      .catch((e) => setError(e.message));
   };
 
   useEffect(loadPipelines, []); // eslint-disable-line react-hooks/exhaustive-deps
@@ -134,6 +144,11 @@ function PipelineTab({ authFetch, SALES_API_BASE, canManage, canAdmin, canDelete
   return (
     <>
       {error && <Banner tone="danger">{error}</Banner>}
+      {view === 'kanban' && dealsTotal !== null && dealsTotal > KANBAN_PAGE_SIZE && (
+        <Banner tone="warning">
+          Showing the first {KANBAN_PAGE_SIZE} of {dealsTotal} deals in this pipeline. Switch to Table view to page through the rest.
+        </Banner>
+      )}
       <div className="flex items-center justify-between">
         <Select value={activePipelineId || ''} onChange={(e) => setActivePipelineId(e.target.value)} className="w-56">
           {pipelines.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
@@ -160,7 +175,11 @@ function PipelineTab({ authFetch, SALES_API_BASE, canManage, canAdmin, canDelete
           onOpenDeal={setOpenDealId}
         />
       ) : (
-        <TableView pipeline={pipeline} deals={deals} canManage={canManage} moveDeal={moveDeal} onOpenDeal={setOpenDealId} />
+        <TableView
+          pipeline={pipeline} authFetch={authFetch} SALES_API_BASE={SALES_API_BASE}
+          canManage={canManage} onOpenDeal={setOpenDealId}
+          onChanged={() => loadDeals(activePipelineId)}
+        />
       )}
 
       {openDealId && (
@@ -230,8 +249,15 @@ function KanbanView({ pipeline, deals, canManage, newDealOpen, setNewDealOpen, d
     <div className="flex gap-3 overflow-x-auto pb-2">
       {pipeline.stages.map((stage) => {
         const stageDeals = deals.filter((d) => d.stage_id === stage.id);
-        const total = stageDeals.reduce((sum, d) => sum + Number(d.amount || 0), 0);
-        const weighted = stageDeals.reduce((sum, d) => sum + Number(d.amount || 0) * ((stage.probability || 0) / 100), 0);
+        // Deals in one stage aren't guaranteed to share a currency —
+        // group instead of summing raw numbers across currencies.
+        const totalByCurrency = {};
+        const weightedByCurrency = {};
+        for (const d of stageDeals) {
+          const cur = d.currency || 'INR';
+          totalByCurrency[cur] = (totalByCurrency[cur] || 0) + Number(d.amount || 0);
+          weightedByCurrency[cur] = (weightedByCurrency[cur] || 0) + Number(d.amount || 0) * ((stage.probability || 0) / 100);
+        }
         return (
           <div
             key={stage.id}
@@ -244,9 +270,9 @@ function KanbanView({ pipeline, deals, canManage, newDealOpen, setNewDealOpen, d
                 <span className="text-xs font-semibold text-ink truncate">{stage.name}</span>
                 <span className="text-[11px] text-subtle shrink-0">{stageDeals.length}</span>
               </div>
-              <div className="flex items-center justify-between mt-0.5">
-                <span className="text-[11px] tabular-nums text-ink shrink-0">{money(total)}</span>
-                <span className="text-[10px] tabular-nums text-subtle shrink-0" title="Weighted by this stage's win probability">{money(weighted)} wtd</span>
+              <div className="flex items-center justify-between mt-0.5 gap-1.5 min-w-0">
+                <span className="text-[11px] tabular-nums text-ink truncate">{moneyByCurrency(totalByCurrency)}</span>
+                <span className="text-[10px] tabular-nums text-subtle shrink-0" title="Weighted by this stage's win probability">{moneyByCurrency(weightedByCurrency)} wtd</span>
               </div>
             </div>
             <div className="p-2 flex flex-col gap-2 min-h-[80px]">
@@ -293,58 +319,145 @@ function KanbanView({ pipeline, deals, canManage, newDealOpen, setNewDealOpen, d
   );
 }
 
-function TableView({ pipeline, deals, canManage, moveDeal, onOpenDeal }) {
+const TABLE_PAGE_SIZE = 50;
+
+// The Pipeline tab's real "Deals list" — independently paginated and
+// searchable from the Kanban view, which deliberately loads the whole
+// pipeline instead (see KANBAN_PAGE_SIZE above). Moving a deal here
+// also tells the parent to refresh its Kanban cache, so stage totals
+// are correct next time the user switches views.
+function TableView({ pipeline, authFetch, SALES_API_BASE, canManage, onOpenDeal, onChanged }) {
+  const [deals, setDeals] = useState(null);
+  const [page, setPage] = useState(1);
+  const [total, setTotal] = useState(null);
+  const [search, setSearch] = useState('');
+  const [searchInput, setSearchInput] = useState('');
+  const [error, setError] = useState(null);
+  const [lostMove, setLostMove] = useState(null);
+  const [lostReason, setLostReason] = useState('');
+  const searchDebounce = useRef(null);
   const stageById = new Map(pipeline.stages.map((s) => [s.id, s]));
+
+  const load = () => {
+    const params = new URLSearchParams({ pipelineId: pipeline.id, page: String(page), pageSize: String(TABLE_PAGE_SIZE) });
+    if (search.trim()) params.set('search', search.trim());
+    authFetch(`${SALES_API_BASE}/deals?${params}`).then((r) => r.json())
+      .then((d) => { setDeals(d.deals || []); setTotal(d.total ?? null); })
+      .catch((e) => setError(e.message));
+  };
+  useEffect(load, [pipeline.id, page, search]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const onSearchChange = (value) => {
+    setSearchInput(value);
+    clearTimeout(searchDebounce.current);
+    searchDebounce.current = setTimeout(() => { setPage(1); setSearch(value); }, 300);
+  };
+
+  const applyMove = async (deal, stageId, lostReasonValue) => {
+    setDeals((prev) => prev.map((d) => (d.id === deal.id ? { ...d, stage_id: stageId } : d))); // optimistic
+    try {
+      const body = lostReasonValue ? { stageId, lostReason: lostReasonValue } : { stageId };
+      const res = await authFetch(`${SALES_API_BASE}/deals/${deal.id}/move`, { method: 'POST', body: JSON.stringify(body) });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Could not move deal.');
+      setDeals((prev) => prev.map((d) => (d.id === deal.id ? data.deal : d)));
+      onChanged?.();
+    } catch (err) {
+      setError(err.message);
+      load();
+    }
+  };
+
+  const moveDeal = (deal, stageId) => {
+    if (deal.stage_id === stageId) return;
+    const targetStage = stageById.get(stageId);
+    if (targetStage?.is_lost) {
+      setLostMove({ deal, stage: targetStage });
+      setLostReason('');
+      return;
+    }
+    applyMove(deal, stageId);
+  };
+
+  const confirmLostMove = async () => {
+    if (!lostMove || !lostReason.trim()) return;
+    await applyMove(lostMove.deal, lostMove.stage.id, lostReason.trim());
+    setLostMove(null);
+    setLostReason('');
+  };
+
   return (
-    <div className="bg-card border border-hairline rounded-card overflow-hidden">
-      <table className="w-full text-xs">
-        <thead>
-          <tr className="border-b border-hairline text-left">
-            <th className="px-3 py-2 font-medium text-subtle">Deal</th>
-            <th className="px-3 py-2 font-medium text-subtle">Company / contact</th>
-            <th className="px-3 py-2 font-medium text-subtle">Owner</th>
-            <th className="px-3 py-2 font-medium text-subtle">Stage</th>
-            <th className="px-3 py-2 font-medium text-subtle text-right">Amount</th>
-            <th className="px-3 py-2 font-medium text-subtle">Expected close</th>
-            <th className="px-3 py-2 font-medium text-subtle"> </th>
-          </tr>
-        </thead>
-        <tbody>
-          {deals.length === 0 ? (
-            <tr><td colSpan={7} className="px-3 py-8 text-center text-muted">No deals in this pipeline yet.</td></tr>
-          ) : deals.map((deal) => {
-            const stage = stageById.get(deal.stage_id);
-            return (
-              <tr key={deal.id} className="border-b border-hairline last:border-b-0 hover:bg-canvas transition-colors">
-                <td className="px-3 py-2 cursor-pointer" onClick={() => onOpenDeal(deal.id)}>
-                  <div className="flex items-center gap-1.5">
-                    <span className="font-medium text-ink">{deal.name}</span>
-                    <StaleBadge isStale={deal.isStale} />
-                  </div>
-                </td>
-                <td className="px-3 py-2 text-muted truncate max-w-[180px]">
-                  {deal.companyName}{deal.companyName && deal.contactName ? ' · ' : ''}{deal.contactName}{!deal.companyName && !deal.contactName && '—'}
-                </td>
-                <td className="px-3 py-2 text-muted truncate max-w-[160px]">{deal.ownerEmail || '—'}</td>
-                <td className="px-3 py-2" onClick={(e) => e.stopPropagation()}>
-                  {canManage ? (
-                    <Select className="h-7" value={deal.stage_id} onChange={(e) => moveDeal(deal, e.target.value)}>
-                      {pipeline.stages.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
-                    </Select>
-                  ) : (
-                    <Chip tone={stage?.is_won ? 'success' : stage?.is_lost ? 'danger' : 'neutral'}>{stage?.name || '—'}</Chip>
-                  )}
-                </td>
-                <td className="px-3 py-2 text-right tabular-nums">{money(deal.amount, deal.currency)}</td>
-                <td className="px-3 py-2 text-muted">{deal.expected_close_date || '—'}</td>
-                <td className="px-3 py-2">
-                  {deal.status !== 'open' && <Chip tone={deal.status === 'won' ? 'success' : 'danger'}>{deal.status}</Chip>}
-                </td>
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
+    <div className="flex flex-col gap-2">
+      {error && <Banner tone="danger">{error}</Banner>}
+      <div className="flex items-center justify-between">
+        <Input icon={Search} placeholder="Search deals…" value={searchInput} onChange={(e) => onSearchChange(e.target.value)} className="h-8 w-56" />
+        {total !== null && <span className="text-[11px] text-subtle">{total} total</span>}
+      </div>
+      <div className="bg-card border border-hairline rounded-card overflow-hidden">
+        <table className="w-full text-xs">
+          <thead>
+            <tr className="border-b border-hairline text-left">
+              <th className="px-3 py-2 font-medium text-subtle">Deal</th>
+              <th className="px-3 py-2 font-medium text-subtle">Company / contact</th>
+              <th className="px-3 py-2 font-medium text-subtle">Owner</th>
+              <th className="px-3 py-2 font-medium text-subtle">Stage</th>
+              <th className="px-3 py-2 font-medium text-subtle text-right">Amount</th>
+              <th className="px-3 py-2 font-medium text-subtle">Expected close</th>
+              <th className="px-3 py-2 font-medium text-subtle"> </th>
+            </tr>
+          </thead>
+          <tbody>
+            {deals === null ? (
+              <tr><td colSpan={7} className="px-3 py-8 text-center text-muted">Loading…</td></tr>
+            ) : deals.length === 0 ? (
+              <tr><td colSpan={7} className="px-3 py-8 text-center text-muted">{search ? 'No deals match your search.' : 'No deals in this pipeline yet.'}</td></tr>
+            ) : deals.map((deal) => {
+              const stage = stageById.get(deal.stage_id);
+              return (
+                <tr key={deal.id} className="border-b border-hairline last:border-b-0 hover:bg-canvas transition-colors">
+                  <td className="px-3 py-2 cursor-pointer" onClick={() => onOpenDeal(deal.id)}>
+                    <div className="flex items-center gap-1.5">
+                      <span className="font-medium text-ink">{deal.name}</span>
+                      <StaleBadge isStale={deal.isStale} />
+                    </div>
+                  </td>
+                  <td className="px-3 py-2 text-muted truncate max-w-[180px]">
+                    {deal.companyName}{deal.companyName && deal.contactName ? ' · ' : ''}{deal.contactName}{!deal.companyName && !deal.contactName && '—'}
+                  </td>
+                  <td className="px-3 py-2 text-muted truncate max-w-[160px]">{deal.ownerEmail || '—'}</td>
+                  <td className="px-3 py-2" onClick={(e) => e.stopPropagation()}>
+                    {canManage ? (
+                      <Select className="h-7" value={deal.stage_id} onChange={(e) => moveDeal(deal, e.target.value)}>
+                        {pipeline.stages.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+                      </Select>
+                    ) : (
+                      <Chip tone={stage?.is_won ? 'success' : stage?.is_lost ? 'danger' : 'neutral'}>{stage?.name || '—'}</Chip>
+                    )}
+                  </td>
+                  <td className="px-3 py-2 text-right tabular-nums">{money(deal.amount, deal.currency)}</td>
+                  <td className="px-3 py-2 text-muted">{deal.expected_close_date || '—'}</td>
+                  <td className="px-3 py-2">
+                    {deal.status !== 'open' && <Chip tone={deal.status === 'won' ? 'success' : 'danger'}>{deal.status}</Chip>}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+        {deals && deals.length > 0 && <Pagination page={page} pageSize={TABLE_PAGE_SIZE} total={total} onPageChange={setPage} />}
+      </div>
+
+      <Modal
+        open={!!lostMove}
+        onClose={() => setLostMove(null)}
+        title="Why was this deal lost?"
+        subtitle={lostMove?.deal?.name}
+        footer={<><Button onClick={() => setLostMove(null)}>Cancel</Button><Button variant="primary" onClick={confirmLostMove} disabled={!lostReason.trim()}>Move to Lost</Button></>}
+      >
+        <Field label="Lost reason" hint="Required — shown on the deal's history.">
+          <Input value={lostReason} onChange={(e) => setLostReason(e.target.value)} placeholder="e.g. Budget cut, chose a competitor" autoFocus />
+        </Field>
+      </Modal>
     </div>
   );
 }

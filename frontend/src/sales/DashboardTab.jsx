@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import { TrendingUp, Target, PieChart } from 'lucide-react';
 import { Panel, PanelHeader, Table, Th, Td, Banner, Skeleton, StatStrip, Stat, EmptyState, Input, Avatar } from '../ui';
-import { money } from './format';
+import { money, moneyByCurrency } from './format';
 
 const FORECAST_CATEGORIES = [
   { key: 'pipeline', label: 'Pipeline', tone: 'bg-subtle' },
@@ -52,9 +52,9 @@ function DashboardTab({ authFetch, SALES_API_BASE }) {
         <Skeleton className="h-24" />
       ) : (
         <StatStrip>
-          <Stat label="Revenue (won)" value={money(data.revenue)} hint="Sum of deals won in this period" />
-          <Stat label="Pipeline value" value={money(data.pipelineValue)} hint="Sum of all currently open deals" />
-          <Stat label="Weighted forecast" value={money(data.weightedForecast)} hint="Open deals expected to close in this period, weighted by stage probability" />
+          <Stat label="Revenue (won)" value={moneyByCurrency(data.revenueByCurrency)} hint="Sum of deals won in this period, grouped by currency — never combined into one misleading total" />
+          <Stat label="Pipeline value" value={moneyByCurrency(data.pipelineValueByCurrency)} hint="Sum of all currently open deals, grouped by currency" />
+          <Stat label="Weighted forecast" value={moneyByCurrency(data.weightedForecastByCurrency)} hint="Open deals expected to close in this period, weighted by stage probability, grouped by currency" />
           <Stat
             label="Conversion rate"
             value={data.conversionRate === null ? '—' : `${Math.round(data.conversionRate * 100)}%`}
@@ -73,21 +73,34 @@ function DashboardTab({ authFetch, SALES_API_BASE }) {
         <PanelHeader title="Forecast by category" meta="Open pipeline, by how confident each deal's owner is it will close (Salesforce/HubSpot pattern)" />
         {data === null ? (
           <div className="p-4"><Skeleton className="h-9" /></div>
-        ) : FORECAST_CATEGORIES.every(({ key }) => !data.forecastByCategory[key]) ? (
+        ) : Object.keys(data.forecastByCategoryByCurrency || {}).length === 0 ? (
           <EmptyState icon={PieChart} title="No open deals with a forecast category yet" description="Set a deal's forecast category from its detail view in Pipeline." />
         ) : (
-          <div className="p-4 flex flex-col gap-3">
-            {FORECAST_CATEGORIES.map(({ key, label, tone }) => {
-              const amount = data.forecastByCategory[key] || 0;
-              const pct = data.pipelineValue > 0 ? Math.round((amount / data.pipelineValue) * 100) : 0;
+          <div className="p-4 flex flex-col gap-4">
+            {Object.entries(data.forecastByCategoryByCurrency).sort(([a], [b]) => a.localeCompare(b)).map(([currency, byCategory]) => {
+              // % is computed against this currency's OWN open-pipeline total —
+              // never against the cross-currency pipelineValueByCurrency sum,
+              // which would silently mix currencies in the denominator.
+              const currencyPipelineValue = Object.values(byCategory).reduce((sum, v) => sum + v, 0);
               return (
-                <div key={key}>
-                  <div className="flex items-center justify-between text-xs mb-1">
-                    <span className="font-medium text-ink">{label}</span>
-                    <span className="tabular-nums text-muted">{money(amount)} ({pct}% of open pipeline)</span>
-                  </div>
-                  <div className="h-2 rounded-full bg-sunken overflow-hidden">
-                    <div className={`h-full transition-all ${tone}`} style={{ width: `${pct}%` }} />
+                <div key={currency}>
+                  {Object.keys(data.forecastByCategoryByCurrency).length > 1 && <div className="eyebrow mb-2">{currency}</div>}
+                  <div className="flex flex-col gap-3">
+                    {FORECAST_CATEGORIES.map(({ key, label, tone }) => {
+                      const amount = byCategory[key] || 0;
+                      const pct = currencyPipelineValue > 0 ? Math.round((amount / currencyPipelineValue) * 100) : 0;
+                      return (
+                        <div key={key}>
+                          <div className="flex items-center justify-between text-xs mb-1">
+                            <span className="font-medium text-ink">{label}</span>
+                            <span className="tabular-nums text-muted">{money(amount, currency)} ({pct}% of {currency} open pipeline)</span>
+                          </div>
+                          <div className="h-2 rounded-full bg-sunken overflow-hidden">
+                            <div className={`h-full transition-all ${tone}`} style={{ width: `${pct}%` }} />
+                          </div>
+                        </div>
+                      );
+                    })}
                   </div>
                 </div>
               );
@@ -110,7 +123,7 @@ function DashboardTab({ authFetch, SALES_API_BASE }) {
                 <div key={t.id}>
                   <div className="flex items-center justify-between text-xs mb-1">
                     <span className="font-medium text-ink">{t.owner_id ? 'Rep target' : 'Team target'}</span>
-                    <span className="tabular-nums text-muted">{money(t.actualAmount)} / {money(t.target_amount)} ({t.attainmentPct ?? 0}%)</span>
+                    <span className="tabular-nums text-muted">{money(t.actualAmount, t.currency)} / {money(t.target_amount, t.currency)} ({t.attainmentPct ?? 0}%)</span>
                   </div>
                   <div className="h-2 rounded-full bg-sunken overflow-hidden">
                     <div className="h-full bg-brand transition-all" style={{ width: `${pct}%` }} />
@@ -136,9 +149,9 @@ function DashboardTab({ authFetch, SALES_API_BASE }) {
                 <tr key={p.ownerId} className="hover:bg-canvas transition-colors">
                   <Td><span className="flex items-center gap-2"><Avatar name={p.ownerEmail || '?'} size={22} />{p.ownerEmail || p.ownerId}</span></Td>
                   <Td align="right">{p.wonCount}</Td>
-                  <Td align="right">{money(p.wonAmount)}</Td>
+                  <Td align="right">{moneyByCurrency(p.wonAmountByCurrency)}</Td>
                   <Td align="right">{p.openCount}</Td>
-                  <Td align="right">{money(p.openValue)}</Td>
+                  <Td align="right">{moneyByCurrency(p.openValueByCurrency)}</Td>
                 </tr>
               ))}
             </tbody>
