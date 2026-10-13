@@ -39,6 +39,7 @@ const ACTIVITY_ICON = { call: Phone, email: Mail, meeting: Calendar, note: Stick
 function SalesHubInner({ authFetch, role }) {
   const searchParams = useSearchParams();
   const tab = searchParams.get('tab') || 'dashboard';
+  const openId = searchParams.get('open') || null;
   const [gateError, setGateError] = useState(null);
   const canManage = atLeast(role, 'member');
   const canDelete = atLeast(role, 'admin');
@@ -70,9 +71,9 @@ function SalesHubInner({ authFetch, role }) {
       <PageBody>
         {tab === 'dashboard' && <DashboardTab authFetch={authFetch} SALES_API_BASE={SALES_API_BASE} />}
         {tab === 'workspace' && <WorkspaceTab authFetch={authFetch} SALES_API_BASE={SALES_API_BASE} />}
-        {tab === 'pipeline' && <PipelineTab authFetch={authFetch} SALES_API_BASE={SALES_API_BASE} canManage={canManage} canAdmin={canAdmin} canDelete={canDelete} />}
-        {tab === 'companies' && <CompaniesTab authFetch={authFetch} SALES_API_BASE={SALES_API_BASE} canManage={canManage} canDelete={canDelete} />}
-        {tab === 'contacts' && <ContactsTab authFetch={authFetch} SALES_API_BASE={SALES_API_BASE} canManage={canManage} />}
+        {tab === 'pipeline' && <PipelineTab authFetch={authFetch} SALES_API_BASE={SALES_API_BASE} canManage={canManage} canAdmin={canAdmin} canDelete={canDelete} openId={openId} />}
+        {tab === 'companies' && <CompaniesTab authFetch={authFetch} SALES_API_BASE={SALES_API_BASE} canManage={canManage} canDelete={canDelete} openId={openId} />}
+        {tab === 'contacts' && <ContactsTab authFetch={authFetch} SALES_API_BASE={SALES_API_BASE} canManage={canManage} openId={openId} />}
         {tab === 'activities' && <ActivitiesTab authFetch={authFetch} canManage={canManage} canDelete={canDelete} />}
         {tab === 'settings' && canAdmin && <SettingsTab authFetch={authFetch} SALES_API_BASE={SALES_API_BASE} />}
       </PageBody>

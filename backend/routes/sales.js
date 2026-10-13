@@ -664,6 +664,8 @@ router.get('/sales/deals', requireHub('sales'), asyncHandler(async (req, res) =>
   if (req.query.pipelineId) query = query.eq('pipeline_id', req.query.pipelineId);
   if (req.query.stageId) query = query.eq('stage_id', req.query.stageId);
   if (req.query.status) query = query.eq('status', req.query.status);
+  if (req.query.search) query = query.ilike('name', `%${req.query.search}%`);
+  if (req.query.pageSize) query = query.limit(Number(req.query.pageSize));
   const { data, error } = await query;
   if (error) throw error;
 

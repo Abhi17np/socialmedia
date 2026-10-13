@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
-import { Search, X, Building2, Users, FileText, Megaphone } from 'lucide-react';
+import { Search, X, Building2, Users, FileText, Megaphone, IndianRupee } from 'lucide-react';
 import { API_BASE } from '../apiBase';
 
 const DEBOUNCE_MS = 300;
@@ -53,13 +53,19 @@ function GlobalSearch({ authFetch, hubsEnabled }) {
       tasks.push(
         authFetch(`${API_BASE}/sales/companies?search=${encodeURIComponent(q)}&pageSize=5`)
           .then((r) => r.json())
-          .then((d) => { if (d.companies?.length) categories.push({ key: 'companies', label: 'Companies', icon: Building2, href: '/sales?tab=companies', items: d.companies.map((c) => ({ id: c.id, title: c.name, subtitle: c.industry || c.domain || '' })) }); })
+          .then((d) => { if (d.companies?.length) categories.push({ key: 'companies', label: 'Companies', icon: Building2, href: '/sales?tab=companies', deepLink: true, items: d.companies.map((c) => ({ id: c.id, title: c.name, subtitle: c.industry || c.domain || '' })) }); })
           .catch(() => {})
       );
       tasks.push(
         authFetch(`${API_BASE}/sales/contacts?search=${encodeURIComponent(q)}&pageSize=5`)
           .then((r) => r.json())
-          .then((d) => { if (d.contacts?.length) categories.push({ key: 'contacts', label: 'Leads', icon: Users, href: '/sales?tab=contacts', items: d.contacts.map((c) => ({ id: c.id, title: c.display_name, subtitle: c.phone || c.email || '' })) }); })
+          .then((d) => { if (d.contacts?.length) categories.push({ key: 'contacts', label: 'Leads', icon: Users, href: '/sales?tab=contacts', deepLink: true, items: d.contacts.map((c) => ({ id: c.id, title: c.display_name, subtitle: c.phone || c.email || '' })) }); })
+          .catch(() => {})
+      );
+      tasks.push(
+        authFetch(`${API_BASE}/sales/deals?search=${encodeURIComponent(q)}&pageSize=5`)
+          .then((r) => r.json())
+          .then((d) => { if (d.deals?.length) categories.push({ key: 'deals', label: 'Deals', icon: IndianRupee, href: '/sales?tab=pipeline', deepLink: true, items: d.deals.map((deal) => ({ id: deal.id, title: deal.name, subtitle: deal.companyName || deal.contactName || '' })) }); })
           .catch(() => {})
       );
     }
@@ -126,7 +132,7 @@ function GlobalSearch({ authFetch, hubsEnabled }) {
               {cat.items.map((item) => (
                 <Link
                   key={item.id}
-                  href={cat.href}
+                  href={cat.deepLink ? `${cat.href}${cat.href.includes('?') ? '&' : '?'}open=${item.id}` : cat.href}
                   onClick={() => setOpen(false)}
                   className="flex items-center gap-2.5 px-2 py-1.5 rounded-ui hover:bg-canvas transition-colors"
                 >

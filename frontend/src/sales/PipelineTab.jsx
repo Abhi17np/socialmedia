@@ -14,7 +14,7 @@ import DealDetailDrawer from './DealDetailDrawer';
 
 // ------------------------------------------------------------- Pipeline
 
-function PipelineTab({ authFetch, SALES_API_BASE, canManage, canAdmin, canDelete }) {
+function PipelineTab({ authFetch, SALES_API_BASE, canManage, canAdmin, canDelete, openId }) {
   const [pipelines, setPipelines] = useState(null);
   const [activePipelineId, setActivePipelineId] = useState(null);
   const [deals, setDeals] = useState(null);
@@ -44,6 +44,17 @@ function PipelineTab({ authFetch, SALES_API_BASE, canManage, canAdmin, canDelete
 
   useEffect(loadPipelines, []); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => loadDeals(activePipelineId), [activePipelineId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Deep-linked from GlobalSearch: switch to the deal's own pipeline first so
+  // the detail drawer's stage picker reflects the pipeline the deal is
+  // actually in, not whichever one happened to be active.
+  useEffect(() => {
+    if (!openId) return;
+    authFetch(`${SALES_API_BASE}/deals/${openId}`).then((r) => r.json()).then((d) => {
+      if (d.deal?.pipeline_id) setActivePipelineId(d.deal.pipeline_id);
+      setOpenDealId(openId);
+    }).catch(() => {});
+  }, [openId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const pipeline = (pipelines || []).find((p) => p.id === activePipelineId);
 

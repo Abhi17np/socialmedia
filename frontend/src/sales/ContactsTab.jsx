@@ -13,7 +13,7 @@ import ContactDetailDrawer from './ContactDetailDrawer';
 const LEAD_STATUS_TONE = { new: 'neutral', contacted: 'info', qualified: 'brand', unqualified: 'danger', customer: 'success' };
 const LEAD_STATUSES = ['new', 'contacted', 'qualified', 'unqualified', 'customer'];
 
-function ContactsTab({ authFetch, SALES_API_BASE, canManage }) {
+function ContactsTab({ authFetch, SALES_API_BASE, canManage, openId }) {
   const [contacts, setContacts] = useState(null);
   const [error, setError] = useState(null);
   const [notice, setNotice] = useState(null);
@@ -30,6 +30,7 @@ function ContactsTab({ authFetch, SALES_API_BASE, canManage }) {
 
   const load = () => { authFetch(`${SALES_API_BASE}/contacts`).then((r) => r.json()).then((d) => setContacts(d.contacts || [])).catch((e) => setError(e.message)); };
   useEffect(load, []); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (openId) setOpenContactId(openId); }, [openId]);
 
   const create = async () => {
     try {

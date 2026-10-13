@@ -11,7 +11,7 @@ import { useTeamMembers } from './useTeamMembers';
 
 const LEAD_STATUS_TONE = { new: 'neutral', contacted: 'info', qualified: 'brand', unqualified: 'danger', customer: 'success' };
 
-function CompaniesTab({ authFetch, SALES_API_BASE, canManage, canDelete }) {
+function CompaniesTab({ authFetch, SALES_API_BASE, canManage, canDelete, openId }) {
   const [companies, setCompanies] = useState(null);
   const [error, setError] = useState(null);
   const [notice, setNotice] = useState(null);
@@ -28,6 +28,7 @@ function CompaniesTab({ authFetch, SALES_API_BASE, canManage, canDelete }) {
 
   const load = () => { authFetch(`${SALES_API_BASE}/companies`).then((r) => r.json()).then((d) => setCompanies(d.companies || [])).catch((e) => setError(e.message)); };
   useEffect(load, []); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (openId) openDetail({ id: openId }); }, [openId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const create = async () => {
     try {
