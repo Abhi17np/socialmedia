@@ -11,22 +11,32 @@
  */
 
 const express = require('express');
+const multer = require('multer');
 const { getSocialClient } = require('../social/db');
 const { scoped } = require('../lib/query');
-const { requireRole } = require('../middleware/tenant');
+const { requireRole, ROLE_RANK } = require('../middleware/tenant');
 const { requireHub } = require('../middleware/hubs');
 const { validate } = require('../middleware/validate');
 const { asyncHandler } = require('../lib/asyncHandler');
 const { recordAudit } = require('../lib/audit');
 const { fireTrigger } = require('../lib/automation');
 const { recomputeLeadScore } = require('../lib/leadScoring');
+const { parseCsvToObjects, toCsv } = require('../lib/csv');
 const {
   companySchema, contactSchema, updateContactSchema, dealSchema, moveDealStageSchema, salesActivitySchema,
   updatePipelineSchema, dealStageSchema, updateDealStageSchema, reorderStagesSchema,
-  salesTargetSchema, updateSalesTargetSchema, leadScoringRuleSchema, updateLeadScoringRuleSchema
+  salesTargetSchema, updateSalesTargetSchema, leadScoringRuleSchema, updateLeadScoringRuleSchema,
+  contactBulkActionSchema, companyBulkActionSchema
 } = require('../lib/schemas');
 
 const router = express.Router();
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const csvUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 2 * 1024 * 1024 } });
+
+function addToGroup(map, key, item) {
+  if (!map.has(key)) map.set(key, []);
+  map.get(key).push(item);
+}
 
 function requireSocialClient(res) {
   const client = getSocialClient();
@@ -58,6 +68,39 @@ router.get('/sales/companies', requireHub('sales'), asyncHandler(async (req, res
   res.json({ companies: data, page, pageSize, total: count });
 }));
 
+router.get('/sales/companies/export', requireHub('sales'), asyncHandler(async (req, res) => {
+  const client = requireSocialClient(res);
+  if (!client) return;
+  let query = scoped(client, req.tenantId, 'companies').select('*').order('created_at', { ascending: false });
+  if (req.query.search) query = query.ilike('name', `%${req.query.search}%`);
+  const { data, error } = await query;
+  if (error) throw error;
+
+  const columns = ['id', 'name', 'domain', 'industry', 'size', 'phone', 'address', 'notes', 'owner_id', 'created_at'];
+  const csv = toCsv(data || [], columns);
+  res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+  res.setHeader('Content-Disposition', 'attachment; filename="companies-export.csv"');
+  res.send(csv);
+}));
+
+router.get('/sales/companies/duplicates', requireHub('sales'), asyncHandler(async (req, res) => {
+  const client = requireSocialClient(res);
+  if (!client) return;
+  const { data: companies, error } = await scoped(client, req.tenantId, 'companies').select('id, name, domain, created_at');
+  if (error) throw error;
+
+  const byDomain = new Map();
+  const byName = new Map();
+  for (const c of companies || []) {
+    if (c.domain) addToGroup(byDomain, c.domain.trim().toLowerCase(), c);
+    if (c.name) addToGroup(byName, c.name.trim().toLowerCase(), c);
+  }
+  const duplicateGroups = [];
+  for (const [matchValue, group] of byDomain) if (group.length > 1) duplicateGroups.push({ matchType: 'domain', matchValue, companies: group });
+  for (const [matchValue, group] of byName) if (group.length > 1) duplicateGroups.push({ matchType: 'name', matchValue, companies: group });
+  res.json({ duplicateGroups });
+}));
+
 router.post('/sales/companies', requireHub('sales'), requireRole('member'), validate(companySchema), asyncHandler(async (req, res) => {
   const client = requireSocialClient(res);
   if (!client) return;
@@ -69,6 +112,75 @@ router.post('/sales/companies', requireHub('sales'), requireRole('member'), vali
   if (error) throw error;
   await recordAudit(client, { tenantId: req.tenantId, actorUserId: req.userId, action: 'sales.company_created', targetType: 'company', targetId: data.id, metadata: { name: data.name } });
   res.status(201).json({ company: data });
+}));
+
+router.post('/sales/companies/bulk-action', requireHub('sales'), requireRole('member'), validate(companyBulkActionSchema), asyncHandler(async (req, res) => {
+  const client = requireSocialClient(res);
+  if (!client) return;
+  const { ids, action, value } = req.body;
+
+  if (action === 'delete' && (ROLE_RANK[req.role] ?? -1) < ROLE_RANK.admin) {
+    return res.status(403).json({ error: 'This action requires the "admin" role or higher.' });
+  }
+  if (action === 'set_owner' && value && !UUID_RE.test(value)) {
+    return res.status(400).json({ error: 'value must be a valid user id (uuid) or null for set_owner.' });
+  }
+
+  let updated;
+  if (action === 'set_owner') {
+    const { data: updatedRows, error } = await scoped(client, req.tenantId, 'companies').update({ owner_id: value || null }).in('id', ids).select('id');
+    if (error) throw error;
+    updated = (updatedRows || []).length;
+  } else {
+    const { data: deletedRows, error } = await scoped(client, req.tenantId, 'companies').delete().in('id', ids).select('id');
+    if (error) throw error;
+    updated = (deletedRows || []).length;
+  }
+
+  await recordAudit(client, { tenantId: req.tenantId, actorUserId: req.userId, action: 'sales.companies_bulk_action', targetType: 'company', targetId: null, metadata: { action, value, count: updated } });
+  res.json({ updated });
+}));
+
+router.post('/sales/companies/import', requireHub('sales'), requireRole('member'), csvUpload.single('file'), asyncHandler(async (req, res) => {
+  const client = requireSocialClient(res);
+  if (!client) return;
+  if (!req.file) return res.status(400).json({ error: 'No file uploaded — expected multipart field "file".' });
+
+  const rows = parseCsvToObjects(req.file.buffer.toString('utf8'));
+  if (rows.length === 0) return res.status(400).json({ error: 'CSV has no data rows.' });
+  if (rows.length > 5000) return res.status(400).json({ error: 'CSV has too many rows (max 5000 per import).' });
+
+  const { data: existing, error: existingError } = await scoped(client, req.tenantId, 'companies').select('domain').not('domain', 'is', null);
+  if (existingError) throw existingError;
+  const existingDomains = new Set((existing || []).map((c) => c.domain.trim().toLowerCase()));
+  const seenDomains = new Set();
+
+  let created = 0, skipped = 0;
+  const errors = [];
+  for (let i = 0; i < rows.length; i++) {
+    const row = rows[i];
+    const parsed = companySchema.safeParse({
+      name: row.name, domain: row.domain || undefined, industry: row.industry || undefined,
+      size: row.size || undefined, phone: row.phone || undefined, address: row.address || undefined, notes: row.notes || undefined
+    });
+    if (!parsed.success) {
+      errors.push({ row: i + 2, reason: parsed.error.issues.map((is) => is.message).join('; ') });
+      continue;
+    }
+    const domainKey = parsed.data.domain ? parsed.data.domain.trim().toLowerCase() : null;
+    if (domainKey && (existingDomains.has(domainKey) || seenDomains.has(domainKey))) { skipped += 1; continue; }
+
+    const { error: insertError } = await client.from('companies').insert({
+      tenant_id: req.tenantId, name: parsed.data.name, domain: parsed.data.domain || null, industry: parsed.data.industry || null,
+      size: parsed.data.size || null, phone: parsed.data.phone || null, address: parsed.data.address || null, notes: parsed.data.notes || null
+    });
+    if (insertError) { errors.push({ row: i + 2, reason: insertError.message }); continue; }
+    if (domainKey) seenDomains.add(domainKey);
+    created += 1;
+  }
+
+  await recordAudit(client, { tenantId: req.tenantId, actorUserId: req.userId, action: 'sales.companies_imported', targetType: 'company', targetId: null, metadata: { created, skipped, errorCount: errors.length } });
+  res.json({ created, skipped, errors });
 }));
 
 router.get('/sales/companies/:id', requireHub('sales'), asyncHandler(async (req, res) => {
@@ -123,6 +235,42 @@ router.get('/sales/contacts', requireHub('sales'), asyncHandler(async (req, res)
   res.json({ contacts: data, page, pageSize, total: count });
 }));
 
+router.get('/sales/contacts/export', requireHub('sales'), asyncHandler(async (req, res) => {
+  const client = requireSocialClient(res);
+  if (!client) return;
+  let query = scoped(client, req.tenantId, 'contacts').select('*').order('created_at', { ascending: false });
+  if (req.query.leadStatus) query = query.eq('lead_status', req.query.leadStatus);
+  if (req.query.companyId) query = query.eq('company_id', req.query.companyId);
+  if (req.query.search) query = query.or(`display_name.ilike.%${req.query.search}%,phone.ilike.%${req.query.search}%,email.ilike.%${req.query.search}%`);
+  const { data, error } = await query;
+  if (error) throw error;
+
+  const columns = ['id', 'display_name', 'phone', 'email', 'company_id', 'job_title', 'lead_status', 'lead_source', 'owner_id', 'tags', 'lead_score', 'created_at'];
+  const rows = (data || []).map((c) => ({ ...c, tags: (c.tags || []).join(';') }));
+  const csv = toCsv(rows, columns);
+  res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+  res.setHeader('Content-Disposition', 'attachment; filename="contacts-export.csv"');
+  res.send(csv);
+}));
+
+router.get('/sales/contacts/duplicates', requireHub('sales'), asyncHandler(async (req, res) => {
+  const client = requireSocialClient(res);
+  if (!client) return;
+  const { data: contacts, error } = await scoped(client, req.tenantId, 'contacts').select('id, display_name, phone, email, created_at');
+  if (error) throw error;
+
+  const byPhone = new Map();
+  const byEmail = new Map();
+  for (const c of contacts || []) {
+    if (c.phone) addToGroup(byPhone, c.phone.trim(), c);
+    if (c.email) addToGroup(byEmail, c.email.trim().toLowerCase(), c);
+  }
+  const duplicateGroups = [];
+  for (const [matchValue, group] of byPhone) if (group.length > 1) duplicateGroups.push({ matchType: 'phone', matchValue, contacts: group });
+  for (const [matchValue, group] of byEmail) if (group.length > 1) duplicateGroups.push({ matchType: 'email', matchValue, contacts: group });
+  res.json({ duplicateGroups });
+}));
+
 router.post('/sales/contacts', requireHub('sales'), requireRole('member'), validate(contactSchema), asyncHandler(async (req, res) => {
   const client = requireSocialClient(res);
   if (!client) return;
@@ -140,6 +288,105 @@ router.post('/sales/contacts', requireHub('sales'), requireRole('member'), valid
   await fireTrigger(client, req.tenantId, 'contact_created', { refType: 'contact', refId: data.id, contactId: data.id });
   await recordAudit(client, { tenantId: req.tenantId, actorUserId: req.userId, action: 'sales.contact_created', targetType: 'contact', targetId: data.id, metadata: { displayName } });
   res.status(201).json({ contact: data });
+}));
+
+const CONTACT_LEAD_STATUSES = ['new', 'contacted', 'qualified', 'unqualified', 'customer'];
+
+router.post('/sales/contacts/bulk-action', requireHub('sales'), requireRole('member'), validate(contactBulkActionSchema), asyncHandler(async (req, res) => {
+  const client = requireSocialClient(res);
+  if (!client) return;
+  const { ids, action, value } = req.body;
+
+  if (action === 'set_lead_status' && !CONTACT_LEAD_STATUSES.includes(value)) {
+    return res.status(400).json({ error: `value must be one of ${CONTACT_LEAD_STATUSES.join(', ')} for set_lead_status.` });
+  }
+  if ((action === 'add_tag' || action === 'remove_tag') && !value) {
+    return res.status(400).json({ error: 'value (the tag) is required for add_tag/remove_tag.' });
+  }
+  if (action === 'set_owner' && value && !UUID_RE.test(value)) {
+    return res.status(400).json({ error: 'value must be a valid user id (uuid) or null for set_owner.' });
+  }
+
+  const { data: contacts, error: fetchError } = await scoped(client, req.tenantId, 'contacts').select('id, tags').in('id', ids);
+  if (fetchError) throw fetchError;
+
+  let updated = 0;
+  if (action === 'set_owner' || action === 'set_lead_status') {
+    const column = action === 'set_owner' ? 'owner_id' : 'lead_status';
+    const { data: updatedRows, error } = await scoped(client, req.tenantId, 'contacts').update({ [column]: value || null }).in('id', ids).select('id');
+    if (error) throw error;
+    updated = (updatedRows || []).length;
+  } else {
+    for (const c of contacts || []) {
+      const tags = new Set(c.tags || []);
+      if (action === 'add_tag') tags.add(value); else tags.delete(value);
+      const { error } = await client.from('contacts').update({ tags: [...tags] }).eq('id', c.id).eq('tenant_id', req.tenantId);
+      if (error) throw error;
+      updated += 1;
+    }
+  }
+
+  // lead_status/tags both feed lead scoring — owner changes don't, so
+  // only recompute for the actions that can actually move the score.
+  if (action !== 'set_owner') {
+    for (const c of contacts || []) await recomputeLeadScore(client, req.tenantId, c.id);
+  }
+
+  await recordAudit(client, { tenantId: req.tenantId, actorUserId: req.userId, action: 'sales.contacts_bulk_action', targetType: 'contact', targetId: null, metadata: { action, value, count: updated } });
+  res.json({ updated });
+}));
+
+router.post('/sales/contacts/import', requireHub('sales'), requireRole('member'), csvUpload.single('file'), asyncHandler(async (req, res) => {
+  const client = requireSocialClient(res);
+  if (!client) return;
+  if (!req.file) return res.status(400).json({ error: 'No file uploaded — expected multipart field "file".' });
+
+  const rows = parseCsvToObjects(req.file.buffer.toString('utf8'));
+  if (rows.length === 0) return res.status(400).json({ error: 'CSV has no data rows.' });
+  if (rows.length > 5000) return res.status(400).json({ error: 'CSV has too many rows (max 5000 per import).' });
+
+  const { data: existing, error: existingError } = await scoped(client, req.tenantId, 'contacts').select('phone, email');
+  if (existingError) throw existingError;
+  const existingPhones = new Set((existing || []).filter((c) => c.phone).map((c) => c.phone.trim()));
+  const existingEmails = new Set((existing || []).filter((c) => c.email).map((c) => c.email.trim().toLowerCase()));
+  const seenPhones = new Set();
+  const seenEmails = new Set();
+
+  let created = 0, skipped = 0;
+  const errors = [];
+  const createdIds = [];
+  for (let i = 0; i < rows.length; i++) {
+    const row = rows[i];
+    const parsed = contactSchema.safeParse({
+      displayName: row.displayName || row.name, phone: row.phone || undefined, email: row.email || undefined,
+      jobTitle: row.jobTitle || undefined, leadStatus: row.leadStatus || undefined,
+      tags: row.tags ? row.tags.split(';').map((t) => t.trim()).filter(Boolean) : undefined
+    });
+    if (!parsed.success) {
+      errors.push({ row: i + 2, reason: parsed.error.issues.map((is) => is.message).join('; ') });
+      continue;
+    }
+    const phoneKey = parsed.data.phone ? parsed.data.phone.trim() : null;
+    const emailKey = parsed.data.email ? parsed.data.email.trim().toLowerCase() : null;
+    const isDuplicate = (phoneKey && (existingPhones.has(phoneKey) || seenPhones.has(phoneKey))) ||
+      (emailKey && (existingEmails.has(emailKey) || seenEmails.has(emailKey)));
+    if (isDuplicate) { skipped += 1; continue; }
+
+    const { data: inserted, error: insertError } = await client.from('contacts').insert({
+      tenant_id: req.tenantId, display_name: parsed.data.displayName, phone: parsed.data.phone || null, email: parsed.data.email || null,
+      job_title: parsed.data.jobTitle || null, lead_status: parsed.data.leadStatus || 'new', lead_source: 'import', tags: parsed.data.tags || []
+    }).select('id').single();
+    if (insertError) { errors.push({ row: i + 2, reason: insertError.message }); continue; }
+    if (phoneKey) seenPhones.add(phoneKey);
+    if (emailKey) seenEmails.add(emailKey);
+    createdIds.push(inserted.id);
+    created += 1;
+  }
+
+  for (const id of createdIds) await recomputeLeadScore(client, req.tenantId, id);
+
+  await recordAudit(client, { tenantId: req.tenantId, actorUserId: req.userId, action: 'sales.contacts_imported', targetType: 'contact', targetId: null, metadata: { created, skipped, errorCount: errors.length } });
+  res.json({ created, skipped, errors });
 }));
 
 router.get('/sales/contacts/:id', requireHub('sales'), asyncHandler(async (req, res) => {

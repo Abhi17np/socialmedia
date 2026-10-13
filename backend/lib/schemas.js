@@ -228,6 +228,21 @@ const salesActivitySchema = z.object({
   assignedTo: optionalUuid()
 });
 
+const CONTACT_BULK_ACTIONS = ['add_tag', 'remove_tag', 'set_owner', 'set_lead_status'];
+const COMPANY_BULK_ACTIONS = ['set_owner', 'delete'];
+
+const contactBulkActionSchema = z.object({
+  ids: z.array(z.string().uuid()).min(1).max(500),
+  action: z.enum(CONTACT_BULK_ACTIONS),
+  value: z.string().trim().max(100).nullable().optional()
+});
+
+const companyBulkActionSchema = z.object({
+  ids: z.array(z.string().uuid()).min(1).max(500),
+  action: z.enum(COMPANY_BULK_ACTIONS),
+  value: z.string().trim().max(100).nullable().optional()
+});
+
 const LEAD_SCORING_CONDITION_TYPES = ['has_email', 'has_phone', 'has_company', 'tag_equals', 'lead_status_equals'];
 const CONDITION_TYPES_NEEDING_VALUE = ['tag_equals', 'lead_status_equals'];
 
@@ -290,5 +305,6 @@ module.exports = {
   updatePipelineSchema, dealStageSchema, updateDealStageSchema, reorderStagesSchema,
   salesTargetSchema, updateSalesTargetSchema,
   leadScoringRuleSchema, updateLeadScoringRuleSchema, LEAD_SCORING_CONDITION_TYPES,
+  contactBulkActionSchema, companyBulkActionSchema,
   marketingCampaignSchema, automationRuleSchema
 };

@@ -40,4 +40,4 @@ function requireRole(minRole) {
   };
 }
 
-module.exports = { requireAuth, requireRole };
+module.exports = { requireAuth, requireRole, ROLE_RANK };
