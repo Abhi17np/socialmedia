@@ -21,7 +21,8 @@ const { recordAudit } = require('../lib/audit');
 const { fireTrigger } = require('../lib/automation');
 const {
   companySchema, contactSchema, updateContactSchema, dealSchema, moveDealStageSchema, salesActivitySchema,
-  updatePipelineSchema, dealStageSchema, updateDealStageSchema, reorderStagesSchema
+  updatePipelineSchema, dealStageSchema, updateDealStageSchema, reorderStagesSchema,
+  salesTargetSchema, updateSalesTargetSchema
 } = require('../lib/schemas');
 
 const router = express.Router();
@@ -492,6 +493,181 @@ router.delete('/sales/activities/:id', requireHub('sales'), requireRole('admin')
   const { error } = await scoped(client, req.tenantId, 'sales_activities').delete().eq('id', req.params.id);
   if (error) throw error;
   res.json({ success: true });
+}));
+
+// -------------------------------------------------------------
+// Sales targets (admin-set revenue targets the dashboard compares
+// actual won-revenue against — see migrations/017_sales_targets.sql)
+// -------------------------------------------------------------
+
+router.get('/sales/targets', requireHub('sales'), asyncHandler(async (req, res) => {
+  const client = requireSocialClient(res);
+  if (!client) return;
+  const { data, error } = await scoped(client, req.tenantId, 'sales_targets').select('*').order('period_start', { ascending: false });
+  if (error) throw error;
+  res.json({ targets: data });
+}));
+
+router.post('/sales/targets', requireHub('sales'), requireRole('admin'), validate(salesTargetSchema), asyncHandler(async (req, res) => {
+  const client = requireSocialClient(res);
+  if (!client) return;
+  const { data, error } = await client.from('sales_targets').insert({
+    tenant_id: req.tenantId, owner_id: req.body.ownerId || null, period_start: req.body.periodStart,
+    period_end: req.body.periodEnd, target_amount: req.body.targetAmount
+  }).select('*').single();
+  if (error) {
+    if (error.code === '23514') return res.status(400).json({ error: 'periodEnd must not be before periodStart.' });
+    throw error;
+  }
+  res.status(201).json({ target: data });
+}));
+
+router.patch('/sales/targets/:id', requireHub('sales'), requireRole('admin'), validate(updateSalesTargetSchema), asyncHandler(async (req, res) => {
+  const client = requireSocialClient(res);
+  if (!client) return;
+  const patch = {};
+  for (const [bodyKey, column] of [['ownerId', 'owner_id'], ['periodStart', 'period_start'], ['periodEnd', 'period_end'], ['targetAmount', 'target_amount']]) {
+    if (req.body[bodyKey] !== undefined) patch[column] = req.body[bodyKey];
+  }
+  patch.updated_at = new Date().toISOString();
+  const { data, error } = await scoped(client, req.tenantId, 'sales_targets').update(patch).eq('id', req.params.id).select('*').single();
+  if (error && error.code === '23514') return res.status(400).json({ error: 'periodEnd must not be before periodStart.' });
+  if (error || !data) return res.status(404).json({ error: 'Target not found.' });
+  res.json({ target: data });
+}));
+
+router.delete('/sales/targets/:id', requireHub('sales'), requireRole('admin'), asyncHandler(async (req, res) => {
+  const client = requireSocialClient(res);
+  if (!client) return;
+  const { error } = await scoped(client, req.tenantId, 'sales_targets').delete().eq('id', req.params.id);
+  if (error) throw error;
+  res.json({ success: true });
+}));
+
+// -------------------------------------------------------------
+// Dashboard & Workspace — real rollups over the tables above, computed
+// at request time (no stored/cached metrics, nothing to go stale).
+// -------------------------------------------------------------
+
+function defaultMonthRange() {
+  const now = new Date();
+  const from = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
+  const to = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 0));
+  return { from: from.toISOString().slice(0, 10), to: to.toISOString().slice(0, 10) };
+}
+
+router.get('/sales/dashboard', requireHub('sales'), asyncHandler(async (req, res) => {
+  const client = requireSocialClient(res);
+  if (!client) return;
+  const defaults = defaultMonthRange();
+  const from = req.query.from || defaults.from;
+  const to = req.query.to || defaults.to;
+
+  const [{ data: deals, error: dealsError }, { data: stages, error: stagesError }, { data: users, error: usersError }, { data: targets, error: targetsError }] = await Promise.all([
+    scoped(client, req.tenantId, 'deals').select('*'),
+    scoped(client, req.tenantId, 'deal_stages').select('id, probability'),
+    scoped(client, req.tenantId, 'users').select('id, email'),
+    scoped(client, req.tenantId, 'sales_targets').select('*').lte('period_start', to).gte('period_end', from)
+  ]);
+  if (dealsError) throw dealsError;
+  if (stagesError) throw stagesError;
+  if (usersError) throw usersError;
+  if (targetsError) throw targetsError;
+
+  const probabilityByStage = new Map((stages || []).map((s) => [s.id, s.probability]));
+  const userEmailById = new Map((users || []).map((u) => [u.id, u.email]));
+  const inRange = (dateStr) => !!dateStr && dateStr.slice(0, 10) >= from && dateStr.slice(0, 10) <= to;
+
+  const wonDeals = (deals || []).filter((d) => d.status === 'won' && inRange(d.closed_at));
+  const lostDeals = (deals || []).filter((d) => d.status === 'lost' && inRange(d.closed_at));
+  const openDeals = (deals || []).filter((d) => d.status === 'open');
+
+  const revenue = wonDeals.reduce((sum, d) => sum + Number(d.amount), 0);
+  const lostAmount = lostDeals.reduce((sum, d) => sum + Number(d.amount), 0);
+  const pipelineValue = openDeals.reduce((sum, d) => sum + Number(d.amount), 0);
+  const weightedForecast = openDeals
+    .filter((d) => inRange(d.expected_close_date))
+    .reduce((sum, d) => sum + Number(d.amount) * ((probabilityByStage.get(d.stage_id) || 0) / 100), 0);
+  const conversionRate = (wonDeals.length + lostDeals.length) > 0 ? wonDeals.length / (wonDeals.length + lostDeals.length) : null;
+
+  const { count: overdueActivitiesCount, error: overdueError } = await scoped(client, req.tenantId, 'sales_activities')
+    .select('id', { count: 'exact', head: true }).eq('status', 'open').lt('due_at', new Date().toISOString());
+  if (overdueError) throw overdueError;
+
+  const performanceByOwner = new Map();
+  for (const d of deals || []) {
+    if (!d.owner_id) continue;
+    const row = performanceByOwner.get(d.owner_id) || {
+      ownerId: d.owner_id, ownerEmail: userEmailById.get(d.owner_id) || null,
+      wonCount: 0, wonAmount: 0, openCount: 0, openValue: 0
+    };
+    if (d.status === 'won' && inRange(d.closed_at)) { row.wonCount += 1; row.wonAmount += Number(d.amount); }
+    if (d.status === 'open') { row.openCount += 1; row.openValue += Number(d.amount); }
+    performanceByOwner.set(d.owner_id, row);
+  }
+
+  const targetsOut = (targets || []).map((t) => {
+    const actualAmount = (deals || [])
+      .filter((d) => d.status === 'won' && inRange(d.closed_at) && (!t.owner_id || d.owner_id === t.owner_id))
+      .reduce((sum, d) => sum + Number(d.amount), 0);
+    const targetAmount = Number(t.target_amount);
+    return { ...t, actualAmount, attainmentPct: targetAmount > 0 ? Math.round((actualAmount / targetAmount) * 1000) / 10 : null };
+  });
+
+  res.json({
+    range: { from, to },
+    revenue, lostAmount, pipelineValue, weightedForecast, conversionRate,
+    wonCount: wonDeals.length, lostCount: lostDeals.length, openCount: openDeals.length,
+    overdueActivitiesCount: overdueActivitiesCount || 0,
+    targets: targetsOut,
+    teamPerformance: [...performanceByOwner.values()]
+  });
+}));
+
+router.get('/sales/workspace', requireHub('sales'), asyncHandler(async (req, res) => {
+  const client = requireSocialClient(res);
+  if (!client) return;
+  const userId = req.userId;
+  const now = new Date();
+  const todayStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate())).toISOString();
+  const todayEnd = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1)).toISOString();
+  const weekEnd = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 7)).toISOString();
+
+  const [
+    { data: overdue, error: overdueError },
+    { data: dueToday, error: dueTodayError },
+    { data: upcoming, error: upcomingError },
+    { data: ownedDeals, error: dealsError }
+  ] = await Promise.all([
+    scoped(client, req.tenantId, 'sales_activities').select('*').eq('assigned_to', userId).eq('status', 'open').lt('due_at', now.toISOString()).order('due_at'),
+    scoped(client, req.tenantId, 'sales_activities').select('*').eq('assigned_to', userId).eq('status', 'open').gte('due_at', todayStart).lt('due_at', todayEnd).order('due_at'),
+    scoped(client, req.tenantId, 'sales_activities').select('*').eq('assigned_to', userId).eq('status', 'open').gte('due_at', todayEnd).lt('due_at', weekEnd).order('due_at'),
+    scoped(client, req.tenantId, 'deals').select('*').eq('owner_id', userId).eq('status', 'open')
+  ]);
+  if (overdueError) throw overdueError;
+  if (dueTodayError) throw dueTodayError;
+  if (upcomingError) throw upcomingError;
+  if (dealsError) throw dealsError;
+
+  const stageIds = [...new Set((ownedDeals || []).map((d) => d.stage_id))];
+  const { data: ownedStages, error: ownedStagesError } = stageIds.length
+    ? await scoped(client, req.tenantId, 'deal_stages').select('id, stale_after_days').in('id', stageIds)
+    : { data: [], error: null };
+  if (ownedStagesError) throw ownedStagesError;
+  const staleAfterByStage = new Map((ownedStages || []).map((s) => [s.id, s.stale_after_days]));
+  const nowMs = Date.now();
+  const staleDeals = (ownedDeals || []).filter((d) => {
+    const staleAfterDays = staleAfterByStage.get(d.stage_id);
+    return staleAfterDays != null && (nowMs - new Date(d.updated_at).getTime()) > staleAfterDays * 86400000;
+  });
+
+  res.json({
+    overdueActivities: overdue || [],
+    dueTodayActivities: dueToday || [],
+    upcomingActivities: upcoming || [],
+    staleDeals,
+    openDealsCount: (ownedDeals || []).length
+  });
 }));
 
 module.exports = router;

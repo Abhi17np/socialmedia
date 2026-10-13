@@ -228,6 +228,20 @@ const salesActivitySchema = z.object({
   assignedTo: optionalUuid()
 });
 
+const salesTargetSchema = z.object({
+  ownerId: nullableOptionalUuid(),
+  periodStart: z.string().trim().min(1).max(10),
+  periodEnd: z.string().trim().min(1).max(10),
+  targetAmount: z.number().min(0).max(1e12)
+});
+
+const updateSalesTargetSchema = z.object({
+  ownerId: nullableOptionalUuid(),
+  periodStart: z.string().trim().min(1).max(10).optional(),
+  periodEnd: z.string().trim().min(1).max(10).optional(),
+  targetAmount: z.number().min(0).max(1e12).optional()
+}).refine(v => Object.keys(v).length > 0, { message: 'Nothing to update.' });
+
 const marketingCampaignSchema = z.object({
   name: z.string().trim().min(1).max(200),
   description: z.string().trim().max(2000).optional(),
@@ -252,5 +266,6 @@ module.exports = {
   updateHubsSchema, templateSchema, segmentSchema, whatsappCampaignSchema,
   companySchema, contactSchema, updateContactSchema, dealSchema, moveDealStageSchema, salesActivitySchema,
   updatePipelineSchema, dealStageSchema, updateDealStageSchema, reorderStagesSchema,
+  salesTargetSchema, updateSalesTargetSchema,
   marketingCampaignSchema, automationRuleSchema
 };
