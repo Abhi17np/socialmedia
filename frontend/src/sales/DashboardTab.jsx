@@ -1,9 +1,15 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { TrendingUp, Target } from 'lucide-react';
+import { TrendingUp, Target, PieChart } from 'lucide-react';
 import { Panel, PanelHeader, Table, Th, Td, Banner, Skeleton, StatStrip, Stat, EmptyState, Input, Avatar } from '../ui';
 import { money } from './format';
+
+const FORECAST_CATEGORIES = [
+  { key: 'pipeline', label: 'Pipeline', tone: 'bg-subtle' },
+  { key: 'best_case', label: 'Best case', tone: 'bg-brand/60' },
+  { key: 'commit', label: 'Commit', tone: 'bg-brand' }
+];
 
 function monthRange() {
   const now = new Date();
@@ -62,6 +68,33 @@ function DashboardTab({ authFetch, SALES_API_BASE }) {
           />
         </StatStrip>
       )}
+
+      <Panel className="overflow-hidden">
+        <PanelHeader title="Forecast by category" meta="Open pipeline, by how confident each deal's owner is it will close (Salesforce/HubSpot pattern)" />
+        {data === null ? (
+          <div className="p-4"><Skeleton className="h-9" /></div>
+        ) : FORECAST_CATEGORIES.every(({ key }) => !data.forecastByCategory[key]) ? (
+          <EmptyState icon={PieChart} title="No open deals with a forecast category yet" description="Set a deal's forecast category from its detail view in Pipeline." />
+        ) : (
+          <div className="p-4 flex flex-col gap-3">
+            {FORECAST_CATEGORIES.map(({ key, label, tone }) => {
+              const amount = data.forecastByCategory[key] || 0;
+              const pct = data.pipelineValue > 0 ? Math.round((amount / data.pipelineValue) * 100) : 0;
+              return (
+                <div key={key}>
+                  <div className="flex items-center justify-between text-xs mb-1">
+                    <span className="font-medium text-ink">{label}</span>
+                    <span className="tabular-nums text-muted">{money(amount)} ({pct}% of open pipeline)</span>
+                  </div>
+                  <div className="h-2 rounded-full bg-sunken overflow-hidden">
+                    <div className={`h-full transition-all ${tone}`} style={{ width: `${pct}%` }} />
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </Panel>
 
       <Panel className="overflow-hidden">
         <PanelHeader title="Sales targets" meta="Set in Settings → Targets" />

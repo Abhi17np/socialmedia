@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { usePathname, useSearchParams } from 'next/navigation';
-import { LayoutDashboard, Inbox, KanbanSquare, Building2, Users, ListChecks, Settings } from 'lucide-react';
+import { LayoutDashboard, Inbox, KanbanSquare, Building2, Users, ListChecks, Workflow, Settings } from 'lucide-react';
 import { atLeast } from '../roleRank';
 
 // Sales Hub's own sidebar — these used to be a horizontal tab row
@@ -17,6 +17,7 @@ const ITEMS = [
   { tab: 'companies', icon: Building2, label: 'Companies', minRole: 'viewer' },
   { tab: 'contacts', icon: Users, label: 'Leads', minRole: 'viewer' },
   { tab: 'activities', icon: ListChecks, label: 'Activities', minRole: 'viewer' },
+  { tab: 'sequences', icon: Workflow, label: 'Sequences', minRole: 'member' },
   { tab: 'settings', icon: Settings, label: 'Settings', minRole: 'admin' }
 ];
 

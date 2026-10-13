@@ -19,6 +19,7 @@ import SettingsTab from './SettingsTab';
 import PipelineTab from './PipelineTab';
 import CompaniesTab from './CompaniesTab';
 import ContactsTab from './ContactsTab';
+import SequencesTab from './SequencesTab';
 
 const SALES_API_BASE = `${API_BASE}/sales`;
 
@@ -75,6 +76,7 @@ function SalesHubInner({ authFetch, role }) {
         {tab === 'companies' && <CompaniesTab authFetch={authFetch} SALES_API_BASE={SALES_API_BASE} canManage={canManage} canDelete={canDelete} openId={openId} />}
         {tab === 'contacts' && <ContactsTab authFetch={authFetch} SALES_API_BASE={SALES_API_BASE} canManage={canManage} openId={openId} />}
         {tab === 'activities' && <ActivitiesTab authFetch={authFetch} canManage={canManage} canDelete={canDelete} />}
+        {tab === 'sequences' && <SequencesTab authFetch={authFetch} SALES_API_BASE={SALES_API_BASE} canAdmin={canAdmin} />}
         {tab === 'settings' && canAdmin && <SettingsTab authFetch={authFetch} SALES_API_BASE={SALES_API_BASE} />}
       </PageBody>
     </Page>
