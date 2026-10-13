@@ -21,6 +21,57 @@
  * anything.
  */
 
+// Idempotency guard: nothing in this codebase calls fireTrigger() twice
+// for the same event today (each trigger type has exactly one call
+// site), but a rule firing twice for the literal same occurrence — a
+// future bug adding a second call site, a retried request — would
+// double-tag a contact or create a duplicate follow-up task. This
+// window is deliberately short: it must not block a rule's legitimate
+// NEXT firing when the same entity triggers it again later (a tag
+// re-added after removal, a deal moving through another stage), only
+// a near-instant re-invocation for the same event.
+const IDEMPOTENCY_WINDOW_MS = 10 * 1000;
+
+async function ranRecently(client, ruleId, refId) {
+  if (!refId) return false;
+  const since = new Date(Date.now() - IDEMPOTENCY_WINDOW_MS).toISOString();
+  const { data } = await client.from('automation_runs').select('id').eq('rule_id', ruleId).eq('trigger_ref_id', refId).gte('ran_at', since).limit(1);
+  return !!(data && data.length > 0);
+}
+
+// Rebuilds enough of fireTrigger()'s context to re-run a rule's action
+// from just (trigger_ref_type, trigger_ref_id) — what's stored on an
+// automation_runs row — so a failed run can be retried without having
+// persisted the full original context. Every action type only ever
+// needs contactId and/or dealId, and both are derivable from the ref
+// alone (a deal's own contact_id covers the contactId side for a deal
+// trigger).
+async function reconstructContext(client, tenantId, refType, refId) {
+  if (refType === 'contact') return { refType, refId, contactId: refId };
+  if (refType === 'deal') {
+    const { data: deal } = await client.from('deals').select('contact_id').eq('id', refId).eq('tenant_id', tenantId).maybeSingle();
+    return { refType, refId, dealId: refId, contactId: deal?.contact_id || null };
+  }
+  return { refType, refId };
+}
+
+// Re-executes a previously failed (or any) automation_runs row's rule
+// against the same entity — the manual "Recovery" path the brief asks
+// for, since nothing here retries automatically (these are real-time,
+// in-request side effects, not a queue with its own retry policy).
+async function retryRun(client, tenantId, runId) {
+  const { data: run, error: runError } = await client.from('automation_runs').select('*').eq('tenant_id', tenantId).eq('id', runId).maybeSingle();
+  if (runError) throw runError;
+  if (!run) throw new Error('Automation run not found.');
+
+  const { data: rule, error: ruleError } = await client.from('automation_rules').select('*').eq('tenant_id', tenantId).eq('id', run.rule_id).maybeSingle();
+  if (ruleError) throw ruleError;
+  if (!rule) throw new Error('The rule this run belongs to no longer exists.');
+
+  const context = await reconstructContext(client, tenantId, run.trigger_ref_type, run.trigger_ref_id);
+  await runRule(client, tenantId, rule, context);
+}
+
 async function runRule(client, tenantId, rule, context) {
   let result;
   try {
@@ -113,13 +164,13 @@ async function fireTrigger(client, tenantId, triggerType, context) {
     const { data: rules, error } = await client.from('automation_rules').select('*').eq('tenant_id', tenantId).eq('trigger_type', triggerType).eq('is_active', true);
     if (error) throw error;
     for (const rule of rules || []) {
-      if (matchesConfig(rule.trigger_config, context)) {
-        await runRule(client, tenantId, rule, context);
-      }
+      if (!matchesConfig(rule.trigger_config, context)) continue;
+      if (await ranRecently(client, rule.id, context.refId)) continue;
+      await runRule(client, tenantId, rule, context);
     }
   } catch (err) {
     console.error(`[automation] fireTrigger(${triggerType}) failed:`, err.message);
   }
 }
 
-module.exports = { fireTrigger };
+module.exports = { fireTrigger, retryRun };

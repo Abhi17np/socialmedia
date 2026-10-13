@@ -19,7 +19,7 @@ const { requireHub } = require('../middleware/hubs');
 const { validate } = require('../middleware/validate');
 const { asyncHandler } = require('../lib/asyncHandler');
 const { recordAudit } = require('../lib/audit');
-const { fireTrigger } = require('../lib/automation');
+const { fireTrigger, retryRun } = require('../lib/automation');
 const { recomputeLeadScore } = require('../lib/leadScoring');
 const { parseCsvToObjects, toCsv } = require('../lib/csv');
 const {
@@ -28,7 +28,8 @@ const {
   updatePipelineSchema, dealStageSchema, updateDealStageSchema, reorderStagesSchema,
   salesTargetSchema, updateSalesTargetSchema, leadScoringRuleSchema, updateLeadScoringRuleSchema,
   contactBulkActionSchema, companyBulkActionSchema,
-  customFieldDefinitionSchema, updateCustomFieldDefinitionSchema, automationRuleSchema
+  customFieldDefinitionSchema, updateCustomFieldDefinitionSchema, automationRuleSchema,
+  sequenceSchema, updateSequenceSchema, sequenceStepSchema, sequenceEnrollSchema
 } = require('../lib/schemas');
 
 const router = express.Router();
@@ -1196,6 +1197,196 @@ router.get('/sales/automation-rules/:id/runs', requireHub('sales'), asyncHandler
   const { data, error } = await scoped(client, req.tenantId, 'automation_runs').select('*').eq('rule_id', req.params.id).order('ran_at', { ascending: false }).limit(50);
   if (error) throw error;
   res.json({ runs: data });
+}));
+
+router.post('/sales/automation-runs/:id/retry', requireHub('sales'), requireRole('admin'), asyncHandler(async (req, res) => {
+  const client = requireSocialClient(res);
+  if (!client) return;
+  const { data: original, error: fetchError } = await scoped(client, req.tenantId, 'automation_runs').select('*').eq('id', req.params.id).maybeSingle();
+  if (fetchError) throw fetchError;
+  if (!original) return res.status(404).json({ error: 'Automation run not found.' });
+
+  try {
+    await retryRun(client, req.tenantId, req.params.id);
+  } catch (err) {
+    return res.status(400).json({ error: err.message });
+  }
+
+  const { data: latest, error } = await scoped(client, req.tenantId, 'automation_runs')
+    .select('*').eq('rule_id', original.rule_id).eq('trigger_ref_id', original.trigger_ref_id)
+    .order('ran_at', { ascending: false }).limit(1).maybeSingle();
+  if (error) throw error;
+  res.json({ run: latest });
+}));
+
+// -------------------------------------------------------------
+// Sequences — a real, persistent multi-step follow-up engine (steps +
+// delays + enrollment + pause/resume/stop), scoped to create_task and
+// add_tag/remove_tag steps. lib/sequences.js + lib/sequenceScheduler.js
+// are the engine; these are CRUD + enrollment management. See that
+// file's header comment for why there's no send_email step type yet.
+// -------------------------------------------------------------
+
+router.get('/sales/sequences', requireHub('sales'), asyncHandler(async (req, res) => {
+  const client = requireSocialClient(res);
+  if (!client) return;
+  const { data: sequences, error } = await scoped(client, req.tenantId, 'sequences').select('*').order('created_at', { ascending: false });
+  if (error) throw error;
+
+  const sequenceIds = (sequences || []).map((s) => s.id);
+  const [{ data: steps }, { data: enrollments }] = sequenceIds.length
+    ? await Promise.all([
+        scoped(client, req.tenantId, 'sequence_steps').select('id, sequence_id').in('sequence_id', sequenceIds),
+        scoped(client, req.tenantId, 'sequence_enrollments').select('id, sequence_id, status').in('sequence_id', sequenceIds)
+      ])
+    : [{ data: [] }, { data: [] }];
+
+  const stepCountBySequence = new Map();
+  for (const s of steps || []) stepCountBySequence.set(s.sequence_id, (stepCountBySequence.get(s.sequence_id) || 0) + 1);
+  const activeEnrollmentsBySequence = new Map();
+  for (const e of enrollments || []) if (e.status === 'active') activeEnrollmentsBySequence.set(e.sequence_id, (activeEnrollmentsBySequence.get(e.sequence_id) || 0) + 1);
+
+  res.json({
+    sequences: (sequences || []).map((s) => ({
+      ...s, stepCount: stepCountBySequence.get(s.id) || 0, activeEnrollmentCount: activeEnrollmentsBySequence.get(s.id) || 0
+    }))
+  });
+}));
+
+router.post('/sales/sequences', requireHub('sales'), requireRole('admin'), validate(sequenceSchema), asyncHandler(async (req, res) => {
+  const client = requireSocialClient(res);
+  if (!client) return;
+  const { data, error } = await client.from('sequences').insert({
+    tenant_id: req.tenantId, name: req.body.name, description: req.body.description || null, created_by: req.userId
+  }).select('*').single();
+  if (error) throw error;
+  res.status(201).json({ sequence: data });
+}));
+
+router.get('/sales/sequences/:id', requireHub('sales'), asyncHandler(async (req, res) => {
+  const client = requireSocialClient(res);
+  if (!client) return;
+  const { data: sequence, error } = await scoped(client, req.tenantId, 'sequences').select('*').eq('id', req.params.id).maybeSingle();
+  if (error) throw error;
+  if (!sequence) return res.status(404).json({ error: 'Sequence not found.' });
+  const { data: steps, error: stepsError } = await scoped(client, req.tenantId, 'sequence_steps').select('*').eq('sequence_id', sequence.id).order('step_order');
+  if (stepsError) throw stepsError;
+  res.json({ sequence, steps: steps || [] });
+}));
+
+router.patch('/sales/sequences/:id', requireHub('sales'), requireRole('admin'), validate(updateSequenceSchema), asyncHandler(async (req, res) => {
+  const client = requireSocialClient(res);
+  if (!client) return;
+  const patch = {};
+  if (req.body.name !== undefined) patch.name = req.body.name;
+  if (req.body.description !== undefined) patch.description = req.body.description;
+  if (req.body.isActive !== undefined) patch.is_active = req.body.isActive;
+  patch.updated_at = new Date().toISOString();
+  const { data, error } = await scoped(client, req.tenantId, 'sequences').update(patch).eq('id', req.params.id).select('*').single();
+  if (error || !data) return res.status(404).json({ error: 'Sequence not found.' });
+  res.json({ sequence: data });
+}));
+
+router.delete('/sales/sequences/:id', requireHub('sales'), requireRole('admin'), asyncHandler(async (req, res) => {
+  const client = requireSocialClient(res);
+  if (!client) return;
+  const { error } = await scoped(client, req.tenantId, 'sequences').delete().eq('id', req.params.id);
+  if (error) throw error;
+  res.json({ success: true });
+}));
+
+router.post('/sales/sequences/:id/steps', requireHub('sales'), requireRole('admin'), validate(sequenceStepSchema), asyncHandler(async (req, res) => {
+  const client = requireSocialClient(res);
+  if (!client) return;
+  const { data: sequence } = await scoped(client, req.tenantId, 'sequences').select('id').eq('id', req.params.id).maybeSingle();
+  if (!sequence) return res.status(404).json({ error: 'Sequence not found.' });
+
+  const { count } = await scoped(client, req.tenantId, 'sequence_steps').select('id', { count: 'exact', head: true }).eq('sequence_id', sequence.id);
+  const { data, error } = await client.from('sequence_steps').insert({
+    tenant_id: req.tenantId, sequence_id: sequence.id, step_order: count || 0,
+    delay_days: req.body.delayDays, action_type: req.body.actionType, action_config: req.body.actionConfig
+  }).select('*').single();
+  if (error) throw error;
+  res.status(201).json({ step: data });
+}));
+
+router.patch('/sales/sequence-steps/:id', requireHub('sales'), requireRole('admin'), asyncHandler(async (req, res) => {
+  const client = requireSocialClient(res);
+  if (!client) return;
+  const patch = {};
+  if (req.body.delayDays !== undefined) patch.delay_days = req.body.delayDays;
+  if (req.body.actionConfig !== undefined) patch.action_config = req.body.actionConfig;
+  if (Object.keys(patch).length === 0) return res.status(400).json({ error: 'Nothing to update.' });
+  const { data, error } = await scoped(client, req.tenantId, 'sequence_steps').update(patch).eq('id', req.params.id).select('*').single();
+  if (error || !data) return res.status(404).json({ error: 'Sequence step not found.' });
+  res.json({ step: data });
+}));
+
+router.delete('/sales/sequence-steps/:id', requireHub('sales'), requireRole('admin'), asyncHandler(async (req, res) => {
+  const client = requireSocialClient(res);
+  if (!client) return;
+  const { error } = await scoped(client, req.tenantId, 'sequence_steps').delete().eq('id', req.params.id);
+  if (error) throw error;
+  res.json({ success: true });
+}));
+
+router.post('/sales/sequences/:id/enroll', requireHub('sales'), requireRole('member'), validate(sequenceEnrollSchema), asyncHandler(async (req, res) => {
+  const client = requireSocialClient(res);
+  if (!client) return;
+  const { data: sequence } = await scoped(client, req.tenantId, 'sequences').select('id, is_active').eq('id', req.params.id).maybeSingle();
+  if (!sequence) return res.status(404).json({ error: 'Sequence not found.' });
+  if (!sequence.is_active) return res.status(400).json({ error: 'This sequence is paused — reactivate it before enrolling contacts.' });
+
+  const { data: firstStep } = await scoped(client, req.tenantId, 'sequence_steps').select('delay_days').eq('sequence_id', sequence.id).eq('step_order', 0).maybeSingle();
+  if (!firstStep) return res.status(400).json({ error: 'This sequence has no steps yet.' });
+
+  const { data: contact } = await scoped(client, req.tenantId, 'contacts').select('id').eq('id', req.body.contactId).maybeSingle();
+  if (!contact) return res.status(400).json({ error: 'contactId does not belong to this tenant.' });
+
+  const nextRunAt = new Date(Date.now() + firstStep.delay_days * 86400000).toISOString();
+  const { data, error } = await client.from('sequence_enrollments').insert({
+    tenant_id: req.tenantId, sequence_id: sequence.id, contact_id: req.body.contactId, deal_id: req.body.dealId || null,
+    next_run_at: nextRunAt, enrolled_by: req.userId
+  }).select('*').single();
+  if (error) {
+    if (error.code === '23505') return res.status(409).json({ error: 'This contact is already enrolled in this sequence.' });
+    throw error;
+  }
+  res.status(201).json({ enrollment: data });
+}));
+
+router.get('/sales/sequences/:id/enrollments', requireHub('sales'), asyncHandler(async (req, res) => {
+  const client = requireSocialClient(res);
+  if (!client) return;
+  const { data: enrollments, error } = await scoped(client, req.tenantId, 'sequence_enrollments').select('*').eq('sequence_id', req.params.id).order('enrolled_at', { ascending: false });
+  if (error) throw error;
+
+  const contactIds = [...new Set((enrollments || []).map((e) => e.contact_id))];
+  const { data: contacts } = contactIds.length
+    ? await scoped(client, req.tenantId, 'contacts').select('id, display_name').in('id', contactIds)
+    : { data: [] };
+  const nameById = new Map((contacts || []).map((c) => [c.id, c.display_name]));
+
+  res.json({ enrollments: (enrollments || []).map((e) => ({ ...e, contactName: nameById.get(e.contact_id) || '(deleted contact)' })) });
+}));
+
+router.patch('/sales/sequence-enrollments/:id', requireHub('sales'), requireRole('member'), asyncHandler(async (req, res) => {
+  const client = requireSocialClient(res);
+  if (!client) return;
+  const nextStatus = req.body.status;
+  if (!['active', 'paused', 'stopped'].includes(nextStatus)) return res.status(400).json({ error: 'status must be "active", "paused", or "stopped".' });
+
+  const patch = { status: nextStatus };
+  // Resuming doesn't try to preserve the exact remaining delay — it
+  // simply makes the enrollment due again right away, so the next
+  // sweep picks up its current step. Simpler and safer than tracking
+  // "time remaining when paused", and the brief only requires
+  // pause/resume/stop to work, not to the exact minute.
+  if (nextStatus === 'active') patch.next_run_at = new Date().toISOString();
+
+  const { data, error } = await scoped(client, req.tenantId, 'sequence_enrollments').update(patch).eq('id', req.params.id).select('*').single();
+  if (error || !data) return res.status(404).json({ error: 'Enrollment not found.' });
+  res.json({ enrollment: data });
 }));
 
 module.exports = router;

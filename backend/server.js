@@ -20,6 +20,7 @@ const marketingRoutes = require('./routes/marketing');
 const socialScheduler = require('./social/scheduler');
 const socialPollers = require('./social/pollers');
 const broadcastQueue = require('./social/broadcastQueue');
+const sequenceScheduler = require('./lib/sequenceScheduler');
 
 // Versioned from day one — nothing in production depends on an
 // unversioned path yet, which is exactly the window in which this is
@@ -137,6 +138,7 @@ if (require.main === module) {
     socialScheduler.start();
     socialPollers.start();
     broadcastQueue.start();
+    sequenceScheduler.start();
   });
 
   // Tear down in the reverse order we started, and don't exit until the
@@ -165,6 +167,7 @@ if (require.main === module) {
       socialPollers.stop();           // the mentions + analytics setIntervals
       await socialScheduler.stop();   // sweep interval, then BullMQ worker/queue and Redis
       await broadcastQueue.stop();    // the WhatsApp broadcast worker/queue and its own Redis connection
+      sequenceScheduler.stop();       // the Sales Hub sequence sweep interval
       const closed = new Promise((resolve, reject) => server.close(err => (err ? reject(err) : resolve())));
       // server.close() only stops new connections; without this it waits
       // on idle keep-alives the dashboard leaves open and never resolves.

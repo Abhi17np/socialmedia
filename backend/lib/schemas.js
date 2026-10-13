@@ -315,6 +315,31 @@ const automationRuleSchema = z.object({
   isActive: z.boolean().optional().default(true)
 });
 
+const SEQUENCE_ACTION_TYPES = ['create_task', 'add_tag', 'remove_tag'];
+
+const sequenceSchema = z.object({
+  name: z.string().trim().min(1).max(200),
+  description: z.string().trim().max(2000).optional()
+});
+
+const updateSequenceSchema = z.object({
+  name: z.string().trim().min(1).max(200).optional(),
+  description: z.string().trim().max(2000).optional(),
+  isActive: z.boolean().optional()
+}).refine(v => Object.keys(v).length > 0, { message: 'Nothing to update.' });
+
+const sequenceStepSchema = z.object({
+  delayDays: z.number().int().min(0).max(365).optional().default(0),
+  actionType: z.enum(SEQUENCE_ACTION_TYPES),
+  actionConfig: z.record(z.string(), z.any()).optional().default({})
+}).refine(v => v.actionType !== 'create_task' || !!v.actionConfig.subject, { message: 'actionConfig.subject is required for create_task steps.', path: ['actionConfig'] })
+  .refine(v => !['add_tag', 'remove_tag'].includes(v.actionType) || !!v.actionConfig.tag, { message: 'actionConfig.tag is required for add_tag/remove_tag steps.', path: ['actionConfig'] });
+
+const sequenceEnrollSchema = z.object({
+  contactId: z.string().uuid(),
+  dealId: optionalUuid()
+});
+
 const CUSTOM_FIELD_ENTITY_TYPES = ['contact', 'company', 'deal'];
 const CUSTOM_FIELD_TYPES = ['text', 'number', 'date', 'boolean', 'select'];
 
@@ -348,5 +373,6 @@ module.exports = {
   leadScoringRuleSchema, updateLeadScoringRuleSchema, LEAD_SCORING_CONDITION_TYPES,
   contactBulkActionSchema, companyBulkActionSchema,
   customFieldDefinitionSchema, updateCustomFieldDefinitionSchema, CUSTOM_FIELD_ENTITY_TYPES, CUSTOM_FIELD_TYPES,
+  sequenceSchema, updateSequenceSchema, sequenceStepSchema, sequenceEnrollSchema, SEQUENCE_ACTION_TYPES,
   marketingCampaignSchema, automationRuleSchema
 };

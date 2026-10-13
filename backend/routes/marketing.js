@@ -24,6 +24,7 @@ const { requireHub } = require('../middleware/hubs');
 const { validate } = require('../middleware/validate');
 const { asyncHandler } = require('../lib/asyncHandler');
 const { recordAudit } = require('../lib/audit');
+const { retryRun } = require('../lib/automation');
 const { marketingCampaignSchema, automationRuleSchema } = require('../lib/schemas');
 
 const router = express.Router();
@@ -245,6 +246,26 @@ router.get('/marketing/automation-rules/:id/runs', requireHub('marketing'), asyn
   const { data, error } = await scoped(client, req.tenantId, 'automation_runs').select('*').eq('rule_id', req.params.id).order('ran_at', { ascending: false }).limit(50);
   if (error) throw error;
   res.json({ runs: data });
+}));
+
+router.post('/marketing/automation-runs/:id/retry', requireHub('marketing'), requireRole('admin'), asyncHandler(async (req, res) => {
+  const client = requireSocialClient(res);
+  if (!client) return;
+  const { data: original, error: fetchError } = await scoped(client, req.tenantId, 'automation_runs').select('*').eq('id', req.params.id).maybeSingle();
+  if (fetchError) throw fetchError;
+  if (!original) return res.status(404).json({ error: 'Automation run not found.' });
+
+  try {
+    await retryRun(client, req.tenantId, req.params.id);
+  } catch (err) {
+    return res.status(400).json({ error: err.message });
+  }
+
+  const { data: latest, error } = await scoped(client, req.tenantId, 'automation_runs')
+    .select('*').eq('rule_id', original.rule_id).eq('trigger_ref_id', original.trigger_ref_id)
+    .order('ran_at', { ascending: false }).limit(1).maybeSingle();
+  if (error) throw error;
+  res.json({ run: latest });
 }));
 
 module.exports = router;
