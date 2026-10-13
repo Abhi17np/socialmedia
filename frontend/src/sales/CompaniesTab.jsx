@@ -1,0 +1,216 @@
+'use client';
+
+import { useEffect, useRef, useState } from 'react';
+import { Plus, Building2, Upload, Download, Copy } from 'lucide-react';
+import {
+  Button, Panel, PanelHeader, Table, Th, Td, Input, Select, Field,
+  Banner, Modal, Drawer, EmptyState, Skeleton, Chip, Checkbox
+} from '../ui';
+import { money, downloadViaAuthFetch } from './format';
+import { useTeamMembers } from './useTeamMembers';
+
+const LEAD_STATUS_TONE = { new: 'neutral', contacted: 'info', qualified: 'brand', unqualified: 'danger', customer: 'success' };
+
+function CompaniesTab({ authFetch, SALES_API_BASE, canManage, canDelete }) {
+  const [companies, setCompanies] = useState(null);
+  const [error, setError] = useState(null);
+  const [notice, setNotice] = useState(null);
+  const [open, setOpen] = useState(false);
+  const [detail, setDetail] = useState(null);
+  const [form, setForm] = useState({ name: '', domain: '', industry: '', ownerId: '' });
+  const [selected, setSelected] = useState(new Set());
+  const [bulkOwnerId, setBulkOwnerId] = useState('');
+  const [duplicates, setDuplicates] = useState(null);
+  const fileInputRef = useRef(null);
+  const members = useTeamMembers(authFetch);
+  const memberEmail = (id) => members.find((m) => m.id === id)?.email || '—';
+
+  const load = () => { authFetch(`${SALES_API_BASE}/companies`).then((r) => r.json()).then((d) => setCompanies(d.companies || [])).catch((e) => setError(e.message)); };
+  useEffect(load, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const create = async () => {
+    try {
+      const res = await authFetch(`${SALES_API_BASE}/companies`, { method: 'POST', body: JSON.stringify({ ...form, ownerId: form.ownerId || undefined }) });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Could not create company.');
+      setCompanies((prev) => [data.company, ...(prev || [])]);
+      setOpen(false);
+      setForm({ name: '', domain: '', industry: '', ownerId: '' });
+    } catch (err) {
+      setError(err.message);
+    }
+  };
+
+  const openDetail = async (company) => {
+    const res = await authFetch(`${SALES_API_BASE}/companies/${company.id}`);
+    const data = await res.json();
+    if (res.ok) setDetail(data);
+  };
+
+  const toggleSelect = (id) => setSelected((prev) => {
+    const next = new Set(prev);
+    if (next.has(id)) next.delete(id); else next.add(id);
+    return next;
+  });
+  const toggleSelectAll = () => setSelected((prev) => (prev.size === (companies || []).length ? new Set() : new Set((companies || []).map((c) => c.id))));
+
+  const bulkAction = async (action, value) => {
+    try {
+      const res = await authFetch(`${SALES_API_BASE}/companies/bulk-action`, { method: 'POST', body: JSON.stringify({ ids: [...selected], action, value: value ?? null }) });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Bulk action failed.');
+      setNotice(`${data.updated} compan${data.updated === 1 ? 'y' : 'ies'} updated.`);
+      setSelected(new Set());
+      load();
+    } catch (err) {
+      setError(err.message);
+    }
+  };
+
+  const exportCsv = async () => {
+    try {
+      await downloadViaAuthFetch(authFetch, `${SALES_API_BASE}/companies/export`, 'companies.csv');
+    } catch (err) {
+      setError(err.message);
+    }
+  };
+
+  const importCsv = async (file) => {
+    const formData = new FormData();
+    formData.append('file', file);
+    try {
+      const res = await authFetch(`${SALES_API_BASE}/companies/import`, { method: 'POST', body: formData });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Import failed.');
+      setNotice(`Imported ${data.created} compan${data.created === 1 ? 'y' : 'ies'}, skipped ${data.skipped} duplicate${data.skipped === 1 ? '' : 's'}${data.errors.length ? `, ${data.errors.length} row error(s)` : ''}.`);
+      load();
+    } catch (err) {
+      setError(err.message);
+    }
+  };
+
+  const loadDuplicates = async () => {
+    const res = await authFetch(`${SALES_API_BASE}/companies/duplicates`);
+    const data = await res.json();
+    if (res.ok) setDuplicates(data.duplicateGroups);
+  };
+
+  return (
+    <>
+      {error && <Banner tone="danger">{error}</Banner>}
+      {notice && <Banner tone="info">{notice}</Banner>}
+
+      {selected.size > 0 && canManage && (
+        <div className="bg-card border border-brand rounded-card px-3 py-2 flex items-center gap-2 text-xs">
+          <span className="font-medium text-ink">{selected.size} selected</span>
+          <div className="flex-1" />
+          <Select className="h-7 w-44" value={bulkOwnerId} onChange={(e) => setBulkOwnerId(e.target.value)}>
+            <option value="">Assign owner…</option>
+            {members.map((m) => <option key={m.id} value={m.id}>{m.email}</option>)}
+          </Select>
+          <Button size="sm" disabled={!bulkOwnerId} onClick={() => bulkAction('set_owner', bulkOwnerId)}>Apply</Button>
+          {canDelete && <Button size="sm" variant="danger" onClick={() => bulkAction('delete')}>Delete selected</Button>}
+          <Button size="sm" onClick={() => setSelected(new Set())}>Clear</Button>
+        </div>
+      )}
+
+      <Panel className="overflow-hidden">
+        <PanelHeader
+          title="Companies"
+          action={
+            <div className="flex items-center gap-1.5">
+              <Button size="sm" icon={Copy} onClick={loadDuplicates}>Find duplicates</Button>
+              <Button size="sm" icon={Download} onClick={exportCsv}>Export</Button>
+              {canManage && <Button size="sm" icon={Upload} onClick={() => fileInputRef.current?.click()}>Import</Button>}
+              {canManage && <Button size="sm" variant="primary" icon={Plus} onClick={() => setOpen(true)}>New company</Button>}
+              <input ref={fileInputRef} type="file" accept=".csv" hidden onChange={(e) => e.target.files[0] && importCsv(e.target.files[0])} />
+            </div>
+          }
+        />
+        {companies === null ? (
+          <div className="p-4 space-y-3"><Skeleton className="h-9" /><Skeleton className="h-9" /></div>
+        ) : companies.length === 0 ? (
+          <EmptyState icon={Building2} title="No companies yet" description="Track the organizations your contacts belong to." />
+        ) : (
+          <Table>
+            <thead>
+              <tr>
+                {canManage && <Th><Checkbox checked={selected.size === companies.length} onChange={toggleSelectAll} /></Th>}
+                <Th>Name</Th><Th>Industry</Th><Th>Domain</Th><Th>Owner</Th>
+              </tr>
+            </thead>
+            <tbody>
+              {companies.map((c) => (
+                <tr key={c.id} className="hover:bg-canvas transition-colors">
+                  {canManage && <Td onClick={(e) => e.stopPropagation()}><Checkbox checked={selected.has(c.id)} onChange={() => toggleSelect(c.id)} /></Td>}
+                  <Td className="cursor-pointer" onClick={() => openDetail(c)}><span className="font-medium">{c.name}</span></Td>
+                  <Td className="cursor-pointer" onClick={() => openDetail(c)}>{c.industry || '—'}</Td>
+                  <Td className="cursor-pointer" onClick={() => openDetail(c)}>{c.domain || '—'}</Td>
+                  <Td>{c.owner_id ? memberEmail(c.owner_id) : '—'}</Td>
+                </tr>
+              ))}
+            </tbody>
+          </Table>
+        )}
+      </Panel>
+
+      <Modal open={open} onClose={() => setOpen(false)} title="New company" footer={<><Button onClick={() => setOpen(false)}>Cancel</Button><Button variant="primary" onClick={create} disabled={!form.name.trim()}>Create</Button></>}>
+        <div className="flex flex-col gap-3">
+          <Field label="Name"><Input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} autoFocus /></Field>
+          <Field label="Industry"><Input value={form.industry} onChange={(e) => setForm({ ...form, industry: e.target.value })} /></Field>
+          <Field label="Domain"><Input value={form.domain} onChange={(e) => setForm({ ...form, domain: e.target.value })} placeholder="acme.com" /></Field>
+          <Field label="Owner">
+            <Select value={form.ownerId} onChange={(e) => setForm({ ...form, ownerId: e.target.value })}>
+              <option value="">Unassigned</option>
+              {members.map((m) => <option key={m.id} value={m.id}>{m.email}</option>)}
+            </Select>
+          </Field>
+        </div>
+      </Modal>
+
+      <Drawer open={!!detail} onClose={() => setDetail(null)} title={detail?.company?.name} subtitle={detail?.company?.industry}>
+        {detail && (
+          <div className="p-4 flex flex-col gap-4">
+            <div>
+              <div className="eyebrow mb-1.5">Contacts ({detail.contacts.length})</div>
+              {detail.contacts.length === 0 ? <p className="text-xs text-muted">No contacts linked yet.</p> : (
+                <div className="flex flex-col gap-1.5">
+                  {detail.contacts.map((c) => (
+                    <div key={c.id} className="flex items-center gap-2 text-xs"><span>{c.display_name}</span><Chip tone={LEAD_STATUS_TONE[c.lead_status]}>{c.lead_status}</Chip></div>
+                  ))}
+                </div>
+              )}
+            </div>
+            <div>
+              <div className="eyebrow mb-1.5">Deals ({detail.deals.length})</div>
+              {detail.deals.length === 0 ? <p className="text-xs text-muted">No deals yet.</p> : (
+                <div className="flex flex-col gap-1.5">
+                  {detail.deals.map((d) => (
+                    <div key={d.id} className="flex items-center justify-between text-xs"><span>{d.name}</span><span className="tabular-nums text-muted">{money(d.amount)}</span></div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+      </Drawer>
+
+      <Drawer open={!!duplicates} onClose={() => setDuplicates(null)} title="Possible duplicates" subtitle="Companies sharing a domain or name">
+        <div className="p-4 flex flex-col gap-4">
+          {duplicates && duplicates.length === 0 ? (
+            <p className="text-xs text-muted">No duplicates found.</p>
+          ) : (
+            (duplicates || []).map((g, i) => (
+              <div key={i} className="border border-hairline rounded-ui p-3">
+                <div className="text-[11px] text-muted mb-1.5">Matched on {g.matchType}: <span className="font-medium text-ink">{g.matchValue}</span></div>
+                {g.companies.map((c) => <div key={c.id} className="text-xs py-0.5">{c.name}</div>)}
+              </div>
+            ))
+          )}
+        </div>
+      </Drawer>
+    </>
+  );
+}
+
+export default CompaniesTab;

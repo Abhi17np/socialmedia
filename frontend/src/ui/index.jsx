@@ -517,7 +517,7 @@ export function Th({ children, align = 'left', className }) {
   );
 }
 
-export function Td({ children, align = 'left', className }) {
+export function Td({ children, align = 'left', className, ...rest }) {
   return (
     <td
       className={cx(
@@ -525,6 +525,7 @@ export function Td({ children, align = 'left', className }) {
         align === 'right' ? 'text-right tabular-nums' : 'text-left',
         className
       )}
+      {...rest}
     >
       {children}
     </td>
