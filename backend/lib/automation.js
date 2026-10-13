@@ -6,12 +6,15 @@
  * real-time, in-request side effects of an action that already
  * happened).
  *
- * Deliberately only three action types, all backed by real tables this
- * app already has: add_tag/remove_tag (contacts.tags) and create_task
- * (sales_activities). An earlier draft included "add_to_segment", but
- * audience_segments are dynamic/filter-evaluated (lib/audience.js) with
- * no membership table to add a row to — rather than fake that action
- * with a no-op, it was dropped from the schema entirely.
+ * Deliberately only four action types, all backed by real tables this
+ * app already has: add_tag/remove_tag (contacts.tags), create_task
+ * (sales_activities), and assign_owner (contacts.owner_id /
+ * deals.owner_id — Zoho's "workflow rule on creation" pattern: auto-
+ * assign an owner when a lead comes in or a deal reaches some stage).
+ * An earlier draft included "add_to_segment", but audience_segments
+ * are dynamic/filter-evaluated (lib/audience.js) with no membership
+ * table to add a row to — rather than fake that action with a no-op,
+ * it was dropped from the schema entirely.
  *
  * Every firing is recorded in automation_runs, success or failure, so
  * "why didn't this run" is answerable from the data, not by re-running
@@ -54,6 +57,21 @@ async function runRule(client, tenantId, rule, context) {
         }).select('id').single();
         if (error) throw error;
         result = { activityId: task.id };
+        break;
+      }
+      case 'assign_owner': {
+        if (!rule.action_config.ownerId) throw new Error('assign_owner requires an ownerId in action_config.');
+        if (context.contactId) {
+          const { error } = await client.from('contacts').update({ owner_id: rule.action_config.ownerId }).eq('id', context.contactId).eq('tenant_id', tenantId);
+          if (error) throw error;
+          result = { contactId: context.contactId, ownerId: rule.action_config.ownerId };
+        } else if (context.dealId) {
+          const { error } = await client.from('deals').update({ owner_id: rule.action_config.ownerId }).eq('id', context.dealId).eq('tenant_id', tenantId);
+          if (error) throw error;
+          result = { dealId: context.dealId, ownerId: rule.action_config.ownerId };
+        } else {
+          throw new Error('assign_owner requires a contactId or dealId in context.');
+        }
         break;
       }
       default:

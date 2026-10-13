@@ -16,6 +16,12 @@ const optionalEmail = () => z.preprocess((v) => (v === '' ? undefined : v), z.st
 const optionalUuid = () => z.preprocess((v) => (v === '' ? undefined : v), z.string().uuid().optional());
 const nullableOptionalUuid = () => z.preprocess((v) => (v === '' ? undefined : v), z.string().uuid().nullable().optional());
 
+// The free-form values a contact/company/deal's custom_fields jsonb
+// column holds — shape is whatever custom_field_definitions describes
+// for that entity_type (migration 016), not something zod can see
+// across tables, so this only bounds the JSON primitive types/size.
+const customFieldsValue = () => z.record(z.string().max(100), z.union([z.string().max(2000), z.number(), z.boolean(), z.null()])).optional();
+
 const signupSchema = z.object({
   tenantName: z.string().trim().min(1).max(200),
   email: z.string().trim().email(),
@@ -151,7 +157,8 @@ const companySchema = z.object({
   phone: z.string().trim().max(50).optional(),
   address: z.string().trim().max(500).optional(),
   notes: z.string().trim().max(5000).optional(),
-  ownerId: optionalUuid()
+  ownerId: optionalUuid(),
+  customFields: customFieldsValue()
 });
 
 const contactSchema = z.object({
@@ -162,7 +169,8 @@ const contactSchema = z.object({
   jobTitle: z.string().trim().max(150).optional(),
   leadStatus: z.enum(['new', 'contacted', 'qualified', 'unqualified', 'customer']).optional(),
   ownerId: optionalUuid(),
-  tags: z.array(z.string().trim().max(50)).max(20).optional()
+  tags: z.array(z.string().trim().max(50)).max(20).optional(),
+  customFields: customFieldsValue()
 });
 
 const updateContactSchema = z.object({
@@ -173,7 +181,8 @@ const updateContactSchema = z.object({
   jobTitle: z.string().trim().max(150).optional(),
   leadStatus: z.enum(['new', 'contacted', 'qualified', 'unqualified', 'customer']).optional(),
   ownerId: nullableOptionalUuid(),
-  tags: z.array(z.string().trim().max(50)).max(20).optional()
+  tags: z.array(z.string().trim().max(50)).max(20).optional(),
+  customFields: customFieldsValue()
 }).refine(v => Object.keys(v).length > 0, { message: 'Nothing to update.' });
 
 const dealSchema = z.object({
@@ -185,7 +194,8 @@ const dealSchema = z.object({
   contactId: optionalUuid(),
   companyId: optionalUuid(),
   ownerId: optionalUuid(),
-  expectedCloseDate: z.string().trim().max(10).optional()
+  expectedCloseDate: z.string().trim().max(10).optional(),
+  customFields: customFieldsValue()
 });
 
 const moveDealStageSchema = z.object({
@@ -291,10 +301,31 @@ const automationRuleSchema = z.object({
   name: z.string().trim().min(1).max(200),
   triggerType: z.enum(['contact_created', 'contact_tag_added', 'deal_stage_changed', 'deal_won', 'deal_lost']),
   triggerConfig: z.record(z.string(), z.any()).optional().default({}),
-  actionType: z.enum(['add_tag', 'remove_tag', 'create_task']),
+  actionType: z.enum(['add_tag', 'remove_tag', 'create_task', 'assign_owner']),
   actionConfig: z.record(z.string(), z.any()).optional().default({}),
   isActive: z.boolean().optional().default(true)
 });
+
+const CUSTOM_FIELD_ENTITY_TYPES = ['contact', 'company', 'deal'];
+const CUSTOM_FIELD_TYPES = ['text', 'number', 'date', 'boolean', 'select'];
+
+const customFieldDefinitionSchema = z.object({
+  entityType: z.enum(CUSTOM_FIELD_ENTITY_TYPES),
+  fieldKey: z.string().trim().min(1).max(100).regex(/^[a-z][a-z0-9_]*$/, 'fieldKey must be lowercase letters, numbers and underscores, starting with a letter.'),
+  label: z.string().trim().min(1).max(200),
+  fieldType: z.enum(CUSTOM_FIELD_TYPES).optional().default('text'),
+  options: z.array(z.string().trim().max(100)).max(50).optional().default([]),
+  isRequired: z.boolean().optional().default(false),
+  position: z.number().int().min(0).max(1000).optional().default(0)
+}).refine(v => v.fieldType !== 'select' || v.options.length > 0, { message: 'options is required when fieldType is "select".', path: ['options'] });
+
+const updateCustomFieldDefinitionSchema = z.object({
+  label: z.string().trim().min(1).max(200).optional(),
+  fieldType: z.enum(CUSTOM_FIELD_TYPES).optional(),
+  options: z.array(z.string().trim().max(100)).max(50).optional(),
+  isRequired: z.boolean().optional(),
+  position: z.number().int().min(0).max(1000).optional()
+}).refine(v => Object.keys(v).length > 0, { message: 'Nothing to update.' });
 
 module.exports = {
   signupSchema, loginSchema, createPostSchema, checkoutSchema, addMemberSchema, updateMemberSchema,
@@ -306,5 +337,6 @@ module.exports = {
   salesTargetSchema, updateSalesTargetSchema,
   leadScoringRuleSchema, updateLeadScoringRuleSchema, LEAD_SCORING_CONDITION_TYPES,
   contactBulkActionSchema, companyBulkActionSchema,
+  customFieldDefinitionSchema, updateCustomFieldDefinitionSchema, CUSTOM_FIELD_ENTITY_TYPES, CUSTOM_FIELD_TYPES,
   marketingCampaignSchema, automationRuleSchema
 };

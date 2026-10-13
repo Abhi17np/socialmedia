@@ -26,7 +26,8 @@ const {
   companySchema, contactSchema, updateContactSchema, dealSchema, moveDealStageSchema, salesActivitySchema,
   updatePipelineSchema, dealStageSchema, updateDealStageSchema, reorderStagesSchema,
   salesTargetSchema, updateSalesTargetSchema, leadScoringRuleSchema, updateLeadScoringRuleSchema,
-  contactBulkActionSchema, companyBulkActionSchema
+  contactBulkActionSchema, companyBulkActionSchema,
+  customFieldDefinitionSchema, updateCustomFieldDefinitionSchema, automationRuleSchema
 } = require('../lib/schemas');
 
 const router = express.Router();
@@ -107,7 +108,7 @@ router.post('/sales/companies', requireHub('sales'), requireRole('member'), vali
   const { data, error } = await client.from('companies').insert({
     tenant_id: req.tenantId, name: req.body.name, domain: req.body.domain || null, industry: req.body.industry || null,
     size: req.body.size || null, phone: req.body.phone || null, address: req.body.address || null, notes: req.body.notes || null,
-    owner_id: req.body.ownerId || null
+    owner_id: req.body.ownerId || null, custom_fields: req.body.customFields || {}
   }).select('*').single();
   if (error) throw error;
   await recordAudit(client, { tenantId: req.tenantId, actorUserId: req.userId, action: 'sales.company_created', targetType: 'company', targetId: data.id, metadata: { name: data.name } });
@@ -200,11 +201,17 @@ router.get('/sales/companies/:id', requireHub('sales'), asyncHandler(async (req,
 router.patch('/sales/companies/:id', requireHub('sales'), requireRole('member'), validate(companySchema), asyncHandler(async (req, res) => {
   const client = requireSocialClient(res);
   if (!client) return;
-  const { data, error } = await scoped(client, req.tenantId, 'companies').update({
+  const patch = {
     name: req.body.name, domain: req.body.domain || null, industry: req.body.industry || null, size: req.body.size || null,
     phone: req.body.phone || null, address: req.body.address || null, notes: req.body.notes || null, owner_id: req.body.ownerId || null,
     updated_at: new Date().toISOString()
-  }).eq('id', req.params.id).select('*').single();
+  };
+  // customFields is optional on this schema — only touch the column when
+  // the caller actually sent it, so an update that omits it doesn't wipe
+  // out custom field values set by a previous request.
+  if (req.body.customFields !== undefined) patch.custom_fields = req.body.customFields;
+
+  const { data, error } = await scoped(client, req.tenantId, 'companies').update(patch).eq('id', req.params.id).select('*').single();
   if (error || !data) return res.status(404).json({ error: 'Company not found.' });
   res.json({ company: data });
 }));
@@ -274,12 +281,12 @@ router.get('/sales/contacts/duplicates', requireHub('sales'), asyncHandler(async
 router.post('/sales/contacts', requireHub('sales'), requireRole('member'), validate(contactSchema), asyncHandler(async (req, res) => {
   const client = requireSocialClient(res);
   if (!client) return;
-  const { displayName, phone, email, companyId, jobTitle, leadStatus, ownerId, tags } = req.body;
+  const { displayName, phone, email, companyId, jobTitle, leadStatus, ownerId, tags, customFields } = req.body;
 
   const { data, error } = await client.from('contacts').insert({
     tenant_id: req.tenantId, display_name: displayName, phone: phone || null, email: email || null,
     company_id: companyId || null, job_title: jobTitle || null, lead_status: leadStatus || 'new',
-    lead_source: 'manual', owner_id: ownerId || null, tags: tags || []
+    lead_source: 'manual', owner_id: ownerId || null, tags: tags || [], custom_fields: customFields || {}
   }).select('*').single();
   if (error) throw error;
 
@@ -410,7 +417,7 @@ router.patch('/sales/contacts/:id', requireHub('sales'), requireRole('member'), 
   if (!before) return res.status(404).json({ error: 'Contact not found.' });
 
   const patch = {};
-  for (const [bodyKey, column] of [['displayName', 'display_name'], ['phone', 'phone'], ['email', 'email'], ['companyId', 'company_id'], ['jobTitle', 'job_title'], ['leadStatus', 'lead_status'], ['ownerId', 'owner_id'], ['tags', 'tags']]) {
+  for (const [bodyKey, column] of [['displayName', 'display_name'], ['phone', 'phone'], ['email', 'email'], ['companyId', 'company_id'], ['jobTitle', 'job_title'], ['leadStatus', 'lead_status'], ['ownerId', 'owner_id'], ['tags', 'tags'], ['customFields', 'custom_fields']]) {
     if (req.body[bodyKey] !== undefined) patch[column] = req.body[bodyKey];
   }
   if (Object.keys(patch).length === 0) return res.status(400).json({ error: 'Nothing to update.' });
@@ -647,14 +654,15 @@ router.get('/sales/deals', requireHub('sales'), asyncHandler(async (req, res) =>
 router.post('/sales/deals', requireHub('sales'), requireRole('member'), validate(dealSchema), asyncHandler(async (req, res) => {
   const client = requireSocialClient(res);
   if (!client) return;
-  const { name, pipelineId, stageId, amount, currency, contactId, companyId, ownerId, expectedCloseDate } = req.body;
+  const { name, pipelineId, stageId, amount, currency, contactId, companyId, ownerId, expectedCloseDate, customFields } = req.body;
 
   const { data: stage } = await scoped(client, req.tenantId, 'deal_stages').select('id, pipeline_id').eq('id', stageId).maybeSingle();
   if (!stage || stage.pipeline_id !== pipelineId) return res.status(400).json({ error: 'stageId must belong to pipelineId.' });
 
   const { data, error } = await client.from('deals').insert({
     tenant_id: req.tenantId, pipeline_id: pipelineId, stage_id: stageId, name, amount, currency,
-    contact_id: contactId || null, company_id: companyId || null, owner_id: ownerId || null, expected_close_date: expectedCloseDate || null
+    contact_id: contactId || null, company_id: companyId || null, owner_id: ownerId || null, expected_close_date: expectedCloseDate || null,
+    custom_fields: customFields || {}
   }).select('*').single();
   if (error) throw error;
 
@@ -680,7 +688,7 @@ router.patch('/sales/deals/:id', requireHub('sales'), requireRole('member'), asy
   const client = requireSocialClient(res);
   if (!client) return;
   const patch = {};
-  for (const [bodyKey, column] of [['name', 'name'], ['amount', 'amount'], ['currency', 'currency'], ['contactId', 'contact_id'], ['companyId', 'company_id'], ['ownerId', 'owner_id'], ['expectedCloseDate', 'expected_close_date']]) {
+  for (const [bodyKey, column] of [['name', 'name'], ['amount', 'amount'], ['currency', 'currency'], ['contactId', 'contact_id'], ['companyId', 'company_id'], ['ownerId', 'owner_id'], ['expectedCloseDate', 'expected_close_date'], ['customFields', 'custom_fields']]) {
     if (req.body[bodyKey] !== undefined) patch[column] = req.body[bodyKey];
   }
   if (Object.keys(patch).length === 0) return res.status(400).json({ error: 'Nothing to update.' });
@@ -964,6 +972,138 @@ router.get('/sales/workspace', requireHub('sales'), asyncHandler(async (req, res
     staleDeals,
     openDealsCount: (ownedDeals || []).length
   });
+}));
+
+// -------------------------------------------------------------
+// Custom field definitions — the schema a Contact/Company/Deal form
+// renders in addition to its fixed columns; values live in that
+// entity's own custom_fields jsonb (wired into the create/update
+// routes above).
+// -------------------------------------------------------------
+
+router.get('/sales/custom-fields', requireHub('sales'), asyncHandler(async (req, res) => {
+  const client = requireSocialClient(res);
+  if (!client) return;
+  let query = scoped(client, req.tenantId, 'custom_field_definitions').select('*').order('position');
+  if (req.query.entityType) query = query.eq('entity_type', req.query.entityType);
+  const { data, error } = await query;
+  if (error) throw error;
+  res.json({ fields: data });
+}));
+
+router.post('/sales/custom-fields', requireHub('sales'), requireRole('admin'), validate(customFieldDefinitionSchema), asyncHandler(async (req, res) => {
+  const client = requireSocialClient(res);
+  if (!client) return;
+  const { data, error } = await client.from('custom_field_definitions').insert({
+    tenant_id: req.tenantId, entity_type: req.body.entityType, field_key: req.body.fieldKey, label: req.body.label,
+    field_type: req.body.fieldType, options: req.body.options, is_required: req.body.isRequired, position: req.body.position
+  }).select('*').single();
+  if (error) {
+    if (error.code === '23505') return res.status(409).json({ error: 'A field with this key already exists for this entity type.' });
+    throw error;
+  }
+  res.status(201).json({ field: data });
+}));
+
+router.patch('/sales/custom-fields/:id', requireHub('sales'), requireRole('admin'), validate(updateCustomFieldDefinitionSchema), asyncHandler(async (req, res) => {
+  const client = requireSocialClient(res);
+  if (!client) return;
+  const patch = {};
+  for (const [bodyKey, column] of [['label', 'label'], ['fieldType', 'field_type'], ['options', 'options'], ['isRequired', 'is_required'], ['position', 'position']]) {
+    if (req.body[bodyKey] !== undefined) patch[column] = req.body[bodyKey];
+  }
+  const { data, error } = await scoped(client, req.tenantId, 'custom_field_definitions').update(patch).eq('id', req.params.id).select('*').single();
+  if (error || !data) return res.status(404).json({ error: 'Custom field not found.' });
+  res.json({ field: data });
+}));
+
+router.delete('/sales/custom-fields/:id', requireHub('sales'), requireRole('admin'), asyncHandler(async (req, res) => {
+  const client = requireSocialClient(res);
+  if (!client) return;
+  const { error } = await scoped(client, req.tenantId, 'custom_field_definitions').delete().eq('id', req.params.id);
+  if (error) throw error;
+  res.json({ success: true });
+}));
+
+// -------------------------------------------------------------
+// Audit log — a read-only view over the existing audit_log table
+// (migrations/009_audit_log.sql); every Sales Hub mutation route
+// already calls recordAudit(), this is the first place any of it
+// surfaces to a user instead of only ever being queried by hand.
+// -------------------------------------------------------------
+
+router.get('/sales/audit-log', requireHub('sales'), requireRole('admin'), asyncHandler(async (req, res) => {
+  const client = requireSocialClient(res);
+  if (!client) return;
+  const { page, pageSize, from, to } = pageParams(req);
+  const { data, error, count } = await scoped(client, req.tenantId, 'audit_log')
+    .select('*', { count: 'exact' }).ilike('action', 'sales.%').order('created_at', { ascending: false }).range(from, to);
+  if (error) throw error;
+  res.json({ entries: data, page, pageSize, total: count });
+}));
+
+// -------------------------------------------------------------
+// Automation rules — same automation_rules/automation_runs tables and
+// lib/automation.js engine routes/marketing.js's CRUD already manages,
+// mirrored here behind requireHub('sales') instead of
+// requireHub('marketing'). Every trigger type that engine fires today
+// (contact_created, contact_tag_added, deal_stage_changed, deal_won,
+// deal_lost) is a Sales Hub event — without this, a tenant with Sales
+// but not Marketing enabled would have no way to manage the rules that
+// fire on its own hub's events.
+// -------------------------------------------------------------
+
+router.get('/sales/automation-rules', requireHub('sales'), asyncHandler(async (req, res) => {
+  const client = requireSocialClient(res);
+  if (!client) return;
+  const { data, error } = await scoped(client, req.tenantId, 'automation_rules').select('*').order('created_at', { ascending: false });
+  if (error) throw error;
+  res.json({ rules: data });
+}));
+
+router.post('/sales/automation-rules', requireHub('sales'), requireRole('admin'), validate(automationRuleSchema), asyncHandler(async (req, res) => {
+  const client = requireSocialClient(res);
+  if (!client) return;
+  const { name, triggerType, triggerConfig, actionType, actionConfig, isActive } = req.body;
+  const { data, error } = await client.from('automation_rules').insert({
+    tenant_id: req.tenantId, name, trigger_type: triggerType, trigger_config: triggerConfig,
+    action_type: actionType, action_config: actionConfig, is_active: isActive, created_by: req.userId
+  }).select('*').single();
+  if (error) throw error;
+  await recordAudit(client, { tenantId: req.tenantId, actorUserId: req.userId, action: 'sales.automation_rule_created', targetType: 'automation_rule', targetId: data.id, metadata: { name, triggerType, actionType } });
+  res.status(201).json({ rule: data });
+}));
+
+router.patch('/sales/automation-rules/:id', requireHub('sales'), requireRole('admin'), asyncHandler(async (req, res) => {
+  const client = requireSocialClient(res);
+  if (!client) return;
+  const patch = {};
+  if (req.body.name !== undefined) patch.name = req.body.name;
+  if (req.body.isActive !== undefined) patch.is_active = req.body.isActive;
+  if (req.body.triggerConfig !== undefined) patch.trigger_config = req.body.triggerConfig;
+  if (req.body.actionConfig !== undefined) patch.action_config = req.body.actionConfig;
+  if (Object.keys(patch).length === 0) return res.status(400).json({ error: 'Nothing to update.' });
+  patch.updated_at = new Date().toISOString();
+
+  const { data, error } = await scoped(client, req.tenantId, 'automation_rules').update(patch).eq('id', req.params.id).select('*').single();
+  if (error || !data) return res.status(404).json({ error: 'Rule not found.' });
+  res.json({ rule: data });
+}));
+
+router.delete('/sales/automation-rules/:id', requireHub('sales'), requireRole('admin'), asyncHandler(async (req, res) => {
+  const client = requireSocialClient(res);
+  if (!client) return;
+  const { error } = await scoped(client, req.tenantId, 'automation_rules').delete().eq('id', req.params.id);
+  if (error) throw error;
+  res.json({ success: true });
+}));
+
+router.get('/sales/automation-rules/:id/runs', requireHub('sales'), asyncHandler(async (req, res) => {
+  const client = requireSocialClient(res);
+  if (!client) return;
+  const { data, error } = await scoped(client, req.tenantId, 'automation_runs').select('*').eq('rule_id', req.params.id).order('ran_at', { ascending: false }).limit(50);
+  if (error) throw error;
+  res.json({ runs: data });
 }));
 
 module.exports = router;
