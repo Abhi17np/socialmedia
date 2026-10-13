@@ -10,6 +10,7 @@ import { useTeamMembers } from './useTeamMembers';
 import { downloadViaAuthFetch } from './format';
 import ContactDetailDrawer from './ContactDetailDrawer';
 import { useSavedViews, SavedViewsBar, ColumnsMenu } from './SavedViews';
+import MergeRecordsModal from './MergeRecordsModal';
 
 const LEAD_STATUS_TONE = { new: 'neutral', contacted: 'info', qualified: 'brand', unqualified: 'danger', customer: 'success' };
 const LEAD_STATUSES = ['new', 'contacted', 'qualified', 'unqualified', 'customer'];
@@ -29,7 +30,7 @@ const SORT_OPTIONS = [
   { value: 'lead_score_asc', label: 'Lowest score' }
 ];
 
-function ContactsTab({ authFetch, SALES_API_BASE, canManage, openId }) {
+function ContactsTab({ authFetch, SALES_API_BASE, canManage, canDelete, openId }) {
   const [contacts, setContacts] = useState(null);
   const [page, setPage] = useState(1);
   const [total, setTotal] = useState(null);
@@ -48,6 +49,7 @@ function ContactsTab({ authFetch, SALES_API_BASE, canManage, openId }) {
   const [bulkOwnerId, setBulkOwnerId] = useState('');
   const [duplicates, setDuplicates] = useState(null);
   const [openContactId, setOpenContactId] = useState(null);
+  const [mergeGroup, setMergeGroup] = useState(null);
   const fileInputRef = useRef(null);
   const searchDebounce = useRef(null);
   const members = useTeamMembers(authFetch);
@@ -275,13 +277,25 @@ function ContactsTab({ authFetch, SALES_API_BASE, canManage, openId }) {
           ) : (
             (duplicates || []).map((g, i) => (
               <div key={i} className="border border-hairline rounded-ui p-3">
-                <div className="text-[11px] text-muted mb-1.5">Matched on {g.matchType}: <span className="font-medium text-ink">{g.matchValue}</span></div>
+                <div className="flex items-center justify-between mb-1.5">
+                  <div className="text-[11px] text-muted">Matched on {g.matchType}: <span className="font-medium text-ink">{g.matchValue}</span></div>
+                  {canDelete && <Button size="sm" onClick={() => setMergeGroup(g.contacts)}>Merge</Button>}
+                </div>
                 {g.contacts.map((c) => <div key={c.id} className="text-xs py-0.5">{c.display_name}</div>)}
               </div>
             ))
           )}
         </div>
       </Drawer>
+
+      {mergeGroup && (
+        <MergeRecordsModal
+          entityType="contacts" records={mergeGroup}
+          authFetch={authFetch} SALES_API_BASE={SALES_API_BASE}
+          onClose={() => setMergeGroup(null)}
+          onMerged={() => { load(); loadDuplicates(); }}
+        />
+      )}
 
       {openContactId && (
         <ContactDetailDrawer

@@ -185,6 +185,22 @@ const updateContactSchema = z.object({
   customFields: customFieldsValue()
 }).refine(v => Object.keys(v).length > 0, { message: 'Nothing to update.' });
 
+// Duplicate merging: mergedFields reuses each entity's own create-schema
+// field rules (same validation as every other write), just all-optional
+// since only the fields the user actually overrode on the survivor are
+// sent — everything else keeps the survivor's existing value.
+const mergeContactsSchema = z.object({
+  survivorId: z.string().uuid(),
+  loserId: z.string().uuid(),
+  mergedFields: contactSchema.omit({ customFields: true, tags: true }).partial().optional().default({})
+}).refine(v => v.survivorId !== v.loserId, { message: 'survivorId and loserId must be different.' });
+
+const mergeCompaniesSchema = z.object({
+  survivorId: z.string().uuid(),
+  loserId: z.string().uuid(),
+  mergedFields: companySchema.omit({ customFields: true }).partial().optional().default({})
+}).refine(v => v.survivorId !== v.loserId, { message: 'survivorId and loserId must be different.' });
+
 const FORECAST_CATEGORIES = ['pipeline', 'best_case', 'commit', 'omitted'];
 
 const SAVED_VIEW_LIST_TYPES = ['companies', 'contacts', 'deals'];
@@ -406,5 +422,6 @@ module.exports = {
   customFieldDefinitionSchema, updateCustomFieldDefinitionSchema, CUSTOM_FIELD_ENTITY_TYPES, CUSTOM_FIELD_TYPES,
   sequenceSchema, updateSequenceSchema, sequenceStepSchema, sequenceEnrollSchema, SEQUENCE_ACTION_TYPES,
   savedViewSchema, updateSavedViewSchema, SAVED_VIEW_LIST_TYPES,
+  mergeContactsSchema, mergeCompaniesSchema,
   marketingCampaignSchema, automationRuleSchema
 };

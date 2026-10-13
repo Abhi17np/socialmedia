@@ -9,6 +9,7 @@ import {
 import { money, downloadViaAuthFetch } from './format';
 import { useTeamMembers } from './useTeamMembers';
 import { useSavedViews, SavedViewsBar, ColumnsMenu } from './SavedViews';
+import MergeRecordsModal from './MergeRecordsModal';
 
 const LEAD_STATUS_TONE = { new: 'neutral', contacted: 'info', qualified: 'brand', unqualified: 'danger', customer: 'success' };
 const COLUMNS = [
@@ -42,6 +43,7 @@ function CompaniesTab({ authFetch, SALES_API_BASE, canManage, canDelete, openId 
   const [selected, setSelected] = useState(new Set());
   const [bulkOwnerId, setBulkOwnerId] = useState('');
   const [duplicates, setDuplicates] = useState(null);
+  const [mergeGroup, setMergeGroup] = useState(null);
   const fileInputRef = useRef(null);
   const searchDebounce = useRef(null);
   const members = useTeamMembers(authFetch);
@@ -334,13 +336,25 @@ function CompaniesTab({ authFetch, SALES_API_BASE, canManage, canDelete, openId 
           ) : (
             (duplicates || []).map((g, i) => (
               <div key={i} className="border border-hairline rounded-ui p-3">
-                <div className="text-[11px] text-muted mb-1.5">Matched on {g.matchType}: <span className="font-medium text-ink">{g.matchValue}</span></div>
+                <div className="flex items-center justify-between mb-1.5">
+                  <div className="text-[11px] text-muted">Matched on {g.matchType}: <span className="font-medium text-ink">{g.matchValue}</span></div>
+                  {canDelete && <Button size="sm" onClick={() => setMergeGroup(g.companies)}>Merge</Button>}
+                </div>
                 {g.companies.map((c) => <div key={c.id} className="text-xs py-0.5">{c.name}</div>)}
               </div>
             ))
           )}
         </div>
       </Drawer>
+
+      {mergeGroup && (
+        <MergeRecordsModal
+          entityType="companies" records={mergeGroup}
+          authFetch={authFetch} SALES_API_BASE={SALES_API_BASE}
+          onClose={() => setMergeGroup(null)}
+          onMerged={() => { load(); loadDuplicates(); }}
+        />
+      )}
     </>
   );
 }

@@ -30,7 +30,8 @@ const {
   contactBulkActionSchema, companyBulkActionSchema,
   customFieldDefinitionSchema, updateCustomFieldDefinitionSchema, automationRuleSchema,
   sequenceSchema, updateSequenceSchema, sequenceStepSchema, sequenceEnrollSchema,
-  savedViewSchema, updateSavedViewSchema
+  savedViewSchema, updateSavedViewSchema,
+  mergeContactsSchema, mergeCompaniesSchema
 } = require('../lib/schemas');
 
 const router = express.Router();
@@ -121,7 +122,7 @@ router.get('/sales/companies/export', requireHub('sales'), asyncHandler(async (r
 router.get('/sales/companies/duplicates', requireHub('sales'), asyncHandler(async (req, res) => {
   const client = requireSocialClient(res);
   if (!client) return;
-  const { data: companies, error } = await scoped(client, req.tenantId, 'companies').select('id, name, domain, created_at');
+  const { data: companies, error } = await scoped(client, req.tenantId, 'companies').select('id, name, domain, industry, size, phone, address, notes, created_at');
   if (error) throw error;
 
   const byDomain = new Map();
@@ -134,6 +135,22 @@ router.get('/sales/companies/duplicates', requireHub('sales'), asyncHandler(asyn
   for (const [matchValue, group] of byDomain) if (group.length > 1) duplicateGroups.push({ matchType: 'domain', matchValue, companies: group });
   for (const [matchValue, group] of byName) if (group.length > 1) duplicateGroups.push({ matchType: 'name', matchValue, companies: group });
   res.json({ duplicateGroups });
+}));
+
+// Merging is destructive (the loser row is gone for good) and
+// reassigns every linked deal/contact/activity atomically via a single
+// Postgres function (merge_companies, migration 022) — never a
+// multi-step client-side reassignment that could partially fail.
+router.post('/sales/companies/merge', requireHub('sales'), requireRole('admin'), validate(mergeCompaniesSchema), asyncHandler(async (req, res) => {
+  const client = requireSocialClient(res);
+  if (!client) return;
+  const { survivorId, loserId, mergedFields } = req.body;
+  const { error } = await client.rpc('merge_companies', { p_tenant_id: req.tenantId, p_survivor_id: survivorId, p_loser_id: loserId, p_merged_fields: mergedFields });
+  if (error) return res.status(400).json({ error: error.message });
+  const { data: survivor, error: fetchError } = await scoped(client, req.tenantId, 'companies').select('*').eq('id', survivorId).maybeSingle();
+  if (fetchError) throw fetchError;
+  await recordAudit(client, { tenantId: req.tenantId, actorUserId: req.userId, action: 'sales.companies_merged', targetType: 'company', targetId: survivorId, metadata: { loserId, mergedFields } });
+  res.json({ company: survivor });
 }));
 
 router.post('/sales/companies', requireHub('sales'), requireRole('member'), validate(companySchema), asyncHandler(async (req, res) => {
@@ -300,7 +317,7 @@ router.get('/sales/contacts/export', requireHub('sales'), asyncHandler(async (re
 router.get('/sales/contacts/duplicates', requireHub('sales'), asyncHandler(async (req, res) => {
   const client = requireSocialClient(res);
   if (!client) return;
-  const { data: contacts, error } = await scoped(client, req.tenantId, 'contacts').select('id, display_name, phone, email, created_at');
+  const { data: contacts, error } = await scoped(client, req.tenantId, 'contacts').select('id, display_name, phone, email, job_title, lead_status, created_at');
   if (error) throw error;
 
   const byPhone = new Map();
@@ -313,6 +330,22 @@ router.get('/sales/contacts/duplicates', requireHub('sales'), asyncHandler(async
   for (const [matchValue, group] of byPhone) if (group.length > 1) duplicateGroups.push({ matchType: 'phone', matchValue, contacts: group });
   for (const [matchValue, group] of byEmail) if (group.length > 1) duplicateGroups.push({ matchType: 'email', matchValue, contacts: group });
   res.json({ duplicateGroups });
+}));
+
+// See the companies/merge route's comment — same atomicity guarantee,
+// via merge_contacts() (migration 022).
+router.post('/sales/contacts/merge', requireHub('sales'), requireRole('admin'), validate(mergeContactsSchema), asyncHandler(async (req, res) => {
+  const client = requireSocialClient(res);
+  if (!client) return;
+  const { survivorId, loserId, mergedFields } = req.body;
+  const { error } = await client.rpc('merge_contacts', { p_tenant_id: req.tenantId, p_survivor_id: survivorId, p_loser_id: loserId, p_merged_fields: mergedFields });
+  if (error) return res.status(400).json({ error: error.message });
+  const { data: survivor, error: fetchError } = await scoped(client, req.tenantId, 'contacts').select('*').eq('id', survivorId).maybeSingle();
+  if (fetchError) throw fetchError;
+  await recomputeLeadScore(client, req.tenantId, survivorId);
+  const { data: rescored } = await scoped(client, req.tenantId, 'contacts').select('*').eq('id', survivorId).maybeSingle();
+  await recordAudit(client, { tenantId: req.tenantId, actorUserId: req.userId, action: 'sales.contacts_merged', targetType: 'contact', targetId: survivorId, metadata: { loserId, mergedFields } });
+  res.json({ contact: rescored || survivor });
 }));
 
 router.post('/sales/contacts', requireHub('sales'), requireRole('member'), validate(contactSchema), asyncHandler(async (req, res) => {
