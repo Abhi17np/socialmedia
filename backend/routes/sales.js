@@ -264,9 +264,16 @@ router.patch('/sales/companies/:id', requireHub('sales'), requireRole('member'),
   // out custom field values set by a previous request.
   if (req.body.customFields !== undefined) patch.custom_fields = req.body.customFields;
 
-  const { data, error } = await scoped(client, req.tenantId, 'companies').update(patch).eq('id', req.params.id).select('*').single();
-  if (error || !data) return res.status(404).json({ error: 'Company not found.' });
-  res.json({ company: data });
+  const result = await updateScopedWithVersion(client, req.tenantId, 'companies', req.params.id, patch, req.body.version);
+  if (result.notFound) return res.status(404).json({ error: 'Company not found.' });
+  if (result.conflict) {
+    return res.status(409).json({
+      error: 'This company was changed by someone else since you loaded it. Reload to see the latest version.',
+      code: 'VERSION_CONFLICT', currentVersion: result.currentVersion
+    });
+  }
+  if (result.error) throw result.error;
+  res.json({ company: result.data });
 }));
 
 router.delete('/sales/companies/:id', requireHub('sales'), requireRole('admin'), asyncHandler(async (req, res) => {
@@ -360,7 +367,7 @@ router.post('/sales/contacts', requireHub('sales'), requireRole('member'), valid
   }).select('*').single();
   if (error) throw error;
 
-  data.lead_score = await recomputeLeadScore(client, req.tenantId, data.id);
+  Object.assign(data, await recomputeLeadScore(client, req.tenantId, data.id));
 
   await fireTrigger(client, req.tenantId, 'contact_created', { refType: 'contact', refId: data.id, contactId: data.id });
   await recordAudit(client, { tenantId: req.tenantId, actorUserId: req.userId, action: 'sales.contact_created', targetType: 'contact', targetId: data.id, metadata: { displayName } });
@@ -507,10 +514,18 @@ router.patch('/sales/contacts/:id', requireHub('sales'), requireRole('member'), 
   }
   if (Object.keys(patch).length === 0) return res.status(400).json({ error: 'Nothing to update.' });
 
-  const { data, error } = await scoped(client, req.tenantId, 'contacts').update(patch).eq('id', req.params.id).select('*').single();
-  if (error) throw error;
+  const result = await updateScopedWithVersion(client, req.tenantId, 'contacts', req.params.id, patch, req.body.version);
+  if (result.notFound) return res.status(404).json({ error: 'Contact not found.' });
+  if (result.conflict) {
+    return res.status(409).json({
+      error: 'This contact was changed by someone else since you loaded it. Reload to see the latest version.',
+      code: 'VERSION_CONFLICT', currentVersion: result.currentVersion
+    });
+  }
+  if (result.error) throw result.error;
+  const data = result.data;
 
-  data.lead_score = await recomputeLeadScore(client, req.tenantId, data.id);
+  Object.assign(data, await recomputeLeadScore(client, req.tenantId, data.id));
 
   if (patch.tags) {
     const added = (patch.tags || []).filter((t) => !(before.tags || []).includes(t));
@@ -837,8 +852,16 @@ router.patch('/sales/deals/:id', requireHub('sales'), requireRole('member'), val
   if (Object.keys(patch).length === 0) return res.status(400).json({ error: 'Nothing to update.' });
   patch.updated_at = new Date().toISOString();
 
-  const { data, error } = await scoped(client, req.tenantId, 'deals').update(patch).eq('id', req.params.id).select('*').single();
-  if (error || !data) return res.status(404).json({ error: 'Deal not found.' });
+  const result = await updateScopedWithVersion(client, req.tenantId, 'deals', req.params.id, patch, req.body.version);
+  if (result.notFound) return res.status(404).json({ error: 'Deal not found.' });
+  if (result.conflict) {
+    return res.status(409).json({
+      error: 'This deal was changed by someone else since you loaded it. Reload to see the latest version.',
+      code: 'VERSION_CONFLICT', currentVersion: result.currentVersion
+    });
+  }
+  if (result.error) throw result.error;
+  const data = result.data;
 
   if (req.body.contactId !== undefined) await upsertPrimaryDealContact(client, req.tenantId, data.id, req.body.contactId);
 
@@ -1052,6 +1075,24 @@ function sumByCurrency(items, amountOf, currencyOf = (d) => d.currency || 'INR')
 
 function addToCurrencyMap(map, currency, amount) {
   map[currency] = (map[currency] || 0) + amount;
+}
+
+// Optimistic concurrency: a PATCH that includes `version` only applies
+// if the row hasn't moved on since the client loaded it (bump_version()
+// trigger, migration 023). Distinguishes "no such row" (404) from "row
+// exists but someone else changed it first" (409) — the two look
+// identical to a plain `.update().eq('id', id)` once zero rows match,
+// so a second read is needed to tell them apart.
+async function updateScopedWithVersion(client, tenantId, table, id, patch, clientVersion) {
+  let query = scoped(client, tenantId, table).update(patch).eq('id', id);
+  if (clientVersion !== undefined) query = query.eq('version', clientVersion);
+  const { data, error } = await query.select('*').single();
+  if (!error && data) return { data };
+
+  const { data: existing } = await scoped(client, tenantId, table).select('id, version').eq('id', id).maybeSingle();
+  if (!existing) return { notFound: true };
+  if (clientVersion !== undefined && existing.version !== clientVersion) return { conflict: true, currentVersion: existing.version };
+  return { error: error || new Error(`Update to ${table} affected no rows for an unknown reason`) };
 }
 
 router.get('/sales/dashboard', requireHub('sales'), asyncHandler(async (req, res) => {

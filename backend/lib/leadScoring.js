@@ -38,11 +38,16 @@ async function recomputeLeadScore(client, tenantId, contactId) {
 
   const score = (rules || []).reduce((sum, rule) => sum + (ruleMatches(rule, contact) ? rule.points : 0), 0);
 
+  // Returns the FULL fresh row, not just the score — this update bumps
+  // the row's optimistic-concurrency version (bump_version() trigger,
+  // migration 023), so a caller that only grabbed the score and kept
+  // using an earlier read's `version` would hand its client a stale
+  // value, making their very next save spuriously 409 conflict.
   const { data: updated, error: updateError } = await client
     .from('contacts').update({ lead_score: score })
-    .eq('id', contactId).eq('tenant_id', tenantId).select('lead_score').single();
+    .eq('id', contactId).eq('tenant_id', tenantId).select('*').single();
   if (updateError) throw updateError;
-  return updated.lead_score;
+  return updated;
 }
 
 module.exports = { recomputeLeadScore, ruleMatches, CONDITION_TYPES };

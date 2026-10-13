@@ -158,7 +158,10 @@ const companySchema = z.object({
   address: z.string().trim().max(500).optional(),
   notes: z.string().trim().max(5000).optional(),
   ownerId: optionalUuid(),
-  customFields: customFieldsValue()
+  customFields: customFieldsValue(),
+  // Optimistic concurrency: present on an update, ignored on create.
+  // See bump_version() trigger, migration 023.
+  version: z.number().int().optional()
 });
 
 const contactSchema = z.object({
@@ -182,7 +185,8 @@ const updateContactSchema = z.object({
   leadStatus: z.enum(['new', 'contacted', 'qualified', 'unqualified', 'customer']).optional(),
   ownerId: nullableOptionalUuid(),
   tags: z.array(z.string().trim().max(50)).max(20).optional(),
-  customFields: customFieldsValue()
+  customFields: customFieldsValue(),
+  version: z.number().int().optional()
 }).refine(v => Object.keys(v).length > 0, { message: 'Nothing to update.' });
 
 // Duplicate merging: mergedFields reuses each entity's own create-schema
@@ -198,7 +202,7 @@ const mergeContactsSchema = z.object({
 const mergeCompaniesSchema = z.object({
   survivorId: z.string().uuid(),
   loserId: z.string().uuid(),
-  mergedFields: companySchema.omit({ customFields: true }).partial().optional().default({})
+  mergedFields: companySchema.omit({ customFields: true, version: true }).partial().optional().default({})
 }).refine(v => v.survivorId !== v.loserId, { message: 'survivorId and loserId must be different.' });
 
 const FORECAST_CATEGORIES = ['pipeline', 'best_case', 'commit', 'omitted'];
@@ -243,7 +247,8 @@ const updateDealSchema = z.object({
   ownerId: nullableOptionalUuid(),
   expectedCloseDate: z.string().trim().max(10).nullable().optional(),
   forecastCategory: z.enum(FORECAST_CATEGORIES).optional(),
-  customFields: customFieldsValue()
+  customFields: customFieldsValue(),
+  version: z.number().int().optional()
 }).refine(v => Object.keys(v).length > 0, { message: 'Nothing to update.' });
 
 const moveDealStageSchema = z.object({

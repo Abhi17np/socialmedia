@@ -79,6 +79,7 @@ node scripts/integration-tests/sales-deal-relationships.js
 node scripts/integration-tests/sales-sequences.js
 node scripts/integration-tests/sales-pagination-views.js
 node scripts/integration-tests/sales-merge.js
+node scripts/integration-tests/sales-concurrency.js
 node scripts/integration-tests/marketing-routes.js
 ```
 

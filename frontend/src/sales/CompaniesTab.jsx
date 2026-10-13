@@ -39,6 +39,7 @@ function CompaniesTab({ authFetch, SALES_API_BASE, canManage, canDelete, openId 
   const [open, setOpen] = useState(false);
   const [detail, setDetail] = useState(null);
   const [detailForm, setDetailForm] = useState(null);
+  const [conflict, setConflict] = useState(null);
   const [form, setForm] = useState({ name: '', domain: '', industry: '', ownerId: '' });
   const [selected, setSelected] = useState(new Set());
   const [bulkOwnerId, setBulkOwnerId] = useState('');
@@ -107,19 +108,32 @@ function CompaniesTab({ authFetch, SALES_API_BASE, canManage, canDelete, openId 
   // PATCH /sales/companies/:id validates against the full companySchema
   // (name required) rather than a partial-update schema, so every save
   // here resends the whole form, not just the field that changed.
+  // `version` is the optimistic-concurrency token this record was
+  // loaded with (migration 023) — if someone else saved first, the
+  // server rejects this with 409 instead of silently overwriting them.
   const saveDetail = async (overrides) => {
     const next = { ...detailForm, ...overrides };
     setDetailForm(next);
     if (!next.name.trim()) return;
     try {
-      const res = await authFetch(`${SALES_API_BASE}/companies/${detail.company.id}`, { method: 'PATCH', body: JSON.stringify({ ...next, ownerId: next.ownerId || undefined, size: next.size || undefined }) });
+      const res = await authFetch(`${SALES_API_BASE}/companies/${detail.company.id}`, {
+        method: 'PATCH', body: JSON.stringify({ ...next, ownerId: next.ownerId || undefined, size: next.size || undefined, version: detail.company.version })
+      });
       const result = await res.json();
-      if (!res.ok) throw new Error(result.error || 'Could not save.');
+      if (!res.ok) {
+        if (res.status === 409) { setConflict(result); return; }
+        throw new Error(result.error || 'Could not save.');
+      }
       setDetail((prev) => ({ ...prev, company: result.company }));
       load();
     } catch (err) {
       setError(err.message);
     }
+  };
+
+  const reloadAfterConflict = async () => {
+    setConflict(null);
+    await openDetail({ id: detail.company.id });
   };
 
   const toggleSelect = (id) => setSelected((prev) => {
@@ -269,9 +283,14 @@ function CompaniesTab({ authFetch, SALES_API_BASE, canManage, canDelete, openId 
         </div>
       </Modal>
 
-      <Drawer open={!!detail} onClose={() => setDetail(null)} title={detail?.company?.name} subtitle={detail?.company?.industry}>
+      <Drawer open={!!detail} onClose={() => { setDetail(null); setConflict(null); }} title={detail?.company?.name} subtitle={detail?.company?.industry}>
         {detail && detailForm && (
           <div className="p-4 flex flex-col gap-4">
+            {conflict && (
+              <Banner tone="warning" action={<Button size="sm" onClick={reloadAfterConflict}>Reload</Button>}>
+                {conflict.error} Your last change was not saved.
+              </Banner>
+            )}
             <div className="grid grid-cols-2 gap-3">
               <Field label="Name">
                 <Input value={detailForm.name} disabled={!canManage} onChange={(e) => setDetailForm({ ...detailForm, name: e.target.value })} onBlur={(e) => saveDetail({ name: e.target.value })} />

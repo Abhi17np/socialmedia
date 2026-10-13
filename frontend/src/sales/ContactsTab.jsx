@@ -99,9 +99,14 @@ function ContactsTab({ authFetch, SALES_API_BASE, canManage, canDelete, openId }
 
   const changeStatus = async (contact, leadStatus) => {
     try {
-      const res = await authFetch(`${SALES_API_BASE}/contacts/${contact.id}`, { method: 'PATCH', body: JSON.stringify({ leadStatus }) });
+      const res = await authFetch(`${SALES_API_BASE}/contacts/${contact.id}`, { method: 'PATCH', body: JSON.stringify({ leadStatus, version: contact.version }) });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Could not update lead.');
+      if (!res.ok) {
+        // Someone else changed this lead first — reload the list rather
+        // than silently keeping a stale row with an un-applied status.
+        if (res.status === 409) { setError(`${data.error} Reloading this lead's current status.`); load(); return; }
+        throw new Error(data.error || 'Could not update lead.');
+      }
       setContacts((prev) => prev.map((c) => (c.id === contact.id ? data.contact : c)));
     } catch (err) {
       setError(err.message);

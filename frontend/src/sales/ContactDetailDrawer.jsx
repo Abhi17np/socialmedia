@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { Building2, Phone, Mail, Calendar, StickyNote, CheckSquare, X } from 'lucide-react';
-import { Input, Select, Field, Banner, Drawer, Skeleton, Chip, Avatar } from '../ui';
+import { Button, Input, Select, Field, Banner, Drawer, Skeleton, Chip, Avatar } from '../ui';
 import { money } from './format';
 import { useTeamMembers } from './useTeamMembers';
 
@@ -20,10 +20,12 @@ const LEAD_STATUSES = ['new', 'contacted', 'qualified', 'unqualified', 'customer
 function ContactDetailDrawer({ contactId, onClose, authFetch, SALES_API_BASE, canManage, onChanged }) {
   const [data, setData] = useState(null);
   const [error, setError] = useState(null);
+  const [conflict, setConflict] = useState(null);
   const [editForm, setEditForm] = useState(null);
   const members = useTeamMembers(authFetch);
 
   const load = () => {
+    setConflict(null);
     authFetch(`${SALES_API_BASE}/contacts/${contactId}`).then((r) => r.json()).then((d) => {
       if (d.error) throw new Error(d.error);
       setData(d);
@@ -37,11 +39,16 @@ function ContactDetailDrawer({ contactId, onClose, authFetch, SALES_API_BASE, ca
 
   useEffect(() => { if (contactId) load(); }, [contactId]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // version is the optimistic-concurrency token this contact was loaded
+  // with (migration 023) — a 409 means someone else saved first.
   const saveField = async (patch) => {
     try {
-      const res = await authFetch(`${SALES_API_BASE}/contacts/${contactId}`, { method: 'PATCH', body: JSON.stringify(patch) });
+      const res = await authFetch(`${SALES_API_BASE}/contacts/${contactId}`, { method: 'PATCH', body: JSON.stringify({ ...patch, version: data.contact.version }) });
       const result = await res.json();
-      if (!res.ok) throw new Error(result.error || 'Could not save.');
+      if (!res.ok) {
+        if (res.status === 409) { setConflict(result); return; }
+        throw new Error(result.error || 'Could not save.');
+      }
       setData((prev) => ({ ...prev, contact: result.contact }));
       onChanged?.();
     } catch (err) {
@@ -49,9 +56,18 @@ function ContactDetailDrawer({ contactId, onClose, authFetch, SALES_API_BASE, ca
     }
   };
 
+  const reloadAfterConflict = () => { setConflict(null); load(); };
+
   return (
     <Drawer open={!!contactId} onClose={onClose} title={data?.contact?.display_name || 'Lead'} subtitle={data?.company?.name} width={520}>
       {error && <div className="px-4 pt-3"><Banner tone="danger" action={<button onClick={() => setError(null)}><X size={14} /></button>}>{error}</Banner></div>}
+      {conflict && (
+        <div className="px-4 pt-3">
+          <Banner tone="warning" action={<Button size="sm" onClick={reloadAfterConflict}>Reload</Button>}>
+            {conflict.error} Your last change was not saved.
+          </Banner>
+        </div>
+      )}
       {!data ? (
         <div className="p-4 space-y-3"><Skeleton className="h-9" /><Skeleton className="h-9" /><Skeleton className="h-24" /></div>
       ) : (

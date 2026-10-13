@@ -25,6 +25,7 @@ const FORECAST_LABELS = { pipeline: 'Pipeline', best_case: 'Best case', commit: 
 function DealDetailDrawer({ dealId, onClose, authFetch, SALES_API_BASE, canManage, canDelete, onChanged, pipelineStages }) {
   const [data, setData] = useState(null);
   const [error, setError] = useState(null);
+  const [conflict, setConflict] = useState(null);
   const [editForm, setEditForm] = useState(null);
   const [addContactOpen, setAddContactOpen] = useState(false);
   const [contactQuery, setContactQuery] = useState('');
@@ -36,6 +37,7 @@ function DealDetailDrawer({ dealId, onClose, authFetch, SALES_API_BASE, canManag
   const searchDebounce = useRef(null);
 
   const load = () => {
+    setConflict(null);
     authFetch(`${SALES_API_BASE}/deals/${dealId}`).then((r) => r.json()).then((d) => {
       if (d.error) throw new Error(d.error);
       setData(d);
@@ -49,17 +51,24 @@ function DealDetailDrawer({ dealId, onClose, authFetch, SALES_API_BASE, canManag
 
   useEffect(() => { if (dealId) load(); }, [dealId]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // version is the optimistic-concurrency token this deal was loaded
+  // with (migration 023) — a 409 means someone else saved first.
   const saveField = async (patch) => {
     try {
-      const res = await authFetch(`${SALES_API_BASE}/deals/${dealId}`, { method: 'PATCH', body: JSON.stringify(patch) });
+      const res = await authFetch(`${SALES_API_BASE}/deals/${dealId}`, { method: 'PATCH', body: JSON.stringify({ ...patch, version: data.deal.version }) });
       const result = await res.json();
-      if (!res.ok) throw new Error(result.error || 'Could not save.');
+      if (!res.ok) {
+        if (res.status === 409) { setConflict(result); return; }
+        throw new Error(result.error || 'Could not save.');
+      }
       setData((prev) => ({ ...prev, deal: result.deal }));
       onChanged?.();
     } catch (err) {
       setError(err.message);
     }
   };
+
+  const reloadAfterConflict = () => { setConflict(null); load(); };
 
   const searchContacts = (q) => {
     setContactQuery(q);
@@ -139,6 +148,13 @@ function DealDetailDrawer({ dealId, onClose, authFetch, SALES_API_BASE, canManag
   return (
     <Drawer open={!!dealId} onClose={onClose} title={data?.deal?.name || 'Deal'} subtitle={data?.company?.name} width={520}>
       {error && <div className="px-4 pt-3"><Banner tone="danger" action={<button onClick={() => setError(null)}><X size={14} /></button>}>{error}</Banner></div>}
+      {conflict && (
+        <div className="px-4 pt-3">
+          <Banner tone="warning" action={<Button size="sm" onClick={reloadAfterConflict}>Reload</Button>}>
+            {conflict.error} Your last change was not saved.
+          </Banner>
+        </div>
+      )}
       {!data ? (
         <div className="p-4 space-y-3"><Skeleton className="h-9" /><Skeleton className="h-9" /><Skeleton className="h-24" /></div>
       ) : (
