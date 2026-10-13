@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { usePathname, useSearchParams } from 'next/navigation';
-import { KanbanSquare, Building2, Users, ListChecks } from 'lucide-react';
+import { LayoutDashboard, Inbox, KanbanSquare, Building2, Users, ListChecks, Settings } from 'lucide-react';
 import { atLeast } from '../roleRank';
 
 // Sales Hub's own sidebar — these used to be a horizontal tab row
@@ -11,16 +11,19 @@ import { atLeast } from '../roleRank';
 // in-page tabs) driven by a ?tab= query param so each section stays
 // linkable/bookmarkable. SalesHub.jsx reads the same param.
 const ITEMS = [
+  { tab: 'dashboard', icon: LayoutDashboard, label: 'Dashboard', minRole: 'viewer' },
+  { tab: 'workspace', icon: Inbox, label: 'Workspace', minRole: 'viewer' },
   { tab: 'pipeline', icon: KanbanSquare, label: 'Pipeline', minRole: 'viewer' },
   { tab: 'companies', icon: Building2, label: 'Companies', minRole: 'viewer' },
   { tab: 'contacts', icon: Users, label: 'Leads', minRole: 'viewer' },
-  { tab: 'activities', icon: ListChecks, label: 'Activities', minRole: 'viewer' }
+  { tab: 'activities', icon: ListChecks, label: 'Activities', minRole: 'viewer' },
+  { tab: 'settings', icon: Settings, label: 'Settings', minRole: 'admin' }
 ];
 
 function SalesNav({ role }) {
   const pathname = usePathname();
   const searchParams = useSearchParams();
-  const activeTab = searchParams.get('tab') || 'pipeline';
+  const activeTab = searchParams.get('tab') || 'dashboard';
 
   return (
     <nav className="px-2 py-1 flex flex-col gap-0.5">

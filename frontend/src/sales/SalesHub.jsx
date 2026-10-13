@@ -13,6 +13,9 @@ import {
   Button, IconButton, Panel, PanelHeader, Table, Th, Td, Input, Textarea, Select, Field,
   Banner, Modal, Drawer, EmptyState, Skeleton, Chip, Avatar
 } from '../ui';
+import DashboardTab from './DashboardTab';
+import WorkspaceTab from './WorkspaceTab';
+import SettingsTab from './SettingsTab';
 
 const SALES_API_BASE = `${API_BASE}/sales`;
 
@@ -37,10 +40,11 @@ function money(amount, currency) {
  */
 function SalesHubInner({ authFetch, role }) {
   const searchParams = useSearchParams();
-  const tab = searchParams.get('tab') || 'pipeline';
+  const tab = searchParams.get('tab') || 'dashboard';
   const [gateError, setGateError] = useState(null);
   const canManage = atLeast(role, 'member');
   const canDelete = atLeast(role, 'admin');
+  const canAdmin = atLeast(role, 'admin');
 
   const checkGate = () => {
     authFetch(`${SALES_API_BASE}/pipelines`)
@@ -66,10 +70,13 @@ function SalesHubInner({ authFetch, role }) {
     <Page>
       <PageBar title="Sales Hub" />
       <PageBody>
-        {tab === 'pipeline' && <PipelineTab authFetch={authFetch} canManage={canManage} />}
+        {tab === 'dashboard' && <DashboardTab authFetch={authFetch} SALES_API_BASE={SALES_API_BASE} />}
+        {tab === 'workspace' && <WorkspaceTab authFetch={authFetch} SALES_API_BASE={SALES_API_BASE} />}
+        {tab === 'pipeline' && <PipelineTab authFetch={authFetch} canManage={canManage} canAdmin={canAdmin} />}
         {tab === 'companies' && <CompaniesTab authFetch={authFetch} canManage={canManage} canDelete={canDelete} />}
         {tab === 'contacts' && <ContactsTab authFetch={authFetch} canManage={canManage} />}
         {tab === 'activities' && <ActivitiesTab authFetch={authFetch} canManage={canManage} canDelete={canDelete} />}
+        {tab === 'settings' && canAdmin && <SettingsTab authFetch={authFetch} SALES_API_BASE={SALES_API_BASE} />}
       </PageBody>
     </Page>
   );
