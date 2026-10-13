@@ -228,6 +228,28 @@ const salesActivitySchema = z.object({
   assignedTo: optionalUuid()
 });
 
+const LEAD_SCORING_CONDITION_TYPES = ['has_email', 'has_phone', 'has_company', 'tag_equals', 'lead_status_equals'];
+const CONDITION_TYPES_NEEDING_VALUE = ['tag_equals', 'lead_status_equals'];
+
+const leadScoringRuleSchema = z.object({
+  name: z.string().trim().min(1).max(200),
+  conditionType: z.enum(LEAD_SCORING_CONDITION_TYPES),
+  conditionValue: z.string().trim().max(100).optional(),
+  points: z.number().int().min(-1000).max(1000),
+  isActive: z.boolean().optional().default(true)
+}).refine(v => !CONDITION_TYPES_NEEDING_VALUE.includes(v.conditionType) || !!v.conditionValue, {
+  message: 'conditionValue is required for tag_equals and lead_status_equals.',
+  path: ['conditionValue']
+});
+
+const updateLeadScoringRuleSchema = z.object({
+  name: z.string().trim().min(1).max(200).optional(),
+  conditionType: z.enum(LEAD_SCORING_CONDITION_TYPES).optional(),
+  conditionValue: z.string().trim().max(100).optional(),
+  points: z.number().int().min(-1000).max(1000).optional(),
+  isActive: z.boolean().optional()
+}).refine(v => Object.keys(v).length > 0, { message: 'Nothing to update.' });
+
 const salesTargetSchema = z.object({
   ownerId: nullableOptionalUuid(),
   periodStart: z.string().trim().min(1).max(10),
@@ -267,5 +289,6 @@ module.exports = {
   companySchema, contactSchema, updateContactSchema, dealSchema, moveDealStageSchema, salesActivitySchema,
   updatePipelineSchema, dealStageSchema, updateDealStageSchema, reorderStagesSchema,
   salesTargetSchema, updateSalesTargetSchema,
+  leadScoringRuleSchema, updateLeadScoringRuleSchema, LEAD_SCORING_CONDITION_TYPES,
   marketingCampaignSchema, automationRuleSchema
 };

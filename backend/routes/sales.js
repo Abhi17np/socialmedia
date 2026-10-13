@@ -19,10 +19,11 @@ const { validate } = require('../middleware/validate');
 const { asyncHandler } = require('../lib/asyncHandler');
 const { recordAudit } = require('../lib/audit');
 const { fireTrigger } = require('../lib/automation');
+const { recomputeLeadScore } = require('../lib/leadScoring');
 const {
   companySchema, contactSchema, updateContactSchema, dealSchema, moveDealStageSchema, salesActivitySchema,
   updatePipelineSchema, dealStageSchema, updateDealStageSchema, reorderStagesSchema,
-  salesTargetSchema, updateSalesTargetSchema
+  salesTargetSchema, updateSalesTargetSchema, leadScoringRuleSchema, updateLeadScoringRuleSchema
 } = require('../lib/schemas');
 
 const router = express.Router();
@@ -134,6 +135,8 @@ router.post('/sales/contacts', requireHub('sales'), requireRole('member'), valid
   }).select('*').single();
   if (error) throw error;
 
+  data.lead_score = await recomputeLeadScore(client, req.tenantId, data.id);
+
   await fireTrigger(client, req.tenantId, 'contact_created', { refType: 'contact', refId: data.id, contactId: data.id });
   await recordAudit(client, { tenantId: req.tenantId, actorUserId: req.userId, action: 'sales.contact_created', targetType: 'contact', targetId: data.id, metadata: { displayName } });
   res.status(201).json({ contact: data });
@@ -168,6 +171,8 @@ router.patch('/sales/contacts/:id', requireHub('sales'), requireRole('member'), 
   const { data, error } = await scoped(client, req.tenantId, 'contacts').update(patch).eq('id', req.params.id).select('*').single();
   if (error) throw error;
 
+  data.lead_score = await recomputeLeadScore(client, req.tenantId, data.id);
+
   if (patch.tags) {
     const added = (patch.tags || []).filter((t) => !(before.tags || []).includes(t));
     for (const tag of added) {
@@ -175,6 +180,50 @@ router.patch('/sales/contacts/:id', requireHub('sales'), requireRole('member'), 
     }
   }
   res.json({ contact: data });
+}));
+
+// -------------------------------------------------------------
+// Lead scoring rules (lib/leadScoring.js is the engine; this is CRUD)
+// -------------------------------------------------------------
+
+router.get('/sales/lead-scoring-rules', requireHub('sales'), asyncHandler(async (req, res) => {
+  const client = requireSocialClient(res);
+  if (!client) return;
+  const { data, error } = await scoped(client, req.tenantId, 'lead_scoring_rules').select('*').order('created_at');
+  if (error) throw error;
+  res.json({ rules: data });
+}));
+
+router.post('/sales/lead-scoring-rules', requireHub('sales'), requireRole('admin'), validate(leadScoringRuleSchema), asyncHandler(async (req, res) => {
+  const client = requireSocialClient(res);
+  if (!client) return;
+  const { data, error } = await client.from('lead_scoring_rules').insert({
+    tenant_id: req.tenantId, name: req.body.name, condition_type: req.body.conditionType,
+    condition_value: req.body.conditionValue || null, points: req.body.points, is_active: req.body.isActive
+  }).select('*').single();
+  if (error) throw error;
+  res.status(201).json({ rule: data });
+}));
+
+router.patch('/sales/lead-scoring-rules/:id', requireHub('sales'), requireRole('admin'), validate(updateLeadScoringRuleSchema), asyncHandler(async (req, res) => {
+  const client = requireSocialClient(res);
+  if (!client) return;
+  const patch = {};
+  for (const [bodyKey, column] of [['name', 'name'], ['conditionType', 'condition_type'], ['conditionValue', 'condition_value'], ['points', 'points'], ['isActive', 'is_active']]) {
+    if (req.body[bodyKey] !== undefined) patch[column] = req.body[bodyKey];
+  }
+  patch.updated_at = new Date().toISOString();
+  const { data, error } = await scoped(client, req.tenantId, 'lead_scoring_rules').update(patch).eq('id', req.params.id).select('*').single();
+  if (error || !data) return res.status(404).json({ error: 'Lead scoring rule not found.' });
+  res.json({ rule: data });
+}));
+
+router.delete('/sales/lead-scoring-rules/:id', requireHub('sales'), requireRole('admin'), asyncHandler(async (req, res) => {
+  const client = requireSocialClient(res);
+  if (!client) return;
+  const { error } = await scoped(client, req.tenantId, 'lead_scoring_rules').delete().eq('id', req.params.id);
+  if (error) throw error;
+  res.json({ success: true });
 }));
 
 // -------------------------------------------------------------

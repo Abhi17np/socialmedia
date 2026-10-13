@@ -72,6 +72,7 @@ node scripts/integration-tests/whatsapp-routes.js
 node scripts/integration-tests/sales-routes.js
 node scripts/integration-tests/sales-stage1.js
 node scripts/integration-tests/sales-dashboard.js
+node scripts/integration-tests/sales-lead-scoring.js
 node scripts/integration-tests/marketing-routes.js
 ```
 
