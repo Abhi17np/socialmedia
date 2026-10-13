@@ -19,7 +19,10 @@ const { validate } = require('../middleware/validate');
 const { asyncHandler } = require('../lib/asyncHandler');
 const { recordAudit } = require('../lib/audit');
 const { fireTrigger } = require('../lib/automation');
-const { companySchema, contactSchema, updateContactSchema, dealSchema, moveDealStageSchema, salesActivitySchema } = require('../lib/schemas');
+const {
+  companySchema, contactSchema, updateContactSchema, dealSchema, moveDealStageSchema, salesActivitySchema,
+  updatePipelineSchema, dealStageSchema, updateDealStageSchema, reorderStagesSchema
+} = require('../lib/schemas');
 
 const router = express.Router();
 
@@ -216,6 +219,99 @@ router.post('/sales/pipelines', requireHub('sales'), requireRole('admin'), async
   res.status(201).json({ pipeline: { ...pipeline, stages } });
 }));
 
+router.patch('/sales/pipelines/:id', requireHub('sales'), requireRole('admin'), validate(updatePipelineSchema), asyncHandler(async (req, res) => {
+  const client = requireSocialClient(res);
+  if (!client) return;
+  const { data, error } = await scoped(client, req.tenantId, 'deal_pipelines').update({ name: req.body.name }).eq('id', req.params.id).select('*').single();
+  if (error || !data) return res.status(404).json({ error: 'Pipeline not found.' });
+  res.json({ pipeline: data });
+}));
+
+router.delete('/sales/pipelines/:id', requireHub('sales'), requireRole('admin'), asyncHandler(async (req, res) => {
+  const client = requireSocialClient(res);
+  if (!client) return;
+  const { error } = await scoped(client, req.tenantId, 'deal_pipelines').delete().eq('id', req.params.id);
+  if (error) {
+    if (error.code === '23503') return res.status(409).json({ error: 'This pipeline has deals in it and cannot be deleted. Move or delete its deals first.' });
+    throw error;
+  }
+  await recordAudit(client, { tenantId: req.tenantId, actorUserId: req.userId, action: 'sales.pipeline_deleted', targetType: 'pipeline', targetId: req.params.id });
+  res.json({ success: true });
+}));
+
+router.post('/sales/pipelines/:pipelineId/stages', requireHub('sales'), requireRole('admin'), validate(dealStageSchema), asyncHandler(async (req, res) => {
+  const client = requireSocialClient(res);
+  if (!client) return;
+  const { data: pipeline } = await scoped(client, req.tenantId, 'deal_pipelines').select('id').eq('id', req.params.pipelineId).maybeSingle();
+  if (!pipeline) return res.status(404).json({ error: 'Pipeline not found.' });
+
+  const { count } = await scoped(client, req.tenantId, 'deal_stages').select('id', { count: 'exact', head: true }).eq('pipeline_id', pipeline.id);
+  const { data, error } = await client.from('deal_stages').insert({
+    tenant_id: req.tenantId, pipeline_id: pipeline.id, name: req.body.name, position: count || 0,
+    probability: req.body.probability, is_won: req.body.isWon, is_lost: req.body.isLost,
+    stale_after_days: req.body.staleAfterDays ?? null
+  }).select('*').single();
+  if (error) throw error;
+  res.status(201).json({ stage: data });
+}));
+
+router.patch('/sales/stages/:id', requireHub('sales'), requireRole('admin'), validate(updateDealStageSchema), asyncHandler(async (req, res) => {
+  const client = requireSocialClient(res);
+  if (!client) return;
+  const patch = {};
+  for (const [bodyKey, column] of [['name', 'name'], ['probability', 'probability'], ['isWon', 'is_won'], ['isLost', 'is_lost'], ['staleAfterDays', 'stale_after_days']]) {
+    if (req.body[bodyKey] !== undefined) patch[column] = req.body[bodyKey];
+  }
+  const { data, error } = await scoped(client, req.tenantId, 'deal_stages').update(patch).eq('id', req.params.id).select('*').single();
+  if (error || !data) return res.status(404).json({ error: 'Stage not found.' });
+  res.json({ stage: data });
+}));
+
+router.delete('/sales/stages/:id', requireHub('sales'), requireRole('admin'), asyncHandler(async (req, res) => {
+  const client = requireSocialClient(res);
+  if (!client) return;
+  const { error } = await scoped(client, req.tenantId, 'deal_stages').delete().eq('id', req.params.id);
+  if (error) {
+    if (error.code === '23503') return res.status(409).json({ error: 'This stage has deals in it and cannot be deleted. Move its deals to another stage first.' });
+    throw error;
+  }
+  res.json({ success: true });
+}));
+
+router.post('/sales/pipelines/:pipelineId/stages/reorder', requireHub('sales'), requireRole('admin'), validate(reorderStagesSchema), asyncHandler(async (req, res) => {
+  const client = requireSocialClient(res);
+  if (!client) return;
+  const { data: existing, error: existingError } = await scoped(client, req.tenantId, 'deal_stages').select('id').eq('pipeline_id', req.params.pipelineId);
+  if (existingError) throw existingError;
+  const validIds = new Set((existing || []).map((s) => s.id));
+  if (req.body.stages.length !== validIds.size) return res.status(400).json({ error: 'Must include every stage in the pipeline exactly once.' });
+
+  const seenPositions = new Set();
+  for (const s of req.body.stages) {
+    if (!validIds.has(s.id)) return res.status(400).json({ error: `Stage ${s.id} does not belong to this pipeline.` });
+    if (seenPositions.has(s.position)) return res.status(400).json({ error: 'Duplicate position in reorder list.' });
+    seenPositions.add(s.position);
+  }
+
+  // deal_stages has a unique(pipeline_id, position) constraint, so
+  // swapping two stages' positions directly can collide mid-update (A
+  // takes B's old slot before B has vacated it). Bump every stage to a
+  // disjoint offset range first, then apply the final positions, so no
+  // intermediate state ever repeats one.
+  for (const s of req.body.stages) {
+    const { error } = await scoped(client, req.tenantId, 'deal_stages').update({ position: s.position + 100000 }).eq('id', s.id);
+    if (error) throw error;
+  }
+  for (const s of req.body.stages) {
+    const { error } = await scoped(client, req.tenantId, 'deal_stages').update({ position: s.position }).eq('id', s.id);
+    if (error) throw error;
+  }
+
+  const { data: updated, error } = await scoped(client, req.tenantId, 'deal_stages').select('*').eq('pipeline_id', req.params.pipelineId).order('position');
+  if (error) throw error;
+  res.json({ stages: updated });
+}));
+
 // -------------------------------------------------------------
 // Deals
 // -------------------------------------------------------------
@@ -229,7 +325,26 @@ router.get('/sales/deals', requireHub('sales'), asyncHandler(async (req, res) =>
   if (req.query.status) query = query.eq('status', req.query.status);
   const { data, error } = await query;
   if (error) throw error;
-  res.json({ deals: data });
+
+  // Stale ("rotting", Pipedrive's term) is computed here at query time
+  // against each deal's own stage.stale_after_days threshold, never
+  // stored — nothing to keep in sync when a threshold changes or a deal
+  // moves. Only open deals can be stale; won/lost deals are done.
+  const stageIds = [...new Set((data || []).map((d) => d.stage_id))];
+  const { data: stages, error: stagesError } = stageIds.length
+    ? await scoped(client, req.tenantId, 'deal_stages').select('id, stale_after_days').in('id', stageIds)
+    : { data: [], error: null };
+  if (stagesError) throw stagesError;
+  const staleAfterByStage = new Map((stages || []).map((s) => [s.id, s.stale_after_days]));
+
+  const now = Date.now();
+  const deals = (data || []).map((d) => {
+    const staleAfterDays = staleAfterByStage.get(d.stage_id);
+    const isStale = d.status === 'open' && staleAfterDays != null &&
+      (now - new Date(d.updated_at).getTime()) > staleAfterDays * 86400000;
+    return { ...d, isStale };
+  });
+  res.json({ deals });
 }));
 
 router.post('/sales/deals', requireHub('sales'), requireRole('member'), validate(dealSchema), asyncHandler(async (req, res) => {
@@ -287,9 +402,13 @@ router.post('/sales/deals/:id/move', requireHub('sales'), requireRole('member'),
 
   const { data: stage } = await scoped(client, req.tenantId, 'deal_stages').select('*').eq('id', req.body.stageId).maybeSingle();
   if (!stage || stage.pipeline_id !== deal.pipeline_id) return res.status(400).json({ error: 'stageId must belong to the deal\'s own pipeline.' });
+  if (stage.is_lost && !req.body.lostReason) return res.status(400).json({ error: 'lostReason is required when moving a deal to a lost stage.' });
 
   const fromStageId = deal.stage_id;
-  const { error } = await client.rpc('move_deal_stage', { p_deal_id: deal.id, p_tenant_id: req.tenantId, p_to_stage_id: stage.id, p_changed_by: req.userId });
+  const { error } = await client.rpc('move_deal_stage', {
+    p_deal_id: deal.id, p_tenant_id: req.tenantId, p_to_stage_id: stage.id, p_changed_by: req.userId,
+    p_lost_reason: stage.is_lost ? req.body.lostReason : null
+  });
   if (error) throw error;
 
   const { data: updated } = await scoped(client, req.tenantId, 'deals').select('*').eq('id', deal.id).single();
@@ -355,6 +474,15 @@ router.patch('/sales/activities/:id', requireHub('sales'), requireRole('member')
 
   const { data, error } = await scoped(client, req.tenantId, 'sales_activities').update(patch).eq('id', req.params.id).select('*').single();
   if (error || !data) return res.status(404).json({ error: 'Activity not found.' });
+
+  // Completing an activity against a deal counts as "touching" it —
+  // Pipedrive's rotting timer resets on any logged activity, not just a
+  // stage move, so a deal with recent calls/emails/meetings never shows
+  // stale just because it hasn't changed stage.
+  if (patch.status === 'completed' && data.deal_id) {
+    await scoped(client, req.tenantId, 'deals').update({ updated_at: new Date().toISOString() }).eq('id', data.deal_id);
+  }
+
   res.json({ activity: data });
 }));
 

@@ -189,7 +189,32 @@ const dealSchema = z.object({
 });
 
 const moveDealStageSchema = z.object({
-  stageId: z.string().uuid()
+  stageId: z.string().uuid(),
+  lostReason: z.string().trim().min(1).max(500).optional()
+});
+
+const updatePipelineSchema = z.object({
+  name: z.string().trim().min(1).max(200)
+});
+
+const dealStageSchema = z.object({
+  name: z.string().trim().min(1).max(100),
+  probability: z.number().int().min(0).max(100).optional().default(0),
+  isWon: z.boolean().optional().default(false),
+  isLost: z.boolean().optional().default(false),
+  staleAfterDays: z.number().int().min(1).max(3650).nullable().optional()
+});
+
+const updateDealStageSchema = z.object({
+  name: z.string().trim().min(1).max(100).optional(),
+  probability: z.number().int().min(0).max(100).optional(),
+  isWon: z.boolean().optional(),
+  isLost: z.boolean().optional(),
+  staleAfterDays: z.number().int().min(1).max(3650).nullable().optional()
+}).refine(v => Object.keys(v).length > 0, { message: 'Nothing to update.' });
+
+const reorderStagesSchema = z.object({
+  stages: z.array(z.object({ id: z.string().uuid(), position: z.number().int().min(0) })).min(1)
 });
 
 const salesActivitySchema = z.object({
@@ -226,5 +251,6 @@ module.exports = {
   INTERACTION_STATUSES, INTERACTION_PRIORITIES, changePasswordSchema, forgotPasswordSchema, resetPasswordSchema,
   updateHubsSchema, templateSchema, segmentSchema, whatsappCampaignSchema,
   companySchema, contactSchema, updateContactSchema, dealSchema, moveDealStageSchema, salesActivitySchema,
+  updatePipelineSchema, dealStageSchema, updateDealStageSchema, reorderStagesSchema,
   marketingCampaignSchema, automationRuleSchema
 };
