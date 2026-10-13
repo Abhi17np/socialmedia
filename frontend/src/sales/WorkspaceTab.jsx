@@ -3,12 +3,9 @@
 import { useEffect, useState } from 'react';
 import { AlertTriangle, Clock, CalendarClock, Flame, Phone, Mail, Calendar, StickyNote, CheckSquare } from 'lucide-react';
 import { Panel, PanelHeader, Banner, Skeleton, EmptyState, Chip } from '../ui';
+import { money } from './format';
 
 const ACTIVITY_ICON = { call: Phone, email: Mail, meeting: Calendar, note: StickyNote, task: CheckSquare };
-
-function money(amount, currency) {
-  return new Intl.NumberFormat('en-IN', { style: 'currency', currency: currency || 'INR', maximumFractionDigits: 0 }).format(amount || 0);
-}
 
 function ActivityRow({ activity, onToggle }) {
   const Icon = ACTIVITY_ICON[activity.type] || StickyNote;

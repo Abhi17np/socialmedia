@@ -3,28 +3,26 @@
 import { Suspense, useEffect, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import {
-  RefreshCw, Plus, Building2, Users, ListChecks, KanbanSquare,
-  Phone, Mail, Calendar, StickyNote, CheckSquare, IndianRupee
+  Plus, Building2, Users, ListChecks,
+  Phone, Mail, Calendar, StickyNote, CheckSquare
 } from 'lucide-react';
 import { API_BASE } from '../apiBase';
 import { atLeast } from '../roleRank';
 import { Page, PageBar, PageBody } from '../ui/page';
 import {
-  Button, IconButton, Panel, PanelHeader, Table, Th, Td, Input, Textarea, Select, Field,
+  Button, Panel, PanelHeader, Table, Th, Td, Input, Textarea, Select, Field,
   Banner, Modal, Drawer, EmptyState, Skeleton, Chip, Avatar
 } from '../ui';
 import DashboardTab from './DashboardTab';
 import WorkspaceTab from './WorkspaceTab';
 import SettingsTab from './SettingsTab';
+import PipelineTab from './PipelineTab';
+import { money } from './format';
 
 const SALES_API_BASE = `${API_BASE}/sales`;
 
 const ACTIVITY_ICON = { call: Phone, email: Mail, meeting: Calendar, note: StickyNote, task: CheckSquare };
 const LEAD_STATUS_TONE = { new: 'neutral', contacted: 'info', qualified: 'brand', unqualified: 'danger', customer: 'success' };
-
-function money(amount, currency) {
-  return new Intl.NumberFormat('en-IN', { style: 'currency', currency: currency || 'INR', maximumFractionDigits: 0 }).format(amount || 0);
-}
 
 /**
  * Sales Hub: practical CRM over the existing contacts spine. Every tab
@@ -72,7 +70,7 @@ function SalesHubInner({ authFetch, role }) {
       <PageBody>
         {tab === 'dashboard' && <DashboardTab authFetch={authFetch} SALES_API_BASE={SALES_API_BASE} />}
         {tab === 'workspace' && <WorkspaceTab authFetch={authFetch} SALES_API_BASE={SALES_API_BASE} />}
-        {tab === 'pipeline' && <PipelineTab authFetch={authFetch} canManage={canManage} canAdmin={canAdmin} />}
+        {tab === 'pipeline' && <PipelineTab authFetch={authFetch} SALES_API_BASE={SALES_API_BASE} canManage={canManage} canAdmin={canAdmin} />}
         {tab === 'companies' && <CompaniesTab authFetch={authFetch} canManage={canManage} canDelete={canDelete} />}
         {tab === 'contacts' && <ContactsTab authFetch={authFetch} canManage={canManage} />}
         {tab === 'activities' && <ActivitiesTab authFetch={authFetch} canManage={canManage} canDelete={canDelete} />}
@@ -87,176 +85,6 @@ function SalesHub(props) {
     <Suspense fallback={null}>
       <SalesHubInner {...props} />
     </Suspense>
-  );
-}
-
-// -------------------------------------------------------------- Pipeline
-
-function PipelineTab({ authFetch, canManage }) {
-  const [pipelines, setPipelines] = useState(null);
-  const [activePipelineId, setActivePipelineId] = useState(null);
-  const [deals, setDeals] = useState(null);
-  const [error, setError] = useState(null);
-  const [newPipelineOpen, setNewPipelineOpen] = useState(false);
-  const [newDealOpen, setNewDealOpen] = useState(null); // stageId or null
-  const [pipelineName, setPipelineName] = useState('');
-  const [dealForm, setDealForm] = useState({ name: '', amount: '' });
-  const [draggingDeal, setDraggingDeal] = useState(null);
-
-  const loadPipelines = () => {
-    authFetch(`${SALES_API_BASE}/pipelines`).then((r) => r.json()).then((d) => {
-      setPipelines(d.pipelines || []);
-      if (!activePipelineId && d.pipelines && d.pipelines.length > 0) setActivePipelineId(d.pipelines[0].id);
-    }).catch((e) => setError(e.message));
-  };
-
-  const loadDeals = (pipelineId) => {
-    if (!pipelineId) return;
-    authFetch(`${SALES_API_BASE}/deals?pipelineId=${pipelineId}`).then((r) => r.json()).then((d) => setDeals(d.deals || [])).catch((e) => setError(e.message));
-  };
-
-  useEffect(loadPipelines, []); // eslint-disable-line react-hooks/exhaustive-deps
-  useEffect(() => loadDeals(activePipelineId), [activePipelineId]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  const pipeline = (pipelines || []).find((p) => p.id === activePipelineId);
-
-  const createPipeline = async () => {
-    try {
-      const res = await authFetch(`${SALES_API_BASE}/pipelines`, { method: 'POST', body: JSON.stringify({ name: pipelineName }) });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Could not create pipeline.');
-      setPipelines((prev) => [...(prev || []), data.pipeline]);
-      setActivePipelineId(data.pipeline.id);
-      setNewPipelineOpen(false);
-      setPipelineName('');
-    } catch (err) {
-      setError(err.message);
-    }
-  };
-
-  const createDeal = async (stageId) => {
-    try {
-      const res = await authFetch(`${SALES_API_BASE}/deals`, {
-        method: 'POST',
-        body: JSON.stringify({ name: dealForm.name, pipelineId: activePipelineId, stageId, amount: Number(dealForm.amount) || 0 })
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Could not create deal.');
-      setDeals((prev) => [...(prev || []), data.deal]);
-      setNewDealOpen(null);
-      setDealForm({ name: '', amount: '' });
-    } catch (err) {
-      setError(err.message);
-    }
-  };
-
-  const moveDeal = async (deal, stageId) => {
-    if (deal.stage_id === stageId) return;
-    setDeals((prev) => prev.map((d) => (d.id === deal.id ? { ...d, stage_id: stageId } : d))); // optimistic
-    try {
-      const res = await authFetch(`${SALES_API_BASE}/deals/${deal.id}/move`, { method: 'POST', body: JSON.stringify({ stageId }) });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Could not move deal.');
-      setDeals((prev) => prev.map((d) => (d.id === deal.id ? data.deal : d)));
-    } catch (err) {
-      setError(err.message);
-      loadDeals(activePipelineId); // revert optimistic update on failure
-    }
-  };
-
-  if (pipelines === null) return <Skeleton className="h-64" />;
-
-  if (pipelines.length === 0) {
-    return (
-      <>
-        <EmptyState icon={KanbanSquare} title="No pipeline yet" description="Create a pipeline to start tracking deals." action={canManage && <Button variant="primary" icon={Plus} onClick={() => setNewPipelineOpen(true)}>New pipeline</Button>} />
-        <PipelineModal open={newPipelineOpen} name={pipelineName} setName={setPipelineName} onClose={() => setNewPipelineOpen(false)} onCreate={createPipeline} />
-      </>
-    );
-  }
-
-  return (
-    <>
-      {error && <Banner tone="danger">{error}</Banner>}
-      <div className="flex items-center justify-between">
-        <Select value={activePipelineId || ''} onChange={(e) => setActivePipelineId(e.target.value)} className="w-56">
-          {pipelines.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
-        </Select>
-        <div className="flex items-center gap-2">
-          <IconButton icon={RefreshCw} label="Refresh" onClick={() => loadDeals(activePipelineId)} />
-          {canManage && <Button size="sm" icon={Plus} onClick={() => setNewPipelineOpen(true)}>New pipeline</Button>}
-        </div>
-      </div>
-
-      {deals === null || !pipeline ? (
-        <Skeleton className="h-64" />
-      ) : (
-        <div className="flex gap-3 overflow-x-auto pb-2">
-          {pipeline.stages.map((stage) => {
-            const stageDeals = deals.filter((d) => d.stage_id === stage.id);
-            const total = stageDeals.reduce((sum, d) => sum + Number(d.amount || 0), 0);
-            return (
-              <div
-                key={stage.id}
-                className="w-72 shrink-0 bg-sunken border border-hairline rounded-card flex flex-col"
-                onDragOver={(e) => e.preventDefault()}
-                onDrop={() => draggingDeal && moveDeal(draggingDeal, stage.id)}
-              >
-                <div className="px-3 py-2.5 border-b border-hairline flex items-center justify-between">
-                  <div className="flex items-center gap-1.5 min-w-0">
-                    <span className="text-xs font-semibold text-ink truncate">{stage.name}</span>
-                    <span className="text-[11px] text-subtle shrink-0">{stageDeals.length}</span>
-                  </div>
-                  <span className="text-[11px] tabular-nums text-muted shrink-0">{money(total)}</span>
-                </div>
-                <div className="p-2 flex flex-col gap-2 min-h-[80px]">
-                  {stageDeals.map((deal) => (
-                    <div
-                      key={deal.id}
-                      draggable={canManage}
-                      onDragStart={() => setDraggingDeal(deal)}
-                      onDragEnd={() => setDraggingDeal(null)}
-                      className="bg-card border border-hairline rounded-ui p-2.5 cursor-grab active:cursor-grabbing hover:border-brand transition-colors"
-                    >
-                      <div className="text-xs font-medium text-ink truncate">{deal.name}</div>
-                      <div className="flex items-center gap-1 mt-1 text-[11px] text-muted tabular-nums">
-                        <IndianRupee size={10} />{money(deal.amount, deal.currency).replace(/^[^\d]+/, '')}
-                      </div>
-                    </div>
-                  ))}
-                  {canManage && (
-                    newDealOpen === stage.id ? (
-                      <div className="bg-card border border-hairline rounded-ui p-2 flex flex-col gap-1.5">
-                        <Input autoFocus placeholder="Deal name" value={dealForm.name} onChange={(e) => setDealForm({ ...dealForm, name: e.target.value })} className="h-7 text-xs" />
-                        <Input placeholder="Amount" type="number" value={dealForm.amount} onChange={(e) => setDealForm({ ...dealForm, amount: e.target.value })} className="h-7 text-xs" />
-                        <div className="flex gap-1.5">
-                          <Button size="sm" variant="primary" disabled={!dealForm.name.trim()} onClick={() => createDeal(stage.id)}>Add</Button>
-                          <Button size="sm" onClick={() => setNewDealOpen(null)}>Cancel</Button>
-                        </div>
-                      </div>
-                    ) : (
-                      <button onClick={() => setNewDealOpen(stage.id)} className="text-[11px] text-muted hover:text-ink flex items-center gap-1 px-1.5 py-1">
-                        <Plus size={12} /> Add deal
-                      </button>
-                    )
-                  )}
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      )}
-
-      <PipelineModal open={newPipelineOpen} name={pipelineName} setName={setPipelineName} onClose={() => setNewPipelineOpen(false)} onCreate={createPipeline} />
-    </>
-  );
-}
-
-function PipelineModal({ open, name, setName, onClose, onCreate }) {
-  return (
-    <Modal open={open} onClose={onClose} title="New pipeline" subtitle="Starts with 5 practical stages — New, Qualified, Proposal, Won, Lost." footer={<><Button onClick={onClose}>Cancel</Button><Button variant="primary" onClick={onCreate} disabled={!name.trim()}>Create</Button></>}>
-      <Field label="Pipeline name"><Input value={name} onChange={(e) => setName(e.target.value)} placeholder="Enterprise sales" autoFocus /></Field>
-    </Modal>
   );
 }
 

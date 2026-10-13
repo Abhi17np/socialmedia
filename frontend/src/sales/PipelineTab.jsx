@@ -1,0 +1,444 @@
+'use client';
+
+import { useEffect, useState } from 'react';
+import {
+  RefreshCw, Plus, KanbanSquare, Table2, Settings2, Flame, GripVertical,
+  Trash2, ArrowUp, ArrowDown, IndianRupee
+} from 'lucide-react';
+import {
+  Button, IconButton, Select, Input, Field, Checkbox,
+  Banner, Modal, Drawer, EmptyState, Skeleton, Chip
+} from '../ui';
+import { money } from './format';
+
+// ------------------------------------------------------------- Pipeline
+
+function PipelineTab({ authFetch, SALES_API_BASE, canManage, canAdmin }) {
+  const [pipelines, setPipelines] = useState(null);
+  const [activePipelineId, setActivePipelineId] = useState(null);
+  const [deals, setDeals] = useState(null);
+  const [error, setError] = useState(null);
+  const [view, setView] = useState('kanban');
+  const [newPipelineOpen, setNewPipelineOpen] = useState(false);
+  const [newDealOpen, setNewDealOpen] = useState(null); // stageId or null
+  const [pipelineName, setPipelineName] = useState('');
+  const [dealForm, setDealForm] = useState({ name: '', amount: '' });
+  const [draggingDeal, setDraggingDeal] = useState(null);
+  const [stageEditorOpen, setStageEditorOpen] = useState(false);
+  const [lostMove, setLostMove] = useState(null); // { deal, stage } | null
+  const [lostReason, setLostReason] = useState('');
+
+  const loadPipelines = () => {
+    authFetch(`${SALES_API_BASE}/pipelines`).then((r) => r.json()).then((d) => {
+      setPipelines(d.pipelines || []);
+      if (!activePipelineId && d.pipelines && d.pipelines.length > 0) setActivePipelineId(d.pipelines[0].id);
+    }).catch((e) => setError(e.message));
+  };
+
+  const loadDeals = (pipelineId) => {
+    if (!pipelineId) return;
+    authFetch(`${SALES_API_BASE}/deals?pipelineId=${pipelineId}`).then((r) => r.json()).then((d) => setDeals(d.deals || [])).catch((e) => setError(e.message));
+  };
+
+  useEffect(loadPipelines, []); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => loadDeals(activePipelineId), [activePipelineId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const pipeline = (pipelines || []).find((p) => p.id === activePipelineId);
+
+  const createPipeline = async () => {
+    try {
+      const res = await authFetch(`${SALES_API_BASE}/pipelines`, { method: 'POST', body: JSON.stringify({ name: pipelineName }) });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Could not create pipeline.');
+      setPipelines((prev) => [...(prev || []), data.pipeline]);
+      setActivePipelineId(data.pipeline.id);
+      setNewPipelineOpen(false);
+      setPipelineName('');
+    } catch (err) {
+      setError(err.message);
+    }
+  };
+
+  const createDeal = async (stageId) => {
+    try {
+      const res = await authFetch(`${SALES_API_BASE}/deals`, {
+        method: 'POST',
+        body: JSON.stringify({ name: dealForm.name, pipelineId: activePipelineId, stageId, amount: Number(dealForm.amount) || 0 })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Could not create deal.');
+      setDeals((prev) => [...(prev || []), data.deal]);
+      setNewDealOpen(null);
+      setDealForm({ name: '', amount: '' });
+    } catch (err) {
+      setError(err.message);
+    }
+  };
+
+  const applyMove = async (deal, stageId, lostReasonValue) => {
+    setDeals((prev) => prev.map((d) => (d.id === deal.id ? { ...d, stage_id: stageId } : d))); // optimistic
+    try {
+      const body = lostReasonValue ? { stageId, lostReason: lostReasonValue } : { stageId };
+      const res = await authFetch(`${SALES_API_BASE}/deals/${deal.id}/move`, { method: 'POST', body: JSON.stringify(body) });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Could not move deal.');
+      setDeals((prev) => prev.map((d) => (d.id === deal.id ? data.deal : d)));
+    } catch (err) {
+      setError(err.message);
+      loadDeals(activePipelineId); // revert optimistic update on failure
+    }
+  };
+
+  const moveDeal = (deal, stageId) => {
+    if (deal.stage_id === stageId) return;
+    const targetStage = (pipeline?.stages || []).find((s) => s.id === stageId);
+    if (targetStage?.is_lost) {
+      setLostMove({ deal, stage: targetStage });
+      setLostReason('');
+      return;
+    }
+    applyMove(deal, stageId);
+  };
+
+  const confirmLostMove = async () => {
+    if (!lostMove || !lostReason.trim()) return;
+    await applyMove(lostMove.deal, lostMove.stage.id, lostReason.trim());
+    setLostMove(null);
+    setLostReason('');
+  };
+
+  if (pipelines === null) return <Skeleton className="h-64" />;
+
+  if (pipelines.length === 0) {
+    return (
+      <>
+        <EmptyState icon={KanbanSquare} title="No pipeline yet" description="Create a pipeline to start tracking deals." action={canManage && <Button variant="primary" icon={Plus} onClick={() => setNewPipelineOpen(true)}>New pipeline</Button>} />
+        <PipelineModal open={newPipelineOpen} name={pipelineName} setName={setPipelineName} onClose={() => setNewPipelineOpen(false)} onCreate={createPipeline} />
+      </>
+    );
+  }
+
+  return (
+    <>
+      {error && <Banner tone="danger">{error}</Banner>}
+      <div className="flex items-center justify-between">
+        <Select value={activePipelineId || ''} onChange={(e) => setActivePipelineId(e.target.value)} className="w-56">
+          {pipelines.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+        </Select>
+        <div className="flex items-center gap-2">
+          <div className="flex items-center bg-sunken border border-hairline rounded-ui p-0.5">
+            <button onClick={() => setView('kanban')} className={`h-7 w-7 rounded flex items-center justify-center ${view === 'kanban' ? 'bg-card text-ink shadow-sm' : 'text-muted'}`} title="Kanban view"><KanbanSquare size={14} /></button>
+            <button onClick={() => setView('table')} className={`h-7 w-7 rounded flex items-center justify-center ${view === 'table' ? 'bg-card text-ink shadow-sm' : 'text-muted'}`} title="Table view"><Table2 size={14} /></button>
+          </div>
+          <IconButton icon={RefreshCw} label="Refresh" onClick={() => loadDeals(activePipelineId)} />
+          {canAdmin && <Button size="sm" icon={Settings2} onClick={() => setStageEditorOpen(true)}>Edit stages</Button>}
+          {canManage && <Button size="sm" icon={Plus} onClick={() => setNewPipelineOpen(true)}>New pipeline</Button>}
+        </div>
+      </div>
+
+      {deals === null || !pipeline ? (
+        <Skeleton className="h-64" />
+      ) : view === 'kanban' ? (
+        <KanbanView
+          pipeline={pipeline} deals={deals} canManage={canManage}
+          newDealOpen={newDealOpen} setNewDealOpen={setNewDealOpen}
+          dealForm={dealForm} setDealForm={setDealForm} createDeal={createDeal}
+          draggingDeal={draggingDeal} setDraggingDeal={setDraggingDeal} moveDeal={moveDeal}
+        />
+      ) : (
+        <TableView pipeline={pipeline} deals={deals} canManage={canManage} moveDeal={moveDeal} />
+      )}
+
+      <PipelineModal open={newPipelineOpen} name={pipelineName} setName={setPipelineName} onClose={() => setNewPipelineOpen(false)} onCreate={createPipeline} />
+
+      <StageEditorDrawer
+        open={stageEditorOpen} onClose={() => setStageEditorOpen(false)}
+        authFetch={authFetch} SALES_API_BASE={SALES_API_BASE}
+        pipeline={pipeline}
+        onStagesChanged={(stages) => setPipelines((prev) => prev.map((p) => (p.id === pipeline.id ? { ...p, stages } : p)))}
+      />
+
+      <Modal
+        open={!!lostMove}
+        onClose={() => setLostMove(null)}
+        title="Why was this deal lost?"
+        subtitle={lostMove?.deal?.name}
+        footer={<><Button onClick={() => setLostMove(null)}>Cancel</Button><Button variant="primary" onClick={confirmLostMove} disabled={!lostReason.trim()}>Move to Lost</Button></>}
+      >
+        <Field label="Lost reason" hint="Required — shown on the deal's history.">
+          <Input value={lostReason} onChange={(e) => setLostReason(e.target.value)} placeholder="e.g. Budget cut, chose a competitor" autoFocus />
+        </Field>
+      </Modal>
+    </>
+  );
+}
+
+function StaleBadge({ isStale }) {
+  if (!isStale) return null;
+  return <span title="No activity in this stage for longer than its stale threshold"><Chip tone="danger"><Flame size={10} className="inline -mt-0.5 mr-0.5" />Stale</Chip></span>;
+}
+
+function KanbanView({ pipeline, deals, canManage, newDealOpen, setNewDealOpen, dealForm, setDealForm, createDeal, draggingDeal, setDraggingDeal, moveDeal }) {
+  return (
+    <div className="flex gap-3 overflow-x-auto pb-2">
+      {pipeline.stages.map((stage) => {
+        const stageDeals = deals.filter((d) => d.stage_id === stage.id);
+        const total = stageDeals.reduce((sum, d) => sum + Number(d.amount || 0), 0);
+        return (
+          <div
+            key={stage.id}
+            className="w-72 shrink-0 bg-sunken border border-hairline rounded-card flex flex-col"
+            onDragOver={(e) => e.preventDefault()}
+            onDrop={() => draggingDeal && moveDeal(draggingDeal, stage.id)}
+          >
+            <div className="px-3 py-2.5 border-b border-hairline flex items-center justify-between">
+              <div className="flex items-center gap-1.5 min-w-0">
+                <span className="text-xs font-semibold text-ink truncate">{stage.name}</span>
+                <span className="text-[11px] text-subtle shrink-0">{stageDeals.length}</span>
+              </div>
+              <span className="text-[11px] tabular-nums text-muted shrink-0">{money(total)}</span>
+            </div>
+            <div className="p-2 flex flex-col gap-2 min-h-[80px]">
+              {stageDeals.map((deal) => (
+                <div
+                  key={deal.id}
+                  draggable={canManage}
+                  onDragStart={() => setDraggingDeal(deal)}
+                  onDragEnd={() => setDraggingDeal(null)}
+                  className="bg-card border border-hairline rounded-ui p-2.5 cursor-grab active:cursor-grabbing hover:border-brand transition-colors"
+                >
+                  <div className="flex items-center justify-between gap-1.5">
+                    <div className="text-xs font-medium text-ink truncate">{deal.name}</div>
+                    <StaleBadge isStale={deal.isStale} />
+                  </div>
+                  <div className="flex items-center gap-1 mt-1 text-[11px] text-muted tabular-nums">
+                    <IndianRupee size={10} />{money(deal.amount, deal.currency).replace(/^[^\d]+/, '')}
+                  </div>
+                </div>
+              ))}
+              {canManage && (
+                newDealOpen === stage.id ? (
+                  <div className="bg-card border border-hairline rounded-ui p-2 flex flex-col gap-1.5">
+                    <Input autoFocus placeholder="Deal name" value={dealForm.name} onChange={(e) => setDealForm({ ...dealForm, name: e.target.value })} className="h-7 text-xs" />
+                    <Input placeholder="Amount" type="number" value={dealForm.amount} onChange={(e) => setDealForm({ ...dealForm, amount: e.target.value })} className="h-7 text-xs" />
+                    <div className="flex gap-1.5">
+                      <Button size="sm" variant="primary" disabled={!dealForm.name.trim()} onClick={() => createDeal(stage.id)}>Add</Button>
+                      <Button size="sm" onClick={() => setNewDealOpen(null)}>Cancel</Button>
+                    </div>
+                  </div>
+                ) : (
+                  <button onClick={() => setNewDealOpen(stage.id)} className="text-[11px] text-muted hover:text-ink flex items-center gap-1 px-1.5 py-1">
+                    <Plus size={12} /> Add deal
+                  </button>
+                )
+              )}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function TableView({ pipeline, deals, canManage, moveDeal }) {
+  const stageById = new Map(pipeline.stages.map((s) => [s.id, s]));
+  return (
+    <div className="bg-card border border-hairline rounded-card overflow-hidden">
+      <table className="w-full text-xs">
+        <thead>
+          <tr className="border-b border-hairline text-left">
+            <th className="px-3 py-2 font-medium text-subtle">Deal</th>
+            <th className="px-3 py-2 font-medium text-subtle">Stage</th>
+            <th className="px-3 py-2 font-medium text-subtle text-right">Amount</th>
+            <th className="px-3 py-2 font-medium text-subtle">Expected close</th>
+            <th className="px-3 py-2 font-medium text-subtle"> </th>
+          </tr>
+        </thead>
+        <tbody>
+          {deals.length === 0 ? (
+            <tr><td colSpan={5} className="px-3 py-8 text-center text-muted">No deals in this pipeline yet.</td></tr>
+          ) : deals.map((deal) => {
+            const stage = stageById.get(deal.stage_id);
+            return (
+              <tr key={deal.id} className="border-b border-hairline last:border-b-0 hover:bg-canvas transition-colors">
+                <td className="px-3 py-2">
+                  <div className="flex items-center gap-1.5">
+                    <span className="font-medium text-ink">{deal.name}</span>
+                    <StaleBadge isStale={deal.isStale} />
+                  </div>
+                </td>
+                <td className="px-3 py-2">
+                  {canManage ? (
+                    <Select className="h-7" value={deal.stage_id} onChange={(e) => moveDeal(deal, e.target.value)}>
+                      {pipeline.stages.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+                    </Select>
+                  ) : (
+                    <Chip tone={stage?.is_won ? 'success' : stage?.is_lost ? 'danger' : 'neutral'}>{stage?.name || '—'}</Chip>
+                  )}
+                </td>
+                <td className="px-3 py-2 text-right tabular-nums">{money(deal.amount, deal.currency)}</td>
+                <td className="px-3 py-2 text-muted">{deal.expected_close_date || '—'}</td>
+                <td className="px-3 py-2">
+                  {deal.status !== 'open' && <Chip tone={deal.status === 'won' ? 'success' : 'danger'}>{deal.status}</Chip>}
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function PipelineModal({ open, name, setName, onClose, onCreate }) {
+  return (
+    <Modal open={open} onClose={onClose} title="New pipeline" subtitle="Starts with 5 practical stages — New, Qualified, Proposal, Won, Lost." footer={<><Button onClick={onClose}>Cancel</Button><Button variant="primary" onClick={onCreate} disabled={!name.trim()}>Create</Button></>}>
+      <Field label="Pipeline name"><Input value={name} onChange={(e) => setName(e.target.value)} placeholder="Enterprise sales" autoFocus /></Field>
+    </Modal>
+  );
+}
+
+// --------------------------------------------------------- Stage editor
+
+function StageEditorDrawer({ open, onClose, authFetch, SALES_API_BASE, pipeline, onStagesChanged }) {
+  const [stages, setStages] = useState([]);
+  const [newStageName, setNewStageName] = useState('');
+  const [error, setError] = useState(null);
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => { if (pipeline) setStages([...(pipeline.stages || [])].sort((a, b) => a.position - b.position)); }, [pipeline, open]);
+
+  if (!pipeline) return null;
+
+  const patchStage = async (stageId, patch) => {
+    setBusy(true);
+    try {
+      const res = await authFetch(`${SALES_API_BASE}/stages/${stageId}`, { method: 'PATCH', body: JSON.stringify(patch) });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Could not update stage.');
+      const next = stages.map((s) => (s.id === stageId ? data.stage : s));
+      setStages(next);
+      onStagesChanged(next);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const addStage = async () => {
+    if (!newStageName.trim()) return;
+    setBusy(true);
+    try {
+      const res = await authFetch(`${SALES_API_BASE}/pipelines/${pipeline.id}/stages`, { method: 'POST', body: JSON.stringify({ name: newStageName.trim(), probability: 0 }) });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Could not create stage.');
+      const next = [...stages, data.stage];
+      setStages(next);
+      onStagesChanged(next);
+      setNewStageName('');
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const deleteStage = async (stageId) => {
+    setBusy(true);
+    try {
+      const res = await authFetch(`${SALES_API_BASE}/stages/${stageId}`, { method: 'DELETE' });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Could not delete stage.');
+      const next = stages.filter((s) => s.id !== stageId);
+      setStages(next);
+      onStagesChanged(next);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const reorder = async (fromIndex, toIndex) => {
+    if (toIndex < 0 || toIndex >= stages.length) return;
+    const reordered = [...stages];
+    const [moved] = reordered.splice(fromIndex, 1);
+    reordered.splice(toIndex, 0, moved);
+    const body = { stages: reordered.map((s, i) => ({ id: s.id, position: i })) };
+    setBusy(true);
+    try {
+      const res = await authFetch(`${SALES_API_BASE}/pipelines/${pipeline.id}/stages/reorder`, { method: 'POST', body: JSON.stringify(body) });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Could not reorder stages.');
+      const sorted = [...data.stages].sort((a, b) => a.position - b.position);
+      setStages(sorted);
+      onStagesChanged(sorted);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Drawer open={open} onClose={onClose} title="Edit stages" subtitle={pipeline.name} width={440}>
+      <div className="p-4 flex flex-col gap-3">
+        {error && <Banner tone="danger">{error}</Banner>}
+        {stages.map((stage, i) => (
+          <div key={stage.id} className="border border-hairline rounded-ui p-3 flex flex-col gap-2 bg-card">
+            <div className="flex items-center gap-2">
+              <GripVertical size={14} className="text-subtle shrink-0" />
+              <Input
+                value={stage.name}
+                onChange={(e) => setStages((prev) => prev.map((s) => (s.id === stage.id ? { ...s, name: e.target.value } : s)))}
+                onBlur={(e) => e.target.value.trim() && e.target.value !== pipeline.stages.find((s) => s.id === stage.id)?.name && patchStage(stage.id, { name: e.target.value.trim() })}
+                className="h-7 text-xs flex-1"
+              />
+              <IconButton icon={ArrowUp} label="Move up" size={13} onClick={() => reorder(i, i - 1)} disabled={busy || i === 0} />
+              <IconButton icon={ArrowDown} label="Move down" size={13} onClick={() => reorder(i, i + 1)} disabled={busy || i === stages.length - 1} />
+              <IconButton icon={Trash2} label="Delete stage" size={13} onClick={() => deleteStage(stage.id)} disabled={busy} />
+            </div>
+            <div className="flex items-center gap-3 text-[11px] text-muted pl-6">
+              <label className="flex items-center gap-1.5">
+                Win %
+                <Input
+                  type="number" min={0} max={100}
+                  defaultValue={stage.probability}
+                  onBlur={(e) => patchStage(stage.id, { probability: Number(e.target.value) || 0 })}
+                  className="h-6 w-14 text-xs"
+                />
+              </label>
+              <label className="flex items-center gap-1.5">
+                <Checkbox checked={stage.is_won} onChange={(e) => patchStage(stage.id, { isWon: e.target.checked })} />
+                Won stage
+              </label>
+              <label className="flex items-center gap-1.5">
+                <Checkbox checked={stage.is_lost} onChange={(e) => patchStage(stage.id, { isLost: e.target.checked })} />
+                Lost stage
+              </label>
+            </div>
+            <div className="flex items-center gap-1.5 text-[11px] text-muted pl-6">
+              Flag stale after
+              <Input
+                type="number" min={1}
+                defaultValue={stage.stale_after_days ?? ''}
+                placeholder="never"
+                onBlur={(e) => patchStage(stage.id, { staleAfterDays: e.target.value ? Number(e.target.value) : null })}
+                className="h-6 w-16 text-xs"
+              />
+              days of inactivity
+            </div>
+          </div>
+        ))}
+
+        <div className="flex gap-1.5">
+          <Input placeholder="New stage name" value={newStageName} onChange={(e) => setNewStageName(e.target.value)} className="h-8 text-xs" />
+          <Button size="sm" variant="primary" icon={Plus} onClick={addStage} disabled={!newStageName.trim() || busy}>Add</Button>
+        </div>
+      </div>
+    </Drawer>
+  );
+}
+
+export default PipelineTab;

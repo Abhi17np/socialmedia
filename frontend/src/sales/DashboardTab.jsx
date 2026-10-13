@@ -3,10 +3,7 @@
 import { useEffect, useState } from 'react';
 import { TrendingUp, Target } from 'lucide-react';
 import { Panel, PanelHeader, Table, Th, Td, Banner, Skeleton, StatStrip, Stat, EmptyState, Input, Avatar } from '../ui';
-
-function money(amount, currency) {
-  return new Intl.NumberFormat('en-IN', { style: 'currency', currency: currency || 'INR', maximumFractionDigits: 0 }).format(amount || 0);
-}
+import { money } from './format';
 
 function monthRange() {
   const now = new Date();

@@ -115,6 +115,20 @@ export function Input({ className, icon: Icon, ...rest }) {
   );
 }
 
+export function Checkbox({ className, ...rest }) {
+  return (
+    <input
+      type="checkbox"
+      className={cx(
+        'w-3.5 h-3.5 rounded-[3px] border border-hairline bg-card accent-brand cursor-pointer',
+        'focus:ring-3 focus:ring-brand/15 outline-none',
+        className
+      )}
+      {...rest}
+    />
+  );
+}
+
 export function Textarea({ className, ...rest }) {
   return (
     <textarea
