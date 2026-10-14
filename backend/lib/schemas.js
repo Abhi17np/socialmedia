@@ -515,6 +515,46 @@ const emailCampaignSchema = z.object({
 
 const emailSendTestSchema = z.object({ to: z.string().trim().email() });
 
+// --------------------------------------------------------------- Journeys
+
+// A node/edge's exact field validity (which actionType config fields are
+// required, which operators a condition supports) is owned by
+// lib/journeyGraph.js's validateGraph() and lib/journeyActions.js's
+// executors — zod here only checks the general shape, same division of
+// labor as the Phase 2 segment filter schema.
+const journeyNodeSchema = z.object({
+  id: z.string().trim().min(1).max(60),
+  type: z.enum(['trigger', 'delay', 'condition', 'action', 'split']),
+  actionType: z.string().max(40).optional(),
+  config: z.record(z.string(), z.any()).optional().default({})
+});
+const journeyEdgeSchema = z.object({
+  id: z.string().trim().min(1).max(60),
+  source: z.string().trim().min(1).max(60),
+  target: z.string().trim().min(1).max(60),
+  branch: z.enum(['yes', 'no']).optional(),
+  weight: z.number().positive().optional()
+});
+const journeyGraphSchema = z.object({
+  nodes: z.array(journeyNodeSchema).min(1).max(100),
+  edges: z.array(journeyEdgeSchema).max(200)
+});
+
+const JOURNEY_TRIGGER_TYPES = ['contact_created', 'contact_tag_added', 'deal_stage_changed', 'deal_won', 'deal_lost', 'email_opened', 'email_clicked'];
+
+const journeySchema = z.object({
+  name: z.string().trim().min(1).max(200),
+  description: z.string().trim().max(2000).optional(),
+  triggerType: z.enum(JOURNEY_TRIGGER_TYPES),
+  triggerConfig: z.record(z.string(), z.any()).optional().default({}),
+  graph: journeyGraphSchema,
+  reentryAllowed: z.boolean().optional().default(false),
+  goalConfig: z.object({ field: z.string(), operator: z.string(), value: z.any() }).optional(),
+  version: z.number().int().optional()
+});
+
+const journeyEnrollSchema = z.object({ contactId: z.string().uuid() });
+
 module.exports = {
   signupSchema, loginSchema, createPostSchema, checkoutSchema, addMemberSchema, updateMemberSchema,
   savedReplySchema, draftPostSchema, whatsappEmbeddedSignupSchema, inboxReplySchema, updateInteractionSchema,
@@ -532,5 +572,6 @@ module.exports = {
   mergeContactsSchema, mergeCompaniesSchema,
   marketingCampaignSchema, automationRuleSchema,
   preferenceUpdateSchema, suppressionCreateSchema, contactConsentUpdateSchema, CONSENT_CHANNELS, SUPPRESSION_REASONS,
-  emailConnectionSchema, emailDomainSchema, emailTemplateSchema, emailCampaignSchema, emailSendTestSchema, EMAIL_PROVIDERS, EMAIL_BLOCK_TYPES
+  emailConnectionSchema, emailDomainSchema, emailTemplateSchema, emailCampaignSchema, emailSendTestSchema, EMAIL_PROVIDERS, EMAIL_BLOCK_TYPES,
+  journeySchema, journeyEnrollSchema, JOURNEY_TRIGGER_TYPES
 };

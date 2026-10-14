@@ -20,6 +20,7 @@ const { validate } = require('../middleware/validate');
 const { asyncHandler } = require('../lib/asyncHandler');
 const { recordAudit } = require('../lib/audit');
 const { fireTrigger, retryRun } = require('../lib/automation');
+const { fireWorkflowTrigger } = require('../lib/journeyEngine');
 const { recomputeLeadScore } = require('../lib/leadScoring');
 const { parseCsvToObjects, toCsv } = require('../lib/csv');
 const {
@@ -370,6 +371,7 @@ router.post('/sales/contacts', requireHub('sales'), requireRole('member'), valid
   Object.assign(data, await recomputeLeadScore(client, req.tenantId, data.id));
 
   await fireTrigger(client, req.tenantId, 'contact_created', { refType: 'contact', refId: data.id, contactId: data.id });
+  await fireWorkflowTrigger(client, req.tenantId, 'contact_created', { contactId: data.id });
   await recordAudit(client, { tenantId: req.tenantId, actorUserId: req.userId, action: 'sales.contact_created', targetType: 'contact', targetId: data.id, metadata: { displayName } });
   res.status(201).json({ contact: data });
 }));
@@ -531,6 +533,7 @@ router.patch('/sales/contacts/:id', requireHub('sales'), requireRole('member'), 
     const added = (patch.tags || []).filter((t) => !(before.tags || []).includes(t));
     for (const tag of added) {
       await fireTrigger(client, req.tenantId, 'contact_tag_added', { refType: 'contact', refId: data.id, contactId: data.id, tag });
+      await fireWorkflowTrigger(client, req.tenantId, 'contact_tag_added', { contactId: data.id, tag });
     }
   }
   res.json({ contact: data });
@@ -925,6 +928,7 @@ router.post('/sales/deals/:id/move', requireHub('sales'), requireRole('member'),
 
   const triggerType = stage.is_won ? 'deal_won' : stage.is_lost ? 'deal_lost' : 'deal_stage_changed';
   await fireTrigger(client, req.tenantId, triggerType, { refType: 'deal', refId: deal.id, dealId: deal.id, contactId: deal.contact_id, fromStageId, toStageId: stage.id, stageName: stage.name });
+  if (deal.contact_id) await fireWorkflowTrigger(client, req.tenantId, triggerType, { contactId: deal.contact_id, dealId: deal.id, toStageId: stage.id });
 
   await recordAudit(client, { tenantId: req.tenantId, actorUserId: req.userId, action: 'sales.deal_moved', targetType: 'deal', targetId: deal.id, metadata: { fromStageId, toStageId: stage.id, stageName: stage.name } });
   res.json({ deal: updated });

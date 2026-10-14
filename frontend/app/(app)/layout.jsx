@@ -87,6 +87,7 @@ const SOCIAL_MOBILE_TABS = [
 // row; anything past that (plus account actions) surfaces in the "More"
 // sheet below instead of being unreachable on mobile.
 const SALES_MOBILE_TAB_COUNT = 4;
+const MARKETING_MOBILE_TAB_COUNT = 4;
 
 export default function AppShellLayout({ children }) {
   const router = useRouter();
@@ -230,7 +231,7 @@ export default function AppShellLayout({ children }) {
           active: pathname === '/sales' && salesActiveTab === i.tab
         }))
       : activeHub === 'marketing'
-      ? visibleMarketingItems.map((i) => ({
+      ? visibleMarketingItems.slice(0, MARKETING_MOBILE_TAB_COUNT).map((i) => ({
           href: `/marketing?tab=${i.tab}`,
           icon: i.icon,
           label: i.label,
@@ -242,6 +243,12 @@ export default function AppShellLayout({ children }) {
     activeHub === 'sales'
       ? visibleSalesItems.slice(SALES_MOBILE_TAB_COUNT).map((i) => ({
           href: `/sales?tab=${i.tab}`,
+          icon: i.icon,
+          label: i.label
+        }))
+      : activeHub === 'marketing'
+      ? visibleMarketingItems.slice(MARKETING_MOBILE_TAB_COUNT).map((i) => ({
+          href: `/marketing?tab=${i.tab}`,
           icon: i.icon,
           label: i.label
         }))

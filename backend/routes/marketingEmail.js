@@ -26,6 +26,7 @@ const { sendViaTenantProvider } = require('../lib/email/providerRegistry');
 const { renderEmailForRecipient } = require('../lib/email/sendPipeline');
 const { decodeClickDestination, TRANSPARENT_GIF } = require('../lib/email/compliance');
 const { sendCampaign } = require('../lib/email/campaignSender');
+const { fireWorkflowTrigger } = require('../lib/journeyEngine');
 const emailQueue = require('../lib/email/emailQueue');
 const crypto = require('../social/crypto');
 const {
@@ -387,11 +388,19 @@ router.get('/marketing/email/campaigns/:id/report', requireHub('marketing'), asy
 // recipient's email client, not an authenticated tenant session)
 // -------------------------------------------------------------
 
+async function fireEmailJourneyTrigger(client, recipientId, triggerType) {
+  const { data: recipient } = await client.from('email_campaign_recipients').select('tenant_id, contact_id').eq('id', recipientId).maybeSingle();
+  if (recipient) await fireWorkflowTrigger(client, recipient.tenant_id, triggerType, { contactId: recipient.contact_id });
+}
+
 publicRouter.get('/marketing/email/track/open/:recipientId', asyncHandler(async (req, res) => {
   const client = requireSocialClient(res);
   res.set('Content-Type', 'image/gif');
   res.set('Cache-Control', 'no-store');
-  if (client) await client.rpc('mark_email_recipient_event', { p_recipient_id: req.params.recipientId, p_event_type: 'open' }).then(() => {}, () => {});
+  if (client) {
+    await client.rpc('mark_email_recipient_event', { p_recipient_id: req.params.recipientId, p_event_type: 'open' }).then(() => {}, () => {});
+    fireEmailJourneyTrigger(client, req.params.recipientId, 'email_opened').catch(() => {});
+  }
   res.end(TRANSPARENT_GIF);
 }));
 
@@ -399,7 +408,10 @@ publicRouter.get('/marketing/email/track/click/:recipientId', asyncHandler(async
   const client = requireSocialClient(res);
   const destination = decodeClickDestination(req.query.u || '');
   if (!destination || !/^https?:\/\//i.test(destination)) return res.status(400).send('Invalid tracking link.');
-  if (client) await client.rpc('mark_email_recipient_event', { p_recipient_id: req.params.recipientId, p_event_type: 'click', p_url: destination }).then(() => {}, () => {});
+  if (client) {
+    await client.rpc('mark_email_recipient_event', { p_recipient_id: req.params.recipientId, p_event_type: 'click', p_url: destination }).then(() => {}, () => {});
+    fireEmailJourneyTrigger(client, req.params.recipientId, 'email_clicked').catch(() => {});
+  }
   res.redirect(302, destination);
 }));
 

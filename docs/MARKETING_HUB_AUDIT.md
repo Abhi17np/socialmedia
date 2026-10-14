@@ -201,7 +201,7 @@ brief) · **MISSING** (nothing exists).
 | C2 | SMS channel | MISSING | No code at all |
 | C3 | Multichannel campaign with fallback rules | MISSING | One campaign can link one WhatsApp sub-campaign + one post; no per-channel variants, no fallback logic |
 | C4 | Social Hub posts tied into one campaign/UTM/report | PARTIAL | Link-post exists and rolls into analytics; no shared UTM builder |
-| D. Journeys/visual workflow builder (entire module) | MISSING (Phase 3 schema only, inert) | `lib/automation.js` is a real but flat rule engine; no canvas, no delay/branching, no re-entry/goal/exit rules |
+| D. Journeys/visual workflow builder (entire module) | DONE (engine + linear editor; branching graph-canvas authoring deferred) | `lib/journeyEngine.js`/`journeyGraph.js`: real multi-step graph engine with delay, condition/split branching, re-entry control, and a goal condition — restart-safe, idempotent, unit+integration tested (see `docs/MARKETING_HUB_IMPLEMENTATION.md`'s Phase 4 entry). `lib/automation.js` (flat rules) kept as-is, unmerged, by deliberate choice. Editor UI authors/edits only straight-line journeys (covers all 7 templates); a branching graph is fully runnable but not yet authorable visually — see Phase 4's scope decisions. |
 | E. Lead capture & growth (forms, landing pages, public API, MQL handoff) | MISSING | Nothing exists |
 | F1 | Engagement scoring combined with lead scoring | MISSING | Sales Hub lead scoring exists; no marketing-behavior input |
 | F2 | Attribution (first/last/linear → revenue) | MISSING | — |
