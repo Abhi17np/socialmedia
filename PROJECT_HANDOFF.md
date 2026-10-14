@@ -280,47 +280,46 @@ drafting, `backend/lib/ai.js`). WhatsApp template management + audience
 segments + broadcast campaigns live in `routes/whatsapp.js` /
 `src/whatsapp/WhatsAppHub.jsx`.
 
-**Marketing Hub**: campaign orchestration + the same automation-rule
-engine Sales Hub uses, on top of the channels Social Hub already sends
-through.
-
-**Phase 3** (cross-Hub AI layer beyond AI Assist, visual workflow builder,
-integrations marketplace, SMS): schema exists
-(`migrations/015_phase3_foundation.sql`, `docs/phase3-foundation.md`) but
-nothing reads or writes it yet. Doesn't start until the commercial gate
-clears for both Hubs, per the strategy doc's sequencing.
+**Marketing Hub**: built out across a 9-phase plan (full detail in
+`docs/MARKETING_HUB_AUDIT.md` and `docs/MARKETING_HUB_IMPLEMENTATION.md`) —
+consent/suppression, a v2 AND/OR segment compiler, email campaigns (its own
+send queue, providers, deliverability), journeys/automation (graph-based
+triggers/delays/conditions/actions), hosted lead capture forms, behavioral
+lead scoring + MQL lifecycle automation, multi-touch revenue attribution,
+SMS (its own provider abstraction, reusing the consent/queue/metering
+pattern), a cross-channel overview + audit-log, and an AI layer (campaign
+copy, a natural-language segment builder, performance insights — Claude-
+backed, same pattern as Social Hub's AI Assist, fails closed without an
+`ANTHROPIC_API_KEY`). The old `migrations/015_phase3_foundation.sql` /
+`docs/phase3-foundation.md` schema this section used to point to predates
+that build and is superseded by it — Marketing Hub's SMS and AI layer
+above are the real, shipped versions of what that schema sketched.
 
 ---
 
 ## 7. Testing
 
 ```bash
-# Backend unit suite (node:test) — 37/37 passing
+# Backend unit suite (node:test)
 cd backend && npm test
 
-# Backend integration suite — real Postgres/PostgREST/Redis, one script per area.
-# (package.json's own test:integration script is stale and only lists 4 of these —
-# run them individually, in any order, each spins up its own in-process app via supertest.)
-cd backend
-for f in sales-routes sales-stage1 sales-dashboard sales-deal-relationships \
-         sales-custom-fields sales-bulk-import sales-lead-scoring sales-sequences \
-         sales-pagination-views sales-merge sales-concurrency sales-email-integration \
-         marketing-routes whatsapp-routes broadcast-queue; do
-  node scripts/integration-tests/$f.js
-done
+# Backend integration suite — real Postgres/PostgREST/Redis, one script per
+# area. package.json's own test:integration script chains every one of
+# them in order; npm run test:all runs unit + integration together.
+cd backend && npm run test:all
 
 # Frontend lint
 cd frontend && npx eslint .
 ```
 
-**Current status** (last full run, 2026-10-14): unit 37/37, all 13
-Sales/Marketing-area integration scripts green. Two **pre-existing,
-unrelated** scripts — `whatsapp-routes.js` and `broadcast-queue.js`, both
-exercising the BullMQ broadcast worker — are genuinely flaky under this
-environment's timing (confirmed by repeated isolated runs: pass/fail
-alternates with no code change). Root cause looks like retry/backoff
-timing, not a logic bug; out of scope for Sales Hub work, flagged rather
-than silently ignored.
+**Current status** (last full run, 2026-10-14): unit **121/121** passing,
+all **23** integration scripts green (Sales Hub, WhatsApp broadcast, and
+every Marketing Hub phase — consent, segmentation, email, journeys, lead
+forms, scoring/attribution, SMS, overview/audit-log, AI layer). The
+BullMQ-broadcast-worker-timing flakiness this section used to flag in
+`whatsapp-routes.js`/`broadcast-queue.js` was not reproduced on the most
+recent runs; re-check with a couple of repeated runs if you see it again,
+rather than assuming it's gone for good.
 
 See `backend/scripts/integration-tests/README.md` for setup notes per
 script.
