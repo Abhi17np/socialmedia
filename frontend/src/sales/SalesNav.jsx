@@ -10,7 +10,12 @@ import { atLeast } from '../roleRank';
 // HubSpot pattern: Contacts/Companies/Deals are sidebar items, not
 // in-page tabs) driven by a ?tab= query param so each section stays
 // linkable/bookmarkable. SalesHub.jsx reads the same param.
-const ITEMS = [
+// Exported so the mobile bottom tab bar (app/(app)/layout.jsx) can
+// show the same items — the ones that don't fit in the bottom row
+// go in its "More" sheet, filtered by the same minRole and built from
+// the same `/sales?tab=` hrefs, instead of a second hardcoded list
+// that would drift from this one.
+export const ITEMS = [
   { tab: 'dashboard', icon: LayoutDashboard, label: 'Dashboard', minRole: 'viewer' },
   { tab: 'workspace', icon: Inbox, label: 'Workspace', minRole: 'viewer' },
   { tab: 'pipeline', icon: KanbanSquare, label: 'Pipeline', minRole: 'viewer' },

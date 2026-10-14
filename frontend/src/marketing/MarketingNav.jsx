@@ -7,7 +7,9 @@ import { atLeast } from '../roleRank';
 
 // Marketing Hub's own sidebar — see SalesNav.jsx's header comment for
 // why this is a sidebar now instead of an in-page tab row.
-const ITEMS = [
+// Exported so the mobile bottom tab bar (app/(app)/layout.jsx) can
+// reuse the same list — see SalesNav.jsx's ITEMS export comment.
+export const ITEMS = [
   { tab: 'campaigns', icon: Megaphone, label: 'Campaigns', minRole: 'viewer' },
   { tab: 'automation', icon: Zap, label: 'Automation', minRole: 'viewer' }
 ];

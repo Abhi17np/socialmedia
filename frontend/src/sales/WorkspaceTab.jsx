@@ -1,11 +1,20 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { AlertTriangle, Clock, CalendarClock, Flame, Phone, Mail, Calendar, StickyNote, CheckSquare } from 'lucide-react';
+import { CheckCircle2, Flame, Phone, Mail, Calendar, StickyNote, CheckSquare } from 'lucide-react';
 import { Panel, PanelHeader, Banner, Skeleton, EmptyState, Chip } from '../ui';
 import { money } from './format';
 
 const ACTIVITY_ICON = { call: Phone, email: Mail, meeting: Calendar, note: StickyNote, task: CheckSquare };
+
+// A full EmptyState (icon + title + description) per section looks
+// fine once, but four of them stacked — the common case, since most
+// days a rep clears most sections — turns the workspace into mostly
+// dead space. One compact line reads as "nothing here" just as
+// clearly without the padding and decoration.
+function CompactEmpty({ children }) {
+  return <p className="px-4 py-3 text-xs text-muted">{children}</p>;
+}
 
 function ActivityRow({ activity, onToggle }) {
   const Icon = ACTIVITY_ICON[activity.type] || StickyNote;
@@ -55,6 +64,18 @@ function WorkspaceTab({ authFetch, SALES_API_BASE }) {
 
   if (data === null) return <Skeleton className="h-64" />;
 
+  const allClear = data.overdueActivities.length === 0 && data.dueTodayActivities.length === 0
+    && data.upcomingActivities.length === 0 && data.staleDeals.length === 0;
+
+  if (allClear) {
+    return (
+      <>
+        {error && <Banner tone="danger">{error}</Banner>}
+        <EmptyState icon={CheckCircle2} title="You're all caught up" description="No overdue, due-today or upcoming follow-ups, and no deals going stale." />
+      </>
+    );
+  }
+
   return (
     <>
       {error && <Banner tone="danger">{error}</Banner>}
@@ -62,7 +83,7 @@ function WorkspaceTab({ authFetch, SALES_API_BASE }) {
       <Panel className="overflow-hidden">
         <PanelHeader title="Overdue" meta={`${data.overdueActivities.length} past due`} />
         {data.overdueActivities.length === 0 ? (
-          <EmptyState icon={AlertTriangle} title="Nothing overdue" description="You're caught up." />
+          <CompactEmpty>Nothing overdue.</CompactEmpty>
         ) : (
           data.overdueActivities.map((a) => <ActivityRow key={a.id} activity={a} onToggle={toggleComplete} />)
         )}
@@ -71,7 +92,7 @@ function WorkspaceTab({ authFetch, SALES_API_BASE }) {
       <Panel className="overflow-hidden">
         <PanelHeader title="Due today" meta={`${data.dueTodayActivities.length} today`} />
         {data.dueTodayActivities.length === 0 ? (
-          <EmptyState icon={Clock} title="Nothing due today" description="No calls, emails or follow-ups scheduled for today." />
+          <CompactEmpty>Nothing due today.</CompactEmpty>
         ) : (
           data.dueTodayActivities.map((a) => <ActivityRow key={a.id} activity={a} onToggle={toggleComplete} />)
         )}
@@ -80,7 +101,7 @@ function WorkspaceTab({ authFetch, SALES_API_BASE }) {
       <Panel className="overflow-hidden">
         <PanelHeader title="Upcoming (next 7 days)" meta={`${data.upcomingActivities.length} scheduled`} />
         {data.upcomingActivities.length === 0 ? (
-          <EmptyState icon={CalendarClock} title="Nothing scheduled" description="No follow-ups in the next 7 days." />
+          <CompactEmpty>Nothing scheduled in the next 7 days.</CompactEmpty>
         ) : (
           data.upcomingActivities.map((a) => <ActivityRow key={a.id} activity={a} onToggle={toggleComplete} />)
         )}
@@ -89,7 +110,7 @@ function WorkspaceTab({ authFetch, SALES_API_BASE }) {
       <Panel className="overflow-hidden">
         <PanelHeader title="Your stale deals" meta={`${data.staleDeals.length} need attention`} />
         {data.staleDeals.length === 0 ? (
-          <EmptyState icon={Flame} title="Nothing going stale" description="All your open deals have had recent activity." />
+          <CompactEmpty>No open deals going stale.</CompactEmpty>
         ) : (
           <div>
             {data.staleDeals.map((d) => (

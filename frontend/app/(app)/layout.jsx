@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useCallback, useEffect, useRef } from 'react';
-import { useRouter, usePathname } from 'next/navigation';
+import { useRouter, usePathname, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import {
   PenSquare,
@@ -14,17 +14,19 @@ import {
   Moon,
   Sun,
   LogOut,
-  WifiOff
+  WifiOff,
+  X
 } from 'lucide-react';
 import SocialNav from '../../src/social/SocialNav';
-import SalesNav from '../../src/sales/SalesNav';
-import MarketingNav from '../../src/marketing/MarketingNav';
+import SalesNav, { ITEMS as SALES_NAV_ITEMS } from '../../src/sales/SalesNav';
+import MarketingNav, { ITEMS as MARKETING_NAV_ITEMS } from '../../src/marketing/MarketingNav';
 import TopBar from '../../src/shell/TopBar';
 import { hubForPathname } from '../../src/shell/HubSwitcher';
 import { AuthContext } from '../../src/AuthContext';
 import { API_BASE } from '../../src/apiBase';
 import { SOCIAL_API_BASE } from '../../src/social/api';
 import { Button } from '../../src/ui';
+import { atLeast } from '../../src/roleRank';
 
 // Everything under app/(app)/ shares this one shell, one auth check,
 // and — since the HubSpot-style redesign — one unified top bar
@@ -71,7 +73,7 @@ function useTheme() {
   return [theme, toggle];
 }
 
-const MOBILE_TABS = [
+const SOCIAL_MOBILE_TABS = [
   { href: '/dashboard', icon: LayoutGrid, label: 'Home' },
   { href: '/compose', icon: PenSquare, label: 'Compose' },
   { href: '/inbox', icon: InboxIcon, label: 'Inbox' },
@@ -79,9 +81,17 @@ const MOBILE_TABS = [
   { href: '/posts', icon: CalendarDays, label: 'Posts' }
 ];
 
+// Sales/Marketing Hub mobile bottom tabs are derived from each hub's own
+// sidebar ITEMS (SalesNav.jsx/MarketingNav.jsx) rather than a second
+// hardcoded list, so they can't drift. Only the first few fit the bottom
+// row; anything past that (plus account actions) surfaces in the "More"
+// sheet below instead of being unreachable on mobile.
+const SALES_MOBILE_TAB_COUNT = 4;
+
 export default function AppShellLayout({ children }) {
   const router = useRouter();
   const pathname = usePathname();
+  const searchParams = useSearchParams();
   const [token, setToken] = useState(null);
   const [checkedStorage, setCheckedStorage] = useState(false);
   const [me, setMe] = useState(null);
@@ -89,6 +99,8 @@ export default function AppShellLayout({ children }) {
   const [theme, toggleTheme] = useTheme();
   const [profileMenuOpen, setProfileMenuOpen] = useState(false);
   const profileMenuRef = useRef(null);
+  const [moreMenuOpen, setMoreMenuOpen] = useState(false);
+  const moreMenuRef = useRef(null);
 
   // Distinct from "no token" (redirect to /login) and from "a specific
   // request errored" (that page's own error state) — this means the
@@ -182,11 +194,58 @@ export default function AppShellLayout({ children }) {
     return () => document.removeEventListener('mousedown', onClick);
   }, [profileMenuOpen]);
 
+  useEffect(() => {
+    if (!moreMenuOpen) return;
+    const onClick = (e) => {
+      if (moreMenuRef.current && !moreMenuRef.current.contains(e.target)) setMoreMenuOpen(false);
+    };
+    document.addEventListener('mousedown', onClick);
+    return () => document.removeEventListener('mousedown', onClick);
+  }, [moreMenuOpen]);
+
+  // Close the "More" sheet on navigation so it doesn't linger over the next page.
+  useEffect(() => {
+    setMoreMenuOpen(false);
+  }, [pathname]);
+
   if (!checkedStorage || !token) return null; // redirecting to /login, or still reading localStorage
 
   const role = me?.user?.role || 'viewer';
   const email = me?.user?.email;
   const activeHub = hubForPathname(pathname);
+
+  const salesActiveTab = searchParams.get('tab') || 'dashboard';
+  const marketingActiveTab = searchParams.get('tab') || 'campaigns';
+  const visibleSalesItems = SALES_NAV_ITEMS.filter((i) => atLeast(role, i.minRole));
+  const visibleMarketingItems = MARKETING_NAV_ITEMS.filter((i) => atLeast(role, i.minRole));
+
+  // Each hub drives its own bottom-tab row from its own sidebar ITEMS;
+  // whatever doesn't fit the row goes in the "More" sheet (see nav below).
+  const hubBottomTabs =
+    activeHub === 'sales'
+      ? visibleSalesItems.slice(0, SALES_MOBILE_TAB_COUNT).map((i) => ({
+          href: `/sales?tab=${i.tab}`,
+          icon: i.icon,
+          label: i.label,
+          active: pathname === '/sales' && salesActiveTab === i.tab
+        }))
+      : activeHub === 'marketing'
+      ? visibleMarketingItems.map((i) => ({
+          href: `/marketing?tab=${i.tab}`,
+          icon: i.icon,
+          label: i.label,
+          active: pathname === '/marketing' && marketingActiveTab === i.tab
+        }))
+      : SOCIAL_MOBILE_TABS.map((t) => ({ ...t, active: pathname === t.href }));
+
+  const moreSheetHubItems =
+    activeHub === 'sales'
+      ? visibleSalesItems.slice(SALES_MOBILE_TAB_COUNT).map((i) => ({
+          href: `/sales?tab=${i.tab}`,
+          icon: i.icon,
+          label: i.label
+        }))
+      : [];
 
   return (
     <div className="h-full flex flex-col bg-canvas text-ink">
@@ -294,35 +353,73 @@ export default function AppShellLayout({ children }) {
       </div>
 
       {/* ------------------------------------------- Mobile tab bar */}
-      {/* Still Social Hub-only — a hub-aware mobile tab bar (swapping
-          like the desktop sidebar does) is a reasonable follow-up, not
-          done here to keep this change scoped to the top bar / desktop
-          sidebar it was asked for. Sales/Marketing Hub remain reachable
-          on mobile via the "More" tab -> profile/settings, same as any
-          page this bar doesn't list today (e.g. Account). */}
+      {/* Hub-aware: swaps the same way the desktop sidebar does, driven
+          by each hub's own ITEMS (SalesNav/MarketingNav/SOCIAL_MOBILE_TABS)
+          instead of a single hardcoded Social-only list. Whatever doesn't
+          fit the row (remaining Sales items, plus account actions for
+          every hub) lives in the "More" sheet instead of being silently
+          unreachable on mobile. */}
       <nav className="lg:hidden fixed bottom-0 inset-x-0 h-14 bg-card border-t border-hairline flex items-stretch z-30">
-        {MOBILE_TABS.map(({ href, icon: Icon, label }) => {
-          const active = pathname === href;
-          return (
-            <Link
-              key={href}
-              href={href}
-              className={`flex-1 flex flex-col items-center justify-center gap-0.5 text-[10px] font-medium transition-colors ${
-                active ? 'text-brand' : 'text-subtle'
-              }`}
+        {hubBottomTabs.map(({ href, icon: Icon, label, active }) => (
+          <Link
+            key={href}
+            href={href}
+            className={`flex-1 flex flex-col items-center justify-center gap-0.5 text-[10px] font-medium transition-colors ${
+              active ? 'text-brand' : 'text-subtle'
+            }`}
+          >
+            <Icon size={18} />
+            {label}
+          </Link>
+        ))}
+        <div className="flex-1 relative" ref={moreMenuRef}>
+          {moreMenuOpen && (
+            <div
+              className="absolute bottom-[calc(100%+4px)] right-2 w-56 bg-card border border-hairline rounded-surface
+                         shadow-[var(--shadow-flyout)] p-1 z-50"
             >
-              <Icon size={18} />
-              {label}
-            </Link>
-          );
-        })}
-        <button
-          onClick={handleLogout}
-          className="flex-1 flex flex-col items-center justify-center gap-0.5 text-[10px] font-medium text-subtle"
-        >
-          <MoreHorizontal size={18} />
-          More
-        </button>
+              {moreSheetHubItems.length > 0 && (
+                <>
+                  {moreSheetHubItems.map(({ href, icon: Icon, label }) => (
+                    <Link
+                      key={href}
+                      href={href}
+                      onClick={() => setMoreMenuOpen(false)}
+                      className="w-full h-8 px-2 rounded-ui flex items-center gap-2 text-xs text-muted hover:text-ink hover:bg-canvas transition-colors"
+                    >
+                      <Icon size={15} />
+                      {label}
+                    </Link>
+                  ))}
+                  <div className="my-1 border-t border-hairline" />
+                </>
+              )}
+              <button
+                onClick={toggleTheme}
+                className="w-full h-8 px-2 rounded-ui flex items-center gap-2 text-xs text-muted hover:text-ink hover:bg-canvas transition-colors"
+              >
+                {theme === 'dark' ? <Sun size={15} /> : <Moon size={15} />}
+                {theme === 'dark' ? 'Light theme' : 'Dark theme'}
+              </button>
+              <button
+                onClick={handleLogout}
+                className="w-full h-8 px-2 rounded-ui flex items-center gap-2 text-xs text-muted hover:text-ink hover:bg-canvas transition-colors"
+              >
+                <LogOut size={15} />
+                Log out
+              </button>
+            </div>
+          )}
+          <button
+            onClick={() => setMoreMenuOpen((v) => !v)}
+            className={`w-full h-full flex flex-col items-center justify-center gap-0.5 text-[10px] font-medium transition-colors ${
+              moreMenuOpen ? 'text-brand' : 'text-subtle'
+            }`}
+          >
+            {moreMenuOpen ? <X size={18} /> : <MoreHorizontal size={18} />}
+            More
+          </button>
+        </div>
       </nav>
     </div>
   );
