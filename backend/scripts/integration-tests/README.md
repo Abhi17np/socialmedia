@@ -81,6 +81,7 @@ node scripts/integration-tests/sales-pagination-views.js
 node scripts/integration-tests/sales-merge.js
 node scripts/integration-tests/sales-concurrency.js
 node scripts/integration-tests/marketing-routes.js
+node scripts/integration-tests/marketing-consent.js
 ```
 
 Run `broadcast-queue.js` on its own (no server needed, no PostgREST
@@ -94,3 +95,18 @@ job silently not re-process — BullMQ's deterministic job IDs make a
 duplicate `enqueue` call for the same tenant a safe no-op, which is
 correct in production but means a second test run reusing the exact
 same IDs won't see a fresh job fire.
+
+**The same worker-race hazard applies to `broadcast-queue.js` and
+`marketing-consent.js` too**, not just `whatsapp-routes.js` — any of
+these three starts its own real BullMQ `Worker` on the same queue name
+`social/broadcastQueue.js` uses, so a separately-running `node server.js`
+(or a second one of these scripts) racing for the same jobs on the same
+Redis produces exactly this symptom: a recipient that should reach
+`'sent'`/`'failed'` never does within the script's poll deadline, or the
+retry count comes out wrong (e.g. `attempts: 4` expected, `2` observed).
+Confirmed by direct reproduction (2026-10-14): a leftover `node server.js`
+process was the actual root cause of this suite's previously-unexplained
+flakiness, not a logic bug in `broadcastQueue.js` — see
+`docs/MARKETING_HUB_AUDIT.md`'s flakiness write-up. Before running any of
+these three, `pgrep -af "node server.js"` and kill anything you find, and
+`redis-cli flushall` first.
