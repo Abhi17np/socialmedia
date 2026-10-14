@@ -16,6 +16,7 @@ const platformRoutes = require('./routes/platform');
 const aiRoutes = require('./routes/ai');
 const whatsappRoutes = require('./routes/whatsapp');
 const salesRoutes = require('./routes/sales');
+const salesEmailRoutes = require('./routes/salesEmail');
 const marketingRoutes = require('./routes/marketing');
 const socialScheduler = require('./social/scheduler');
 const socialPollers = require('./social/pollers');
@@ -74,6 +75,7 @@ app.get(`${API_PREFIX}/health`, (req, res) => res.json({ status: 'ok' }));
 app.use(API_PREFIX, authRoutes.router);
 app.use(API_PREFIX, platformRoutes.publicRouter);
 app.use(API_PREFIX, socialRoutes.publicRouter);
+app.use(API_PREFIX, salesEmailRoutes.publicRouter);
 app.use(API_PREFIX, billingRoutes.publicRouter);
 
 // requirePlatformAdmin is mounted at the more specific `${API_PREFIX}/platform`
@@ -98,6 +100,7 @@ tenantRouter.use(billingRoutes.protectedRouter);
 tenantRouter.use(teamRoutes);
 tenantRouter.use(whatsappRoutes);
 tenantRouter.use(salesRoutes);
+tenantRouter.use(salesEmailRoutes.protectedRouter);
 tenantRouter.use(marketingRoutes);
 // Scoped to '/ai' specifically (not a blanket tenantRouter.use()) so
 // aiLimiter's much tighter cap only governs AI Assist calls, not every

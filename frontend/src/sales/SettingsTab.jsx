@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { Plus, Trash2, SlidersHorizontal, Target, ScrollText, Zap, Layers } from 'lucide-react';
+import { Plus, Trash2, SlidersHorizontal, Target, ScrollText, Zap, Layers, Mail } from 'lucide-react';
 import {
   Button, IconButton, Panel, PanelHeader, Table, Th, Td, Input, Select, Field,
   Banner, Modal, Drawer, ConfirmDialog, EmptyState, Skeleton, Chip, FilterPill, Checkbox
@@ -14,6 +14,7 @@ const SECTIONS = [
   { key: 'leadScoring', label: 'Lead scoring', icon: SlidersHorizontal },
   { key: 'targets', label: 'Targets', icon: Target },
   { key: 'automation', label: 'Automation', icon: Zap },
+  { key: 'email', label: 'Email & calendar', icon: Mail },
   { key: 'auditLog', label: 'Audit log', icon: ScrollText }
 ];
 
@@ -39,6 +40,7 @@ function SettingsTab({ authFetch, SALES_API_BASE }) {
       {section === 'leadScoring' && <LeadScoringPanel authFetch={authFetch} SALES_API_BASE={SALES_API_BASE} />}
       {section === 'targets' && <TargetsPanel authFetch={authFetch} SALES_API_BASE={SALES_API_BASE} />}
       {section === 'automation' && <AutomationPanel authFetch={authFetch} SALES_API_BASE={SALES_API_BASE} />}
+      {section === 'email' && <EmailCalendarPanel authFetch={authFetch} SALES_API_BASE={SALES_API_BASE} />}
       {section === 'auditLog' && <AuditLogPanel authFetch={authFetch} SALES_API_BASE={SALES_API_BASE} />}
     </>
   );
@@ -476,6 +478,124 @@ function AutomationPanel({ authFetch, SALES_API_BASE }) {
           )}
         </div>
       </Drawer>
+    </Panel>
+  );
+}
+
+// ------------------------------------------------------- Email & calendar
+
+const PROVIDER_LABELS = { gmail: 'Gmail', microsoft365: 'Microsoft 365' };
+
+/**
+ * Real connection status for each provider — nothing here is mocked.
+ * `configured: false` (the case in every environment without real OAuth
+ * credentials — see SALES_HUB_IMPLEMENTATION.md's "Blocked: Email &
+ * Calendar") disables Connect outright with an explanation, rather than
+ * pretending a connect flow exists. `configured: true, connected: false`
+ * is a real "Connect" button that redirects to the provider's actual
+ * consent screen (backend/routes/salesEmail.js).
+ */
+function EmailCalendarPanel({ authFetch, SALES_API_BASE }) {
+  const [providers, setProviders] = useState(null);
+  const [error, setError] = useState(null);
+  const [banner, setBanner] = useState(null);
+  const [connectingProvider, setConnectingProvider] = useState(null);
+  const [confirmDisconnect, setConfirmDisconnect] = useState(null);
+
+  const load = () => { authFetch(`${SALES_API_BASE}/email/status`).then((r) => r.json()).then((d) => setProviders(d.providers || [])).catch((e) => setError(e.message)); };
+
+  // The OAuth callback redirects the browser back to ?tab=email&email_connected=<provider>
+  // or &email_error=<message> — surface it once, then strip just those
+  // two params so a refresh doesn't reshow it and ?tab=email is kept.
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const connected = params.get('email_connected');
+    const connectError = params.get('email_error');
+    if (connected) setBanner({ tone: 'success', text: `${PROVIDER_LABELS[connected] || connected} connected.` });
+    if (connectError) setBanner({ tone: 'danger', text: connectError });
+    if (connected || connectError) {
+      params.delete('email_connected');
+      params.delete('email_error');
+      window.history.replaceState({}, '', `${window.location.pathname}?${params.toString()}`);
+    }
+    load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const connect = async (provider) => {
+    setConnectingProvider(provider);
+    try {
+      const res = await authFetch(`${SALES_API_BASE}/email/connect/${provider}`);
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Could not start the connect flow.');
+      window.location.href = data.url; // leaves the app for the provider's real OAuth consent screen
+    } catch (err) {
+      setBanner({ tone: 'danger', text: err.message });
+      setConnectingProvider(null);
+    }
+  };
+
+  const disconnect = async (provider) => {
+    try {
+      const res = await authFetch(`${SALES_API_BASE}/email/${provider}/disconnect`, { method: 'POST' });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Could not disconnect.');
+      setConfirmDisconnect(null);
+      load();
+    } catch (err) {
+      setError(err.message);
+    }
+  };
+
+  return (
+    <Panel className="overflow-hidden">
+      <PanelHeader title="Email & calendar" meta="Connect your own inbox to log sent emails and sync meetings against deals and contacts" />
+      {banner && <div className="px-4 pt-3"><Banner tone={banner.tone}>{banner.text}</Banner></div>}
+      {error && <div className="px-4 pt-3"><Banner tone="danger">{error}</Banner></div>}
+
+      {providers === null ? (
+        <div className="p-4 space-y-3"><Skeleton className="h-16" /><Skeleton className="h-16" /></div>
+      ) : (
+        <div className="divide-y divide-hairline">
+          {providers.map((p) => (
+            <div key={p.provider} className="px-4 py-3.5 flex items-center justify-between gap-3">
+              <div className="min-w-0">
+                <div className="text-sm font-medium text-ink flex items-center gap-2">
+                  {PROVIDER_LABELS[p.provider] || p.provider}
+                  {p.connected && <Chip tone="success">Connected</Chip>}
+                  {!p.configured && <Chip tone="neutral">Not configured</Chip>}
+                </div>
+                {p.connected ? (
+                  <div className="text-xs text-muted mt-0.5">{p.emailAddress}</div>
+                ) : !p.configured ? (
+                  <div className="text-xs text-muted mt-0.5">
+                    Needs an administrator to set up OAuth credentials for this provider — see SALES_HUB_IMPLEMENTATION.md&rsquo;s &ldquo;Blocked: Email &amp; Calendar&rdquo; section for the exact environment variables.
+                  </div>
+                ) : (
+                  <div className="text-xs text-muted mt-0.5">Not connected yet.</div>
+                )}
+              </div>
+              {p.connected ? (
+                <Button size="sm" onClick={() => setConfirmDisconnect(p.provider)}>Disconnect</Button>
+              ) : (
+                <Button
+                  size="sm" variant="primary" disabled={!p.configured || connectingProvider === p.provider}
+                  onClick={() => connect(p.provider)}
+                >
+                  {connectingProvider === p.provider ? 'Redirecting…' : 'Connect'}
+                </Button>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+
+      <ConfirmDialog
+        open={!!confirmDisconnect} title={`Disconnect ${PROVIDER_LABELS[confirmDisconnect] || confirmDisconnect}?`}
+        body="Deals and contacts keep any activity already logged from this account, but no further emails or calendar events will sync until you reconnect."
+        confirmLabel="Disconnect"
+        onConfirm={() => disconnect(confirmDisconnect)} onCancel={() => setConfirmDisconnect(null)}
+      />
     </Panel>
   );
 }
