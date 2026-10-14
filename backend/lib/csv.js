@@ -46,8 +46,23 @@ function parseCsvToObjects(text) {
   });
 }
 
+// CSV/"formula" injection: Excel, Google Sheets and LibreOffice all treat
+// a cell starting with =, +, -, or @ as a formula to evaluate on open —
+// not just a value to display. Every column this exports (company name,
+// notes, custom fields, ...) is user-entered data, so without this an
+// admin exporting Companies/Leads/Deals and opening the file could run
+// an attacker-authored formula (e.g. one that exfiltrates other cells to
+// a remote URL) just by opening a CSV this app itself produced. The
+// standard mitigation (OWASP's): prefix such a value with a single quote,
+// which every one of those apps displays as a leading quote on a
+// plain-text cell instead of evaluating it, while keeping the value
+// otherwise unchanged and the CSV itself still valid RFC 4180.
+function neutralizeFormula(s) {
+  return /^[=+\-@]/.test(s) ? `'${s}` : s;
+}
+
 function toCsvField(value) {
-  const s = value === null || value === undefined ? '' : String(value);
+  const s = neutralizeFormula(value === null || value === undefined ? '' : String(value));
   if (/[",\r\n]/.test(s)) return '"' + s.replace(/"/g, '""') + '"';
   return s;
 }
