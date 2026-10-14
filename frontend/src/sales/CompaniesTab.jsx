@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Plus, Building2, Upload, Download, Copy, Search } from 'lucide-react';
 import {
   Button, Panel, PanelHeader, Table, Th, Td, Input, Select, Field,
-  Banner, Modal, Drawer, EmptyState, Skeleton, Chip, Checkbox, Pagination
+  Banner, Modal, Drawer, EmptyState, Skeleton, Chip, Checkbox, Pagination, ConfirmDialog
 } from '../ui';
 import { money, downloadViaAuthFetch } from './format';
 import { useTeamMembers } from './useTeamMembers';
@@ -45,6 +45,8 @@ function CompaniesTab({ authFetch, SALES_API_BASE, canManage, canDelete, openId 
   const [bulkOwnerId, setBulkOwnerId] = useState('');
   const [duplicates, setDuplicates] = useState(null);
   const [mergeGroup, setMergeGroup] = useState(null);
+  const [confirmBulkDelete, setConfirmBulkDelete] = useState(false);
+  const [bulkActionPending, setBulkActionPending] = useState(false);
   const fileInputRef = useRef(null);
   const searchDebounce = useRef(null);
   const members = useTeamMembers(authFetch);
@@ -154,14 +156,18 @@ function CompaniesTab({ authFetch, SALES_API_BASE, canManage, canDelete, openId 
 
   const bulkAction = async (action, value) => {
     try {
+      setBulkActionPending(true);
       const res = await authFetch(`${SALES_API_BASE}/companies/bulk-action`, { method: 'POST', body: JSON.stringify({ ids: [...selected], action, value: value ?? null }) });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Bulk action failed.');
       setNotice(`${data.updated} compan${data.updated === 1 ? 'y' : 'ies'} updated.`);
       setSelected(new Set());
+      setConfirmBulkDelete(false);
       load();
     } catch (err) {
       setError(err.message);
+    } finally {
+      setBulkActionPending(false);
     }
   };
 
@@ -207,10 +213,20 @@ function CompaniesTab({ authFetch, SALES_API_BASE, canManage, canDelete, openId 
             {members.map((m) => <option key={m.id} value={m.id}>{m.email}</option>)}
           </Select>
           <Button size="sm" disabled={!bulkOwnerId} onClick={() => bulkAction('set_owner', bulkOwnerId)}>Apply</Button>
-          {canDelete && <Button size="sm" variant="danger" onClick={() => bulkAction('delete')}>Delete selected</Button>}
+          {canDelete && <Button size="sm" variant="danger" onClick={() => setConfirmBulkDelete(true)}>Delete selected</Button>}
           <Button size="sm" onClick={() => setSelected(new Set())}>Clear</Button>
         </div>
       )}
+
+      <ConfirmDialog
+        open={confirmBulkDelete}
+        title={`Delete ${selected.size} compan${selected.size === 1 ? 'y' : 'ies'}?`}
+        body="This permanently deletes the selected companies and any activities logged against them. Linked contacts and deals are kept, just unlinked from the company. This cannot be undone."
+        confirmLabel="Delete"
+        pending={bulkActionPending}
+        onConfirm={() => bulkAction('delete')}
+        onCancel={() => setConfirmBulkDelete(false)}
+      />
 
       <Panel className="overflow-hidden">
         <PanelHeader
