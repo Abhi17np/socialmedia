@@ -96,6 +96,12 @@ async function main() {
   const deal = r.data.deal;
   console.log('✓ contact and deal created');
 
+  // No ownerId was sent above (the Kanban quick-create form never offers
+  // one) — it must default to the creating rep, not sit unassigned, or
+  // this deal is invisible in Team performance / Workspace's "your deals".
+  assert.strictEqual(deal.owner_id, ownerId, 'a deal created without an explicit ownerId defaults to the creating user');
+  console.log('✓ a deal created without an ownerId defaults to the creating rep, not unassigned');
+
   r = await api(`/api/v1/sales/deals/${deal.id}/move`, { method: 'POST', auth: memberToken, body: { stageId: wonStage.id } });
   assert.strictEqual(r.status, 200, JSON.stringify(r.data));
   assert.strictEqual(r.data.deal.status, 'won');

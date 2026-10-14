@@ -790,7 +790,14 @@ router.post('/sales/deals', requireHub('sales'), requireRole('member'), validate
 
   const { data, error } = await client.from('deals').insert({
     tenant_id: req.tenantId, pipeline_id: pipelineId, stage_id: stageId, name, amount, currency,
-    contact_id: contactId || null, company_id: companyId || null, owner_id: ownerId || null, expected_close_date: expectedCloseDate || null,
+    // Unlike companies/contacts (whose create forms expose an owner picker
+    // defaulting to blank — "unassigned" is a deliberate choice there), the
+    // deal quick-create flow never offers an owner field at all, so leaving
+    // this null left every deal silently unattributed: invisible in Team
+    // performance, Workspace's "your stale deals", and owner-scoped sales
+    // targets. Default to the creating rep, same as HubSpot/Pipedrive;
+    // still reassignable afterward from the deal detail drawer.
+    contact_id: contactId || null, company_id: companyId || null, owner_id: ownerId || req.userId, expected_close_date: expectedCloseDate || null,
     forecast_category: forecastCategory || 'pipeline', custom_fields: customFields || {}
   }).select('*').single();
   if (error) throw error;
