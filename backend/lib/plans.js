@@ -14,10 +14,10 @@
 // template broadcast send is a distinct, marketing-style cost center
 // from customer-service replies, see migrations/012_whatsapp_broadcast.sql.
 const PLAN_LIMITS = {
-  free: { socialAccounts: 2, postsPerMonth: 30, whatsappMessagesPerMonth: 200, aiGenerationsPerMonth: 20, whatsappBroadcastSendsPerMonth: 100 },
-  starter: { socialAccounts: 5, postsPerMonth: 150, whatsappMessagesPerMonth: 2000, aiGenerationsPerMonth: 200, whatsappBroadcastSendsPerMonth: 1000 },
-  pro: { socialAccounts: 15, postsPerMonth: 1000, whatsappMessagesPerMonth: 10000, aiGenerationsPerMonth: 1000, whatsappBroadcastSendsPerMonth: 10000 },
-  enterprise: { socialAccounts: Infinity, postsPerMonth: Infinity, whatsappMessagesPerMonth: Infinity, aiGenerationsPerMonth: Infinity, whatsappBroadcastSendsPerMonth: Infinity }
+  free: { socialAccounts: 2, postsPerMonth: 30, whatsappMessagesPerMonth: 200, aiGenerationsPerMonth: 20, whatsappBroadcastSendsPerMonth: 100, emailSendsPerMonth: 500 },
+  starter: { socialAccounts: 5, postsPerMonth: 150, whatsappMessagesPerMonth: 2000, aiGenerationsPerMonth: 200, whatsappBroadcastSendsPerMonth: 1000, emailSendsPerMonth: 5000 },
+  pro: { socialAccounts: 15, postsPerMonth: 1000, whatsappMessagesPerMonth: 10000, aiGenerationsPerMonth: 1000, whatsappBroadcastSendsPerMonth: 10000, emailSendsPerMonth: 50000 },
+  enterprise: { socialAccounts: Infinity, postsPerMonth: Infinity, whatsappMessagesPerMonth: Infinity, aiGenerationsPerMonth: Infinity, whatsappBroadcastSendsPerMonth: Infinity, emailSendsPerMonth: Infinity }
 };
 
 // Unknown/unset plan fails closed to the lowest tier, never to unlimited.

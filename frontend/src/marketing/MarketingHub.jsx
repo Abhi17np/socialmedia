@@ -12,6 +12,7 @@ import {
   Button, IconButton, Panel, PanelHeader, Table, Th, Td, Input, Textarea, Select, Field,
   Banner, Modal, Drawer, EmptyState, Skeleton, Chip, StatStrip, Stat, Pagination, ConfirmDialog
 } from '../ui';
+import EmailTab from './EmailTab';
 
 const MKT_API_BASE = `${API_BASE}/marketing`;
 const WA_API_BASE = `${API_BASE}/whatsapp`;
@@ -69,6 +70,7 @@ function MarketingHubInner({ authFetch, role }) {
         {tab === 'campaigns' && <CampaignsTab authFetch={authFetch} canManage={canManage} canAdmin={canAdmin} />}
         {tab === 'automation' && <AutomationTab authFetch={authFetch} canAdmin={canAdmin} />}
         {tab === 'audience' && <SuppressionTab authFetch={authFetch} canAdmin={canAdmin} />}
+        {tab === 'email' && <EmailTab authFetch={authFetch} canManage={canManage} canAdmin={canAdmin} />}
       </PageBody>
     </Page>
   );

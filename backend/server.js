@@ -18,9 +18,12 @@ const whatsappRoutes = require('./routes/whatsapp');
 const salesRoutes = require('./routes/sales');
 const salesEmailRoutes = require('./routes/salesEmail');
 const marketingRoutes = require('./routes/marketing');
+const marketingEmailRoutes = require('./routes/marketingEmail');
 const socialScheduler = require('./social/scheduler');
 const socialPollers = require('./social/pollers');
 const broadcastQueue = require('./social/broadcastQueue');
+const emailQueue = require('./lib/email/emailQueue');
+const scheduledSendSweep = require('./lib/email/scheduledSendSweep');
 const sequenceScheduler = require('./lib/sequenceScheduler');
 
 // Versioned from day one — nothing in production depends on an
@@ -78,6 +81,7 @@ app.use(API_PREFIX, socialRoutes.publicRouter);
 app.use(API_PREFIX, salesEmailRoutes.publicRouter);
 app.use(API_PREFIX, billingRoutes.publicRouter);
 app.use(API_PREFIX, marketingRoutes.publicRouter);
+app.use(API_PREFIX, marketingEmailRoutes.publicRouter);
 
 // requirePlatformAdmin is mounted at the more specific `${API_PREFIX}/platform`
 // path, and registered BEFORE the broader tenant mount below — Express
@@ -103,6 +107,7 @@ tenantRouter.use(whatsappRoutes);
 tenantRouter.use(salesRoutes);
 tenantRouter.use(salesEmailRoutes.protectedRouter);
 tenantRouter.use(marketingRoutes.protectedRouter);
+tenantRouter.use(marketingEmailRoutes.router);
 // Scoped to '/ai' specifically (not a blanket tenantRouter.use()) so
 // aiLimiter's much tighter cap only governs AI Assist calls, not every
 // route registered after it — the same mounting-order lesson server.js
@@ -142,6 +147,8 @@ if (require.main === module) {
     socialScheduler.start();
     socialPollers.start();
     broadcastQueue.start();
+    emailQueue.start();
+    scheduledSendSweep.start();
     sequenceScheduler.start();
   });
 
@@ -171,6 +178,8 @@ if (require.main === module) {
       socialPollers.stop();           // the mentions + analytics setIntervals
       await socialScheduler.stop();   // sweep interval, then BullMQ worker/queue and Redis
       await broadcastQueue.stop();    // the WhatsApp broadcast worker/queue and its own Redis connection
+      await emailQueue.stop();        // the marketing email worker/queue and its own Redis connection
+      scheduledSendSweep.stop();      // the scheduled-email-campaign sweep interval
       sequenceScheduler.stop();       // the Sales Hub sequence sweep interval
       const closed = new Promise((resolve, reject) => server.close(err => (err ? reject(err) : resolve())));
       // server.close() only stops new connections; without this it waits

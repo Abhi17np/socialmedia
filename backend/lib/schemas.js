@@ -450,6 +450,71 @@ const contactConsentUpdateSchema = z.object({
   version: z.number().int().optional()
 });
 
+// ----------------------------------------------------------- Email marketing
+
+const EMAIL_PROVIDERS = ['mock', 'smtp', 'sendgrid', 'resend'];
+
+const emailConnectionSchema = z.object({
+  provider: z.enum(EMAIL_PROVIDERS),
+  fromName: z.string().trim().min(1).max(200),
+  fromEmail: z.string().trim().email(),
+  replyTo: optionalEmail(),
+  config: z.object({
+    host: z.string().trim().max(255).optional(),
+    port: z.number().int().min(1).max(65535).optional(),
+    secure: z.boolean().optional(),
+    user: z.string().trim().max(255).optional()
+  }).optional().default({}),
+  secret: z.string().trim().max(2000).optional() // SMTP password / provider API key — write-only, never read back
+}).refine(v => v.provider !== 'smtp' || (v.config.host && v.config.port && v.config.user), { message: 'SMTP needs config.host, config.port and config.user.', path: ['config'] });
+
+const emailDomainSchema = z.object({
+  domain: z.string().trim().toLowerCase().min(3).max(255).regex(/^[a-z0-9.-]+\.[a-z]{2,}$/, 'Enter a bare domain, e.g. mail.example.com'),
+  dkimSelector: z.string().trim().max(100).optional()
+});
+
+const EMAIL_BLOCK_TYPES = ['heading', 'text', 'image', 'button', 'divider', 'spacer'];
+const emailBlockSchema = z.object({
+  type: z.enum(EMAIL_BLOCK_TYPES),
+  text: z.string().max(5000).optional(),
+  src: z.string().max(2000).optional(),
+  alt: z.string().max(300).optional(),
+  label: z.string().max(100).optional(),
+  href: z.string().max(2000).optional(),
+  height: z.number().int().min(1).max(200).optional()
+});
+
+const emailTemplateSchema = z.object({
+  name: z.string().trim().min(1).max(200),
+  subject: z.string().trim().max(300).optional().default(''),
+  preheader: z.string().trim().max(300).optional(),
+  blocks: z.array(emailBlockSchema).max(100).optional().default([]),
+  brand: z.object({ logoUrl: z.string().max(2000).optional(), primaryColor: z.string().trim().max(20).optional(), fontFamily: z.string().trim().max(100).optional() }).optional().default({}),
+  version: z.number().int().optional()
+});
+
+const emailAbTestSchema = z.object({
+  variants: z.array(z.object({ key: z.string().trim().min(1).max(20), subject: z.string().trim().min(1).max(300) })).min(2).max(4),
+  splitPercent: z.number().min(1).max(99).optional().default(50),
+  winnerMetric: z.enum(['opens', 'clicks']).optional().default('opens')
+}).optional();
+
+const emailCampaignSchema = z.object({
+  name: z.string().trim().min(1).max(200),
+  templateId: z.string().uuid(),
+  segmentId: z.string().uuid(),
+  subject: z.string().trim().max(300).optional(),
+  preheader: z.string().trim().max(300).optional(),
+  fromName: z.string().trim().max(200).optional(),
+  fromEmail: optionalEmail(),
+  sendMode: z.enum(['immediate', 'scheduled']).optional().default('immediate'),
+  scheduledAt: z.string().trim().optional(),
+  timezone: z.string().trim().max(100).optional().default('UTC'),
+  abTest: emailAbTestSchema
+}).refine(v => v.sendMode !== 'scheduled' || !!v.scheduledAt, { message: 'scheduledAt is required when sendMode is "scheduled".', path: ['scheduledAt'] });
+
+const emailSendTestSchema = z.object({ to: z.string().trim().email() });
+
 module.exports = {
   signupSchema, loginSchema, createPostSchema, checkoutSchema, addMemberSchema, updateMemberSchema,
   savedReplySchema, draftPostSchema, whatsappEmbeddedSignupSchema, inboxReplySchema, updateInteractionSchema,
@@ -466,5 +531,6 @@ module.exports = {
   savedViewSchema, updateSavedViewSchema, SAVED_VIEW_LIST_TYPES,
   mergeContactsSchema, mergeCompaniesSchema,
   marketingCampaignSchema, automationRuleSchema,
-  preferenceUpdateSchema, suppressionCreateSchema, contactConsentUpdateSchema, CONSENT_CHANNELS, SUPPRESSION_REASONS
+  preferenceUpdateSchema, suppressionCreateSchema, contactConsentUpdateSchema, CONSENT_CHANNELS, SUPPRESSION_REASONS,
+  emailConnectionSchema, emailDomainSchema, emailTemplateSchema, emailCampaignSchema, emailSendTestSchema, EMAIL_PROVIDERS, EMAIL_BLOCK_TYPES
 };
