@@ -540,7 +540,7 @@ const journeyGraphSchema = z.object({
   edges: z.array(journeyEdgeSchema).max(200)
 });
 
-const JOURNEY_TRIGGER_TYPES = ['contact_created', 'contact_tag_added', 'deal_stage_changed', 'deal_won', 'deal_lost', 'email_opened', 'email_clicked'];
+const JOURNEY_TRIGGER_TYPES = ['contact_created', 'contact_tag_added', 'deal_stage_changed', 'deal_won', 'deal_lost', 'email_opened', 'email_clicked', 'form_submitted'];
 
 const journeySchema = z.object({
   name: z.string().trim().min(1).max(200),
@@ -554,6 +554,30 @@ const journeySchema = z.object({
 });
 
 const journeyEnrollSchema = z.object({ contactId: z.string().uuid() });
+
+// Field-level semantics (key uniqueness, "needs at least one email/phone
+// field") are owned by lib/leadForms.js's validateFieldDefinitions — same
+// division of labor as journeyGraphSchema/journeyGraph.js: this just
+// checks the structural shape so a malformed field can't reach the
+// handler at all.
+const leadFormFieldSchema = z.object({
+  key: z.string().trim().min(1).max(50),
+  label: z.string().trim().min(1).max(200),
+  type: z.enum(['text', 'email', 'phone', 'textarea', 'select', 'checkbox']),
+  required: z.boolean().optional().default(false),
+  options: z.array(z.string().trim().min(1).max(200)).max(50).optional()
+});
+
+const leadFormSchema = z.object({
+  name: z.string().trim().min(1).max(200),
+  description: z.string().trim().max(2000).optional(),
+  fields: z.array(leadFormFieldSchema).min(1).max(20),
+  consentRequired: z.boolean().optional().default(true),
+  consentText: z.string().trim().min(1).max(500).optional(),
+  thankYouMessage: z.string().trim().min(1).max(500).optional(),
+  redirectUrl: z.string().trim().url().max(2000).optional(),
+  version: z.number().int().optional()
+});
 
 module.exports = {
   signupSchema, loginSchema, createPostSchema, checkoutSchema, addMemberSchema, updateMemberSchema,
@@ -573,5 +597,6 @@ module.exports = {
   marketingCampaignSchema, automationRuleSchema,
   preferenceUpdateSchema, suppressionCreateSchema, contactConsentUpdateSchema, CONSENT_CHANNELS, SUPPRESSION_REASONS,
   emailConnectionSchema, emailDomainSchema, emailTemplateSchema, emailCampaignSchema, emailSendTestSchema, EMAIL_PROVIDERS, EMAIL_BLOCK_TYPES,
-  journeySchema, journeyEnrollSchema, JOURNEY_TRIGGER_TYPES
+  journeySchema, journeyEnrollSchema, JOURNEY_TRIGGER_TYPES,
+  leadFormSchema, leadFormFieldSchema
 };

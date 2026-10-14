@@ -20,6 +20,7 @@ const salesEmailRoutes = require('./routes/salesEmail');
 const marketingRoutes = require('./routes/marketing');
 const marketingEmailRoutes = require('./routes/marketingEmail');
 const journeysRoutes = require('./routes/journeys');
+const leadFormsRoutes = require('./routes/leadForms');
 const socialScheduler = require('./social/scheduler');
 const socialPollers = require('./social/pollers');
 const broadcastQueue = require('./social/broadcastQueue');
@@ -84,6 +85,7 @@ app.use(API_PREFIX, salesEmailRoutes.publicRouter);
 app.use(API_PREFIX, billingRoutes.publicRouter);
 app.use(API_PREFIX, marketingRoutes.publicRouter);
 app.use(API_PREFIX, marketingEmailRoutes.publicRouter);
+app.use(API_PREFIX, leadFormsRoutes.publicRouter);
 
 // requirePlatformAdmin is mounted at the more specific `${API_PREFIX}/platform`
 // path, and registered BEFORE the broader tenant mount below — Express
@@ -111,6 +113,7 @@ tenantRouter.use(salesEmailRoutes.protectedRouter);
 tenantRouter.use(marketingRoutes.protectedRouter);
 tenantRouter.use(marketingEmailRoutes.router);
 tenantRouter.use(journeysRoutes);
+tenantRouter.use(leadFormsRoutes.router);
 // Scoped to '/ai' specifically (not a blanket tenantRouter.use()) so
 // aiLimiter's much tighter cap only governs AI Assist calls, not every
 // route registered after it — the same mounting-order lesson server.js

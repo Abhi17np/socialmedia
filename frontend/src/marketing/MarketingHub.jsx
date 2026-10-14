@@ -14,6 +14,7 @@ import {
 } from '../ui';
 import EmailTab from './EmailTab';
 import JourneysSection from './JourneysSection';
+import FormsSection from './FormsSection';
 
 const MKT_API_BASE = `${API_BASE}/marketing`;
 const WA_API_BASE = `${API_BASE}/whatsapp`;
@@ -69,6 +70,7 @@ function MarketingHubInner({ authFetch, role }) {
       <PageBar title="Marketing Hub" />
       <PageBody>
         {tab === 'campaigns' && <CampaignsTab authFetch={authFetch} canManage={canManage} canAdmin={canAdmin} />}
+        {tab === 'forms' && <FormsSection authFetch={authFetch} canManage={canManage} canAdmin={canAdmin} />}
         {tab === 'journeys' && <JourneysSection authFetch={authFetch} canManage={canManage} canAdmin={canAdmin} />}
         {tab === 'automation' && <AutomationTab authFetch={authFetch} canAdmin={canAdmin} />}
         {tab === 'audience' && <SuppressionTab authFetch={authFetch} canAdmin={canAdmin} />}
