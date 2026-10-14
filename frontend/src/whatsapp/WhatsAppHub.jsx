@@ -10,11 +10,13 @@ import { atLeast } from '../roleRank';
 import { Page, PageBar, PageBody } from '../ui/page';
 import {
   Button, IconButton, Panel, PanelHeader, Table, Th, Td, Input, Textarea, Select, Field,
-  Banner, Modal, ConfirmDialog, EmptyState, Skeleton, Chip, FilterPill, StatStrip, Stat
+  Banner, Modal, ConfirmDialog, EmptyState, Skeleton, Chip, FilterPill, StatStrip, Stat, Drawer, PillSelect
 } from '../ui';
+import SegmentRuleBuilder, { emptySegmentRoot } from '../marketing/SegmentRuleBuilder';
 
 const WA_API_BASE = `${API_BASE}/whatsapp`;
 const SOCIAL_API_BASE = `${API_BASE}/social`;
+const MKT_API_BASE = `${API_BASE}/marketing`;
 
 const TABS = [
   { key: 'templates', label: 'Templates', icon: FileText },
@@ -286,27 +288,42 @@ function TemplatesTab({ authFetch, templates, setTemplates, accounts, canManage,
 
 // -------------------------------------------------------------- Segments
 
+function segmentSummary(segment) {
+  if (segment.segment_type === 'static') return 'Hand-picked list';
+  const filter = segment.filter_json;
+  if (filter?.version === 2) {
+    const groupCount = filter.root?.children?.length || 0;
+    const condCount = (filter.root?.children || []).reduce((n, g) => n + (g.children?.length || 0), 0);
+    return `${condCount} condition${condCount === 1 ? '' : 's'} in ${groupCount} group${groupCount === 1 ? '' : 's'}`;
+  }
+  const parts = [];
+  if (filter?.tags?.length) parts.push(`tagged ${filter.tags.join(', ')}`);
+  if (filter?.hasPhone) parts.push('has phone');
+  return parts.join(' · ') || 'All contacts';
+}
+
 function SegmentsTab({ authFetch, segments, setSegments, canManage, setError }) {
   const [open, setOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [preview, setPreview] = useState({});
-  const [form, setForm] = useState({ name: '', description: '', tags: '', hasPhone: true });
+  const [form, setForm] = useState({ name: '', description: '', segmentType: 'dynamic', legacyTags: '', hasPhone: true, root: emptySegmentRoot() });
+  const [members, setMembers] = useState(null); // the static segment currently open in the "Manage members" drawer
+
+  const resetForm = () => setForm({ name: '', description: '', segmentType: 'dynamic', legacyTags: '', hasPhone: true, root: emptySegmentRoot() });
 
   const create = async () => {
     setSaving(true);
     try {
-      const filter = { hasPhone: form.hasPhone };
-      const tags = form.tags.split(',').map((t) => t.trim()).filter(Boolean);
-      if (tags.length > 0) filter.tags = tags;
+      const filter = form.segmentType === 'static' ? {} : { version: 2, root: form.root };
       const res = await authFetch(`${WA_API_BASE}/segments`, {
         method: 'POST',
-        body: JSON.stringify({ name: form.name, description: form.description, filter })
+        body: JSON.stringify({ name: form.name, description: form.description, segmentType: form.segmentType, filter })
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Could not create segment.');
       setSegments((prev) => [data.segment, ...(prev || [])]);
       setOpen(false);
-      setForm({ name: '', description: '', tags: '', hasPhone: true });
+      resetForm();
     } catch (err) {
       setError(err.message);
     } finally {
@@ -318,11 +335,13 @@ function SegmentsTab({ authFetch, segments, setSegments, canManage, setError }) 
     try {
       const res = await authFetch(`${WA_API_BASE}/segments/${segment.id}/preview`);
       const data = await res.json();
-      if (res.ok) setPreview((prev) => ({ ...prev, [segment.id]: data.whatsappEligibleCount }));
+      if (res.ok) setPreview((prev) => ({ ...prev, [segment.id]: { count: data.whatsappEligibleCount, suppressed: data.suppressedCount || 0 } }));
     } catch {
       /* preview is a convenience, not critical — leave blank on failure */
     }
   };
+
+  const refreshPreview = (segment) => loadPreview(segment);
 
   useEffect(() => {
     (segments || []).forEach((s) => { if (preview[s.id] === undefined) loadPreview(s); });
@@ -333,27 +352,31 @@ function SegmentsTab({ authFetch, segments, setSegments, canManage, setError }) 
       <Panel className="overflow-hidden">
         <PanelHeader
           title="Audience segments"
-          meta="Dynamic — resolved against your contacts each time a campaign sends"
+          meta="Dynamic segments re-resolve every time a campaign sends; static lists are hand-picked"
           action={canManage && <Button size="sm" variant="primary" icon={Plus} onClick={() => setOpen(true)}>New segment</Button>}
         />
         {segments === null ? (
           <div className="p-4 space-y-3"><Skeleton className="h-9" /><Skeleton className="h-9" /></div>
         ) : segments.length === 0 ? (
-          <EmptyState icon={Users} title="No segments yet" description="Group contacts by tag so a campaign can target them precisely." />
+          <EmptyState icon={Users} title="No segments yet" description="Build a rule-based segment or a hand-picked list, then target it from a campaign." />
         ) : (
           <Table>
-            <thead><tr><Th>Name</Th><Th>Filter</Th><Th>WhatsApp-eligible</Th></tr></thead>
+            <thead><tr><Th>Name</Th><Th>Type</Th><Th>Rule</Th><Th>WhatsApp-eligible</Th>{canManage && <Th align="right"> </Th>}</tr></thead>
             <tbody>
               {segments.map((s) => (
                 <tr key={s.id} className="hover:bg-canvas transition-colors">
                   <Td><span className="font-medium">{s.name}</span>{s.description && <div className="text-[11px] text-muted">{s.description}</div>}</Td>
+                  <Td><Chip tone={s.segment_type === 'static' ? 'neutral' : 'brand'}>{s.segment_type === 'static' ? 'Static' : 'Dynamic'}</Chip></Td>
+                  <Td><span className="text-xs text-muted">{segmentSummary(s)}</span></Td>
                   <Td>
-                    <div className="flex flex-wrap gap-1">
-                      {(s.filter_json?.tags || []).map((t) => <Chip key={t} tone="brand">{t}</Chip>)}
-                      {s.filter_json?.hasPhone && <Chip tone="neutral">has phone</Chip>}
-                    </div>
+                    <span className="tabular-nums font-medium">{preview[s.id]?.count ?? '…'}</span>
+                    {!!preview[s.id]?.suppressed && <span className="text-[11px] text-muted ml-1">({preview[s.id].suppressed} suppressed)</span>}
                   </Td>
-                  <Td><span className="tabular-nums font-medium">{preview[s.id] ?? '…'}</span></Td>
+                  {canManage && (
+                    <Td align="right">
+                      {s.segment_type === 'static' && <Button size="sm" onClick={() => setMembers(s)}>Manage members</Button>}
+                    </Td>
+                  )}
                 </tr>
               ))}
             </tbody>
@@ -365,17 +388,99 @@ function SegmentsTab({ authFetch, segments, setSegments, canManage, setError }) 
         open={open}
         onClose={() => setOpen(false)}
         title="New segment"
+        width={640}
         footer={<><Button onClick={() => setOpen(false)} disabled={saving}>Cancel</Button><Button variant="primary" onClick={create} loading={saving} disabled={!form.name.trim()}>Create</Button></>}
       >
         <div className="flex flex-col gap-3">
-          <Field label="Name"><Input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="VIP customers" /></Field>
+          <Field label="Name"><Input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="VIP customers" autoFocus /></Field>
           <Field label="Description (optional)"><Input value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} /></Field>
-          <Field label="Match contacts tagged (comma-separated)" hint="Leave blank to match on phone presence alone.">
-            <Input value={form.tags} onChange={(e) => setForm({ ...form, tags: e.target.value })} placeholder="vip, repeat-buyer" />
+          <Field label="Type">
+            <PillSelect value={form.segmentType} onChange={(e) => setForm({ ...form, segmentType: e.target.value })} aria-label="Segment type">
+              <option value="dynamic">Dynamic — matches a rule</option>
+              <option value="static">Static — a hand-picked list</option>
+            </PillSelect>
           </Field>
+          {form.segmentType === 'dynamic' ? (
+            <SegmentRuleBuilder value={form.root} onChange={(root) => setForm({ ...form, root })} />
+          ) : (
+            <p className="text-xs text-muted">Add contacts to the list after creating it, from "Manage members".</p>
+          )}
         </div>
       </Modal>
+
+      <SegmentMembersDrawer
+        segment={members}
+        authFetch={authFetch}
+        onClose={() => setMembers(null)}
+        onChanged={() => members && refreshPreview(members)}
+      />
     </>
+  );
+}
+
+function SegmentMembersDrawer({ segment, authFetch, onClose, onChanged }) {
+  const [query, setQuery] = useState('');
+  const [results, setResults] = useState([]);
+  const [memberList, setMemberList] = useState(null);
+  const [error, setError] = useState(null);
+
+  const loadMembers = async () => {
+    if (!segment) return;
+    try {
+      const res = await authFetch(`${WA_API_BASE}/segments/${segment.id}/preview`);
+      const data = await res.json();
+      setMemberList(data.whatsappEligibleCount ?? 0);
+    } catch {
+      setMemberList(null);
+    }
+  };
+
+  useEffect(() => { setQuery(''); setResults([]); loadMembers(); }, [segment]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const search = async (q) => {
+    setQuery(q);
+    if (!q.trim()) return setResults([]);
+    try {
+      const res = await authFetch(`${MKT_API_BASE}/contacts/search?q=${encodeURIComponent(q)}`);
+      const data = await res.json();
+      setResults(data.contacts || []);
+    } catch (err) {
+      setError(err.message);
+    }
+  };
+
+  const add = async (contact) => {
+    try {
+      const res = await authFetch(`${WA_API_BASE}/segments/${segment.id}/members`, { method: 'POST', body: JSON.stringify({ contactIds: [contact.id] }) });
+      if (!res.ok) { const data = await res.json(); throw new Error(data.error || 'Could not add contact.'); }
+      setResults((prev) => prev.filter((c) => c.id !== contact.id));
+      loadMembers();
+      onChanged();
+    } catch (err) {
+      setError(err.message);
+    }
+  };
+
+  return (
+    <Drawer open={!!segment} onClose={onClose} title={segment?.name} subtitle="Manage members" width={440}>
+      <div className="p-4 flex flex-col gap-3">
+        {error && <Banner tone="danger">{error}</Banner>}
+        <div className="text-xs text-muted">{memberList ?? '…'} contact{memberList === 1 ? '' : 's'} in this list</div>
+        <Field label="Add a contact" hint="Search by name, phone or email">
+          <Input value={query} onChange={(e) => search(e.target.value)} placeholder="Search contacts…" aria-label="Search contacts to add" />
+        </Field>
+        {results.length > 0 && (
+          <div className="flex flex-col gap-1 border border-hairline rounded-ui overflow-hidden">
+            {results.map((c) => (
+              <button key={c.id} onClick={() => add(c)} className="flex items-center justify-between px-3 py-2 text-xs hover:bg-canvas transition-colors text-left">
+                <span>{c.display_name || c.phone || c.email}</span>
+                <span className="text-muted">{c.phone || c.email}</span>
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+    </Drawer>
   );
 }
 

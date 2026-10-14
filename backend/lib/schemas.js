@@ -125,16 +125,31 @@ const templateSchema = z.object({
   socialAccountId: z.string().uuid()
 });
 
+// The v2 AND/OR tree's actual (field, operator, value) validity is
+// checked by lib/segmentCompiler.js's validateTree(), which knows the
+// full field/operator registry — zod here only needs to accept the
+// general shape (a condition leaf OR a nested group) so a malformed
+// body 400s before ever reaching the route, not the exact semantics.
+const segmentConditionNodeSchema = z.object({ field: z.string().min(1).max(60), operator: z.string().min(1).max(30), value: z.any().optional() });
+const segmentGroupNodeSchema = z.lazy(() => z.object({ logic: z.enum(['AND', 'OR']), children: z.array(z.union([segmentConditionNodeSchema, segmentGroupNodeSchema])).min(1).max(60) }));
+const segmentFilterV2Schema = z.object({ version: z.literal(2), root: z.union([segmentConditionNodeSchema, segmentGroupNodeSchema]) });
+const segmentFilterLegacySchema = z.object({
+  tags: z.array(z.string().max(100)).optional(),
+  hasPhone: z.boolean().optional(),
+  hasEmail: z.boolean().optional(),
+  leadStatus: z.string().max(50).optional(),
+  search: z.string().max(200).optional()
+});
+
 const segmentSchema = z.object({
   name: z.string().trim().min(1).max(200),
   description: z.string().trim().max(1000).optional(),
-  filter: z.object({
-    tags: z.array(z.string().max(100)).optional(),
-    hasPhone: z.boolean().optional(),
-    hasEmail: z.boolean().optional(),
-    leadStatus: z.string().max(50).optional(),
-    search: z.string().max(200).optional()
-  }).optional().default({})
+  segmentType: z.enum(['dynamic', 'static']).optional().default('dynamic'),
+  filter: z.union([segmentFilterV2Schema, segmentFilterLegacySchema]).optional().default({})
+});
+
+const segmentMembersSchema = z.object({
+  contactIds: z.array(z.string().uuid()).min(1).max(5000)
 });
 
 const whatsappCampaignSchema = z.object({
@@ -439,7 +454,7 @@ module.exports = {
   signupSchema, loginSchema, createPostSchema, checkoutSchema, addMemberSchema, updateMemberSchema,
   savedReplySchema, draftPostSchema, whatsappEmbeddedSignupSchema, inboxReplySchema, updateInteractionSchema,
   INTERACTION_STATUSES, INTERACTION_PRIORITIES, changePasswordSchema, forgotPasswordSchema, resetPasswordSchema,
-  updateHubsSchema, templateSchema, segmentSchema, whatsappCampaignSchema,
+  updateHubsSchema, templateSchema, segmentSchema, segmentMembersSchema, whatsappCampaignSchema,
   companySchema, contactSchema, updateContactSchema, dealSchema, updateDealSchema, moveDealStageSchema, salesActivitySchema,
   dealContactSchema, FORECAST_CATEGORIES,
   updatePipelineSchema, dealStageSchema, updateDealStageSchema, reorderStagesSchema,

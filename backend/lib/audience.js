@@ -1,19 +1,26 @@
 /**
  * Shared audience-segment resolver — one implementation of "which
- * contacts match this segment's filter_json", used by both WhatsApp
- * broadcast campaigns (routes/whatsapp.js) and Marketing Hub campaigns
+ * contacts match this segment", used by both WhatsApp broadcast
+ * campaigns (routes/whatsapp.js) and Marketing Hub campaigns
  * (routes/marketing.js), so a segment means the same thing everywhere
  * it's referenced instead of each caller re-interpreting filter_json
  * slightly differently.
  *
- * Segments are dynamic (evaluated against contacts at the moment a
- * campaign is sent), not a stored membership list — filter_json is the
- * only source of truth, see migrations/012_whatsapp_broadcast.sql's
- * header for why.
+ * Two segment shapes (migrations/026_segmentation.sql's `segment_type`):
+ *   - 'dynamic' (default, and every segment created before Phase 2):
+ *     evaluated against contacts at the moment it's read — filter_json is
+ *     the only source of truth, see migrations/012_whatsapp_broadcast.sql's
+ *     original header for why. filter_json is either the v1 legacy flat
+ *     shape (applyFilter below) or a v2 AND/OR tree
+ *     (lib/segmentCompiler.js) — isV2Filter() tells them apart.
+ *   - 'static': a stored membership list (segment_members) a user builds
+ *     by adding/importing specific contacts — evaluated by a plain join,
+ *     no filter logic at all.
  */
 
 const { scoped } = require('./query');
 const { filterConsentedContacts } = require('./consent');
+const { isV2Filter, compileFilterTree } = require('./segmentCompiler');
 
 const MAX_SEGMENT_CONTACTS = 20000; // safety cap — a single campaign send beyond this needs a conversation about pacing, not a silent partial send
 
@@ -36,8 +43,40 @@ async function getSegment(client, tenantId, segmentId) {
   return data;
 }
 
-/** Resolved contact rows for a segment — requirePhone is forced true for any WhatsApp-bound use, since a contact with no phone can never receive one regardless of how the segment itself was defined. */
-const CONTACT_FIELDS = 'id, display_name, phone, email, tags, lead_status, global_opt_out_at';
+const CONTACT_FIELDS = 'id, display_name, phone, email, tags, lead_status, lifecycle_stage, global_opt_out_at';
+
+/** Static-list member contact rows, bounded by `limit` — one query to get the member ids, one to fetch the contacts (never per-member). */
+async function resolveStaticMembers(client, tenantId, segmentId, { requirePhone, limit }) {
+  const { data: members, error } = await scoped(client, tenantId, 'segment_members').select('contact_id').eq('segment_id', segmentId).limit(limit);
+  if (error) throw error;
+  const ids = (members || []).map((m) => m.contact_id);
+  if (ids.length === 0) return [];
+  let query = scoped(client, tenantId, 'contacts').select(CONTACT_FIELDS).in('id', ids);
+  if (requirePhone) query = query.not('phone', 'is', null);
+  const { data, error: cErr } = await query;
+  if (cErr) throw cErr;
+  return data || [];
+}
+
+/** Dynamic-segment contact rows for either filter_json shape — see this file's header. */
+async function resolveDynamicContacts(client, tenantId, segment, { requirePhone, limit }) {
+  let query = scoped(client, tenantId, 'contacts').select(CONTACT_FIELDS);
+  if (isV2Filter(segment.filter_json)) {
+    const fragment = await compileFilterTree(client, tenantId, segment.filter_json.root);
+    query = query.or(fragment);
+  } else {
+    query = applyFilter(query, segment.filter_json);
+  }
+  if (requirePhone) query = query.not('phone', 'is', null);
+  query = query.limit(limit);
+  const { data, error } = await query;
+  if (error) throw error;
+  return data || [];
+}
+
+async function resolveContactsForSegment(client, tenantId, segment, opts) {
+  return segment.segment_type === 'static' ? resolveStaticMembers(client, tenantId, segment.id, opts) : resolveDynamicContacts(client, tenantId, segment, opts);
+}
 
 /**
  * `consentChannel`, when passed, filters out contacts who are globally
@@ -51,14 +90,7 @@ async function resolveSegmentContacts(client, tenantId, segmentId, { requirePhon
   const segment = await getSegment(client, tenantId, segmentId);
   if (!segment) return { segment: null, contacts: [], suppressedCount: 0 };
 
-  let query = scoped(client, tenantId, 'contacts').select(CONTACT_FIELDS);
-  query = applyFilter(query, segment.filter_json);
-  if (requirePhone) query = query.not('phone', 'is', null);
-  query = query.limit(limit);
-
-  const { data, error } = await query;
-  if (error) throw error;
-  let contacts = data || [];
+  let contacts = await resolveContactsForSegment(client, tenantId, segment, { requirePhone, limit });
   let suppressedCount = 0;
   let suppressed = [];
   if (consentChannel) {
@@ -88,17 +120,29 @@ async function countSegment(client, tenantId, segmentId, { requirePhone = false,
   const segment = await getSegment(client, tenantId, segmentId);
   if (!segment) return { segment: null, count: 0 };
 
-  if (consentChannel) {
-    // Consent-aware preview needs the actual rows to filter against the
-    // suppression/consent tables — this is still a single bounded query
-    // (capped at MAX_SEGMENT_CONTACTS) plus the fixed 3 queries
-    // filterConsentedContacts makes, not N+1 against the audience size.
+  // A consent-aware count, or any static-list count that also needs a
+  // phone filter, needs the actual rows to check against — still a
+  // single bounded query (capped at MAX_SEGMENT_CONTACTS) plus, for a
+  // consent check, the fixed 3 queries filterConsentedContacts makes;
+  // never N+1 against the audience size.
+  if (consentChannel || (segment.segment_type === 'static' && requirePhone)) {
     const { contacts, suppressedCount } = await resolveSegmentContacts(client, tenantId, segmentId, { requirePhone, consentChannel });
     return { segment, count: contacts.length, suppressedCount };
   }
 
+  if (segment.segment_type === 'static') {
+    const { count, error } = await scoped(client, tenantId, 'segment_members').select('id', { count: 'exact', head: true }).eq('segment_id', segmentId);
+    if (error) throw error;
+    return { segment, count: count || 0 };
+  }
+
   let query = scoped(client, tenantId, 'contacts').select('id', { count: 'exact', head: true });
-  query = applyFilter(query, segment.filter_json);
+  if (isV2Filter(segment.filter_json)) {
+    const fragment = await compileFilterTree(client, tenantId, segment.filter_json.root);
+    query = query.or(fragment);
+  } else {
+    query = applyFilter(query, segment.filter_json);
+  }
   if (requirePhone) query = query.not('phone', 'is', null);
 
   const { count, error } = await query;

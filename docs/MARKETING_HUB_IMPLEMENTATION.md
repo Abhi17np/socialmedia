@@ -224,6 +224,120 @@ to be worth anything.
 
 ---
 
+## 2026-10-14 — Phase 2: Segmentation upgrade
+
+**Status: LIVE** (pure app DB + logic, no external credentials; verified
+against the same real local Postgres/PostgREST/Redis stack).
+
+**Files added:**
+- `backend/migrations/026_segmentation.sql` — `contacts.lifecycle_stage`
+  (subscriber/lead/mql/sql/opportunity/customer/evangelist/other, the
+  standard lifecycle vocabulary from the benchmark research),
+  `audience_segments.segment_type` ('dynamic' default / 'static'),
+  `segment_members` (static-list membership).
+- `backend/lib/segmentCompiler.js` — compiles an AND/OR condition tree
+  into **one** PostgREST filter string executed as a single `contacts`
+  query. Native fields (tags, lead_status, lifecycle_stage, lead_score,
+  email/phone presence, owner/company, created_at, display_name, global
+  opt-out) translate directly into the query's predicate. Cross-table
+  fields (channel identity, consent status, deal stage/status/amount/has-
+  open-deal) are pre-resolved to a small, bounded contact-id set (bounded
+  by how many matching deals/identities/consent rows exist, never by
+  total contact count) and folded into the same final query as an
+  `id.in.(...)`/`id.not.in.(...)` leaf — no N+1, no full-table scan, no
+  pulling the whole audience into Node to filter in JS.
+- `backend/test/segmentCompiler.test.js` — 14 pure-logic unit tests (tree
+  validation, every native-field PostgREST fragment, value escaping) with
+  no DB dependency, run by `npm test`.
+- `backend/scripts/integration-tests/marketing-segmentation.js` — 10
+  assertions against the real stack: a genuine nested AND/OR tree
+  resolves to exactly the right contact among 4 candidates; a
+  channel-identity condition and a deal-based condition (`has_open_deal`)
+  both resolve correctly via their small side-queries; an invalid field
+  name 400s cleanly instead of crashing; a **pre-Phase-2 legacy-shape
+  segment still resolves identically** (backward compatibility actually
+  exercised, not assumed); static-list add/remove/preview all verified
+  against real `segment_members` rows.
+- `frontend/src/marketing/SegmentRuleBuilder.jsx` — a two-level AND/OR
+  rule builder (top level combines groups, each group combines its own
+  conditions) covering every field the backend supports except
+  `deal_stage_id` (would need a pipeline/stage picker fetch; scoped out
+  to keep this slice finishable, still reachable directly via the API).
+
+**Files changed:**
+- `backend/lib/audience.js` — `resolveSegmentContacts`/
+  `resolveExplicitContacts`/`countSegment` now detect `segment_type`
+  (static → `segment_members` join) and `filter_json`'s shape (v2 tree →
+  `segmentCompiler`, v1 flat → the original, completely untouched
+  `applyFilter`), so every existing caller (WhatsApp send, Marketing Hub
+  campaigns) gets both upgrades for free.
+- `backend/routes/whatsapp.js` — segment create/update validates a v2
+  tree with `segmentCompiler.validateTree()` before it's ever persisted
+  (a bad field/operator 400s immediately, not at the next send attempt);
+  new static-list membership routes; `/segments/:id/preview` gained an
+  optional `?channel=` so the segment-builder UI can get a plain or
+  channel-specific count without assuming WhatsApp.
+- `backend/routes/marketing.js` — new `GET /marketing/contacts/search`
+  (lightweight contact lookup for the static-list member picker, gated by
+  `requireHub('marketing')` only, not Sales Hub, since contacts are the
+  shared unified spine, not a Sales Hub concept).
+- `backend/lib/schemas.js` — recursive zod schema for the v2 tree shape
+  (general shape only; `segmentCompiler.validateTree()` owns the actual
+  field/operator semantics, same division of labor as every other
+  `validate()` + route-level check pair in this codebase).
+- `frontend/src/whatsapp/WhatsAppHub.jsx`'s `SegmentsTab` — segment type
+  toggle, the new rule builder for dynamic segments, a "Manage members"
+  drawer (search → add → remove) for static lists, suppressed-count
+  shown alongside the eligible count.
+
+**Tests run:** `npm test` (51/51, up from 37 — 14 new pure-logic
+segment-compiler tests), `marketing-routes.js`, `whatsapp-routes.js`,
+`marketing-consent.js`, `marketing-segmentation.js` (new, 10/10),
+`sales-concurrency.js`, `sales-routes.js` — all green against the real
+local stack. Frontend `eslint .` clean; `next build` compiles the new
+code successfully (the **pre-existing** `/analytics` prerender failure
+from Phase 1's notes is unchanged — still not introduced by this round,
+and still not fixed: tracing it further showed the root cause is
+`app/(app)/layout.jsx` itself calling `useSearchParams()` with no
+Suspense boundary, which is the shared shell for every page in the app,
+not something scoped to Marketing Hub — fixing it safely needs
+regression-testing Sales Hub, Social Hub and Billing's pages too, not
+just Marketing Hub's, so it's left flagged rather than attempted
+mid-slice).
+
+**Decision recorded:** behavioral-event segment fields (opened email,
+clicked link, replied on WhatsApp, visited a page, submitted a form) are
+not exposed in the v2 field registry yet, even as a stub — see the gap
+matrix (A1) for why: Phase 3/5 haven't created the underlying event
+tables, and a condition that can never match real data is worse than no
+condition at all (looks supported, silently returns nothing). The field
+registry is additive by design — adding `email_opened_count` etc. once
+Phase 3 exists is a new `CROSS_RESOLVERS` entry, not a redesign.
+
+**Known gaps carried forward:**
+- No bulk CSV import into a static list — only one-at-a-time add via the
+  search picker. The brief's "+ import" for module A2 is partially
+  unaddressed; worth revisiting if/when list-building volume makes
+  one-at-a-time impractical.
+- `deal_stage_id` has no UI picker (needs a pipeline/stage fetch the
+  builder doesn't do yet) — backend-complete, frontend gap, same pattern
+  as `assign_owner` from Phase 0's audit.
+- The rule builder is two levels deep (groups of conditions, not
+  arbitrarily nested groups-of-groups) — the backend has no such limit;
+  this is a UI scope decision, not a backend one.
+
+**Phase 2 self-assessment:** the compiler design (single compiled query +
+small bounded side-queries, never N+1/full-scan) is the piece I'm most
+confident is production-grade — it was built and tested against real
+cross-table data (deals, contact_identities, contact_consents), not just
+the happy path of contacts-native fields. Weakest part: the UI's
+two-level cap and missing deal-stage picker are real, if minor, scope
+cuts. Tech debt: none knowingly introduced. What I'd attack next: Phase 3
+(email), since segments now have enough real targeting power to be worth
+sending something to.
+
+---
+
 ## 2026-10-14 — Phase 0 remaining/blocked carried forward
 
 **Remaining/Blocked (credential- or infra-blocked, not code gaps):**

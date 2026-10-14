@@ -166,6 +166,22 @@ router.patch('/marketing/contacts/:id/consent', requireHub('marketing'), require
   res.json(summary);
 }));
 
+// Lightweight contact lookup for the static-list member picker — gated
+// only by requireHub('marketing'), not Sales Hub, since contacts are the
+// shared unified-contact spine (contacts/contact_identities), not a
+// Sales Hub-only concept, and a tenant can have Marketing Hub without
+// Sales Hub enabled.
+router.get('/marketing/contacts/search', requireHub('marketing'), asyncHandler(async (req, res) => {
+  const client = requireSocialClient(res);
+  if (!client) return;
+  const q = (req.query.q || '').trim().replace(/[%,]/g, '');
+  if (!q) return res.json({ contacts: [] });
+  const { data, error } = await scoped(client, req.tenantId, 'contacts')
+    .select('id, display_name, phone, email').or(`display_name.ilike.%${q}%,phone.ilike.%${q}%,email.ilike.%${q}%`).limit(20);
+  if (error) throw error;
+  res.json({ contacts: data || [] });
+}));
+
 router.patch('/marketing/contacts/:id/global-opt-out', requireHub('marketing'), requireRole('admin'), asyncHandler(async (req, res) => {
   const client = requireSocialClient(res);
   if (!client) return;

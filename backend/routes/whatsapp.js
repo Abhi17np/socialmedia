@@ -42,8 +42,9 @@ const { getTenantPlan, currentUsage } = require('../lib/entitlements');
 const { limitsFor } = require('../lib/plans');
 const { resolveSegmentContacts, resolveExplicitContacts, countSegment } = require('../lib/audience');
 const { filterConsentedContacts } = require('../lib/consent');
+const { validateTree, isV2Filter, SegmentValidationError } = require('../lib/segmentCompiler');
 const broadcastQueue = require('../social/broadcastQueue');
-const { templateSchema, segmentSchema, whatsappCampaignSchema } = require('../lib/schemas');
+const { templateSchema, segmentSchema, segmentMembersSchema, whatsappCampaignSchema } = require('../lib/schemas');
 
 const router = express.Router();
 
@@ -178,11 +179,32 @@ router.get('/whatsapp/segments', asyncHandler(async (req, res) => {
   res.json({ segments: data });
 }));
 
+// A v2 filter tree's exact (field, operator, value) validity can't be
+// expressed in zod alone (lib/segmentCompiler.js owns the full field/
+// operator registry) — this runs after validate(segmentSchema) confirms
+// the general shape, and turns a bad tree into the same 400 style every
+// other validation failure in this app uses, not an unhandled throw.
+function validateSegmentFilter(req, res) {
+  if (!isV2Filter(req.body.filter)) return true;
+  try {
+    validateTree(req.body.filter.root);
+    return true;
+  } catch (err) {
+    if (err instanceof SegmentValidationError) {
+      res.status(400).json({ error: err.message });
+      return false;
+    }
+    throw err;
+  }
+}
+
 router.post('/whatsapp/segments', requireRole('member'), validate(segmentSchema), asyncHandler(async (req, res) => {
   const client = requireSocialClient(res);
   if (!client) return;
+  if (!validateSegmentFilter(req, res)) return;
   const { data, error } = await client.from('audience_segments').insert({
-    tenant_id: req.tenantId, name: req.body.name, description: req.body.description || null, filter_json: req.body.filter, created_by: req.userId
+    tenant_id: req.tenantId, name: req.body.name, description: req.body.description || null,
+    segment_type: req.body.segmentType, filter_json: req.body.filter, created_by: req.userId
   }).select('*').single();
   if (error) throw error;
   res.status(201).json({ segment: data });
@@ -191,8 +213,10 @@ router.post('/whatsapp/segments', requireRole('member'), validate(segmentSchema)
 router.patch('/whatsapp/segments/:id', requireRole('member'), validate(segmentSchema), asyncHandler(async (req, res) => {
   const client = requireSocialClient(res);
   if (!client) return;
+  if (!validateSegmentFilter(req, res)) return;
   const { data, error } = await scoped(client, req.tenantId, 'audience_segments').update({
-    name: req.body.name, description: req.body.description || null, filter_json: req.body.filter, updated_at: new Date().toISOString()
+    name: req.body.name, description: req.body.description || null, segment_type: req.body.segmentType,
+    filter_json: req.body.filter, updated_at: new Date().toISOString()
   }).eq('id', req.params.id).select('*').single();
   if (error || !data) return res.status(404).json({ error: 'Segment not found.' });
   res.json({ segment: data });
@@ -206,12 +230,50 @@ router.delete('/whatsapp/segments/:id', requireRole('admin'), asyncHandler(async
   res.json({ success: true });
 }));
 
+// Static-list membership — dynamic segments have nothing to manage here
+// (filter_json is the only source of truth for those); a static segment's
+// membership is these rows, added/removed explicitly or via import.
+router.post('/whatsapp/segments/:id/members', requireRole('member'), validate(segmentMembersSchema), asyncHandler(async (req, res) => {
+  const client = requireSocialClient(res);
+  if (!client) return;
+  const { data: segment } = await scoped(client, req.tenantId, 'audience_segments').select('id, segment_type').eq('id', req.params.id).maybeSingle();
+  if (!segment) return res.status(404).json({ error: 'Segment not found.' });
+  if (segment.segment_type !== 'static') return res.status(400).json({ error: 'Only a static list has members to add — a dynamic segment is defined entirely by its filter.' });
+
+  const { data: validContacts, error: cErr } = await scoped(client, req.tenantId, 'contacts').select('id').in('id', req.body.contactIds);
+  if (cErr) throw cErr;
+  const validIds = (validContacts || []).map((c) => c.id);
+  if (validIds.length === 0) return res.status(400).json({ error: 'None of the given contact ids belong to this tenant.' });
+
+  const { error } = await client.from('segment_members').upsert(
+    validIds.map((contactId) => ({ tenant_id: req.tenantId, segment_id: segment.id, contact_id: contactId, added_by: req.userId })),
+    { onConflict: 'segment_id,contact_id', ignoreDuplicates: true }
+  );
+  if (error) throw error;
+  res.status(201).json({ added: validIds.length, skipped: req.body.contactIds.length - validIds.length });
+}));
+
+router.delete('/whatsapp/segments/:id/members/:contactId', requireRole('member'), asyncHandler(async (req, res) => {
+  const client = requireSocialClient(res);
+  if (!client) return;
+  const { error } = await scoped(client, req.tenantId, 'segment_members').delete().eq('segment_id', req.params.id).eq('contact_id', req.params.contactId);
+  if (error) throw error;
+  res.json({ success: true });
+}));
+
 router.get('/whatsapp/segments/:id/preview', asyncHandler(async (req, res) => {
   const client = requireSocialClient(res);
   if (!client) return;
-  const { segment, count, suppressedCount } = await countSegment(client, req.tenantId, req.params.id, { requirePhone: true, consentChannel: 'whatsapp' });
+  // No ?channel param: the original, WhatsApp-specific preview (phone
+  // required, whatsapp consent applied) — kept as the default so
+  // WhatsAppHub.jsx's existing call sites are unaffected. The segment
+  // builder UI (any channel, or none yet picked) passes ?channel= to get
+  // a plain or channel-specific count instead.
+  const channel = ['email', 'whatsapp', 'sms'].includes(req.query.channel) ? req.query.channel : undefined;
+  const requirePhone = req.query.channel === undefined ? true : channel === 'whatsapp' || channel === 'sms';
+  const { segment, count, suppressedCount } = await countSegment(client, req.tenantId, req.params.id, { requirePhone, consentChannel: channel || (req.query.channel === undefined ? 'whatsapp' : null) });
   if (!segment) return res.status(404).json({ error: 'Segment not found.' });
-  res.json({ segment, whatsappEligibleCount: count, suppressedCount: suppressedCount || 0 });
+  res.json({ segment, whatsappEligibleCount: count, eligibleCount: count, suppressedCount: suppressedCount || 0 });
 }));
 
 // -------------------------------------------------------------
