@@ -515,6 +515,29 @@ const emailCampaignSchema = z.object({
 
 const emailSendTestSchema = z.object({ to: z.string().trim().email() });
 
+// -------------------------------------------------------------------- SMS
+
+const SMS_PROVIDERS = ['mock', 'twilio', 'msg91'];
+
+const smsConnectionSchema = z.object({
+  provider: z.enum(SMS_PROVIDERS),
+  fromNumber: z.string().trim().min(1).max(20),
+  config: z.object({
+    accountSid: z.string().trim().max(255).optional(),      // twilio
+    dltEntityId: z.string().trim().max(255).optional(),     // msg91 / India TRAI DLT
+    dltTemplateId: z.string().trim().max(255).optional()
+  }).optional().default({}),
+  secret: z.string().trim().max(2000).optional() // auth token / API key — write-only, never read back
+}).refine(v => v.provider !== 'twilio' || v.config.accountSid, { message: 'Twilio needs config.accountSid.', path: ['config'] })
+  .refine(v => v.provider !== 'msg91' || (v.config.dltEntityId && v.config.dltTemplateId), { message: 'MSG91 needs config.dltEntityId and config.dltTemplateId (India TRAI DLT registration).', path: ['config'] });
+
+const smsCampaignSchema = z.object({
+  name: z.string().trim().min(1).max(200),
+  body: z.string().trim().min(1).max(1600), // ~10 concatenated SMS segments
+  segmentId: z.string().uuid(),
+  version: z.number().int().optional()
+});
+
 // --------------------------------------------------------------- Journeys
 
 // A node/edge's exact field validity (which actionType config fields are
@@ -597,6 +620,7 @@ module.exports = {
   marketingCampaignSchema, automationRuleSchema,
   preferenceUpdateSchema, suppressionCreateSchema, contactConsentUpdateSchema, CONSENT_CHANNELS, SUPPRESSION_REASONS,
   emailConnectionSchema, emailDomainSchema, emailTemplateSchema, emailCampaignSchema, emailSendTestSchema, EMAIL_PROVIDERS, EMAIL_BLOCK_TYPES,
+  smsConnectionSchema, smsCampaignSchema, SMS_PROVIDERS,
   journeySchema, journeyEnrollSchema, JOURNEY_TRIGGER_TYPES,
   leadFormSchema, leadFormFieldSchema
 };

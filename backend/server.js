@@ -19,6 +19,7 @@ const salesRoutes = require('./routes/sales');
 const salesEmailRoutes = require('./routes/salesEmail');
 const marketingRoutes = require('./routes/marketing');
 const marketingEmailRoutes = require('./routes/marketingEmail');
+const marketingSmsRoutes = require('./routes/marketingSms');
 const journeysRoutes = require('./routes/journeys');
 const leadFormsRoutes = require('./routes/leadForms');
 const attributionRoutes = require('./routes/attribution');
@@ -26,6 +27,7 @@ const socialScheduler = require('./social/scheduler');
 const socialPollers = require('./social/pollers');
 const broadcastQueue = require('./social/broadcastQueue');
 const emailQueue = require('./lib/email/emailQueue');
+const smsQueue = require('./lib/sms/smsQueue');
 const scheduledSendSweep = require('./lib/email/scheduledSendSweep');
 const journeySweep = require('./lib/journeySweep');
 const sequenceScheduler = require('./lib/sequenceScheduler');
@@ -113,6 +115,7 @@ tenantRouter.use(salesRoutes);
 tenantRouter.use(salesEmailRoutes.protectedRouter);
 tenantRouter.use(marketingRoutes.protectedRouter);
 tenantRouter.use(marketingEmailRoutes.router);
+tenantRouter.use(marketingSmsRoutes);
 tenantRouter.use(journeysRoutes);
 tenantRouter.use(leadFormsRoutes.router);
 tenantRouter.use(attributionRoutes);
@@ -156,6 +159,7 @@ if (require.main === module) {
     socialPollers.start();
     broadcastQueue.start();
     emailQueue.start();
+    smsQueue.start();
     scheduledSendSweep.start();
     journeySweep.start();
     sequenceScheduler.start();
@@ -188,6 +192,7 @@ if (require.main === module) {
       await socialScheduler.stop();   // sweep interval, then BullMQ worker/queue and Redis
       await broadcastQueue.stop();    // the WhatsApp broadcast worker/queue and its own Redis connection
       await emailQueue.stop();        // the marketing email worker/queue and its own Redis connection
+      await smsQueue.stop();          // the marketing SMS worker/queue and its own Redis connection
       scheduledSendSweep.stop();      // the scheduled-email-campaign sweep interval
       journeySweep.stop();            // the journey delay-resume sweep interval
       sequenceScheduler.stop();       // the Sales Hub sequence sweep interval

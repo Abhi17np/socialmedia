@@ -24,6 +24,8 @@ const { filterConsentedContacts } = require('./consent');
 const { renderEmailForRecipient } = require('./email/sendPipeline');
 const emailQueue = require('./email/emailQueue');
 const broadcastQueue = require('../social/broadcastQueue');
+const smsQueue = require('./sms/smsQueue');
+const { applyMergeTags, mergeContextFromContact } = require('./emailRenderer');
 
 async function addTag(client, tenantId, config, { contact }) {
   if (!config.tag) throw new Error('add_tag requires a tag.');
@@ -143,6 +145,35 @@ async function sendWhatsapp(client, tenantId, config, { contact }) {
   return { campaignId: campaign.id, recipientId: recipient.id };
 }
 
+// The "multichannel fallback" half of Phase 7: NOT a separate primitive
+// — a tenant composes send_whatsapp -> delay -> condition(on
+// delivery/read) -> send_sms using the exact condition/delay nodes
+// Phase 4 already built, falling back to SMS only when WhatsApp didn't
+// land. See docs/MARKETING_HUB_IMPLEMENTATION.md's Phase 7 entry.
+async function sendSms(client, tenantId, config, { contact }) {
+  if (!config.body) throw new Error('send_sms requires a body.');
+  if (!contact.phone) return { skipped: 'no_phone' };
+  const { allowed } = await filterConsentedContacts(client, tenantId, [contact], 'sms');
+  if (allowed.length === 0) return { skipped: 'suppressed_or_opted_out' };
+
+  const body = applyMergeTags(config.body, mergeContextFromContact(contact));
+  // A lightweight synthetic campaign row, same reasoning as sendEmail's
+  // above: one contact, not a batch, but still visible in reporting
+  // through the same sms_campaigns/sms_campaign_recipients tables a bulk
+  // send uses — no parallel tracking mechanism just for journey sends.
+  const { data: campaign, error: campErr } = await client.from('sms_campaigns').insert({
+    tenant_id: tenantId, name: 'Journey SMS', body, status: 'sending', total_recipients: 1
+  }).select('id').single();
+  if (campErr) throw campErr;
+  const { data: recipient, error: recErr } = await client.from('sms_campaign_recipients').insert({
+    tenant_id: tenantId, campaign_id: campaign.id, contact_id: contact.id, phone: contact.phone
+  }).select('id').single();
+  if (recErr) throw recErr;
+
+  await smsQueue.enqueueCampaign({ id: campaign.id, tenant_id: tenantId }, [{ id: recipient.id, phone: contact.phone }], new Map([[recipient.id, body]]));
+  return { campaignId: campaign.id, recipientId: recipient.id };
+}
+
 const ACTION_EXECUTORS = {
   add_tag: addTag,
   remove_tag: removeTag,
@@ -152,7 +183,8 @@ const ACTION_EXECUTORS = {
   create_deal: createDeal,
   move_deal_stage: moveDealStage,
   send_email: sendEmail,
-  send_whatsapp: sendWhatsapp
+  send_whatsapp: sendWhatsapp,
+  send_sms: sendSms
 };
 
 module.exports = { ACTION_EXECUTORS };

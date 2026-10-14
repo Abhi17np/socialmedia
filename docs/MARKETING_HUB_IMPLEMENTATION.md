@@ -581,3 +581,26 @@ sending something to.
 **Phase 6 self-assessment:** this phase caught more of its own real bugs before they could reach the integration test than any prior phase — a circular-dependency hazard found via a deliberate require-order smoke test, and an inverted lifecycle-promotion guard caught by a unit test written specifically to probe the trap, both before the expensive, slower integration test ever ran against them. That ordering (cheap pure tests first, specifically targeting the sharp edges of the logic, not just its happy path) is the discipline this whole build's testing bar has been pushing toward since Phase 0, and this phase is the clearest example of it paying off. What I'd attack next: Phase 7 (SMS + multichannel fallback), which reuses Phase 3's provider-abstraction pattern and Phase 1's consent model on a channel this attribution engine is already structurally ready to include.
 
 ---
+
+## 2026-10-14 — Phase 7: SMS + multichannel fallback
+
+**Status by piece:**
+- SMS channel: **LIVE** for the provider-abstraction/consent/queue/metering pipeline (verified against the real mock provider end to end). **WORKS WITH MOCK PROVIDER** for Twilio/MSG91 — implemented against each provider's documented REST API (Twilio Messages API, MSG91 Flow API incl. India TRAI DLT fields), no real account/credentials available in this environment to verify against, same honesty posture as Phase 3's SendGrid/Resend entry.
+- `send_sms` journey action: **LIVE** — consent-gated, merge tags applied, verified by actually enrolling a contact and watching a real SMS campaign row get created and sent through the mock provider.
+- Multichannel fallback: **LIVE as a composition pattern**, not a new primitive — a tenant can already build `send_whatsapp -> delay -> condition -> send_sms` with Phase 4's existing journey nodes. See scope decision below for the one real limitation (no delivery-status condition field yet).
+- Frontend: **LIVE** — a new "SMS" tab (connection settings incl. provider-specific fields, campaign list/create/send/cancel/detail), same shape as Email's.
+
+**Files added:** `backend/migrations/031_sms.sql` (connections, campaigns, recipients, `recompute_sms_campaign_counts`, `usage_counters.sms_sends`); `backend/lib/sms/providers/{mock,twilio,msg91}.js`, `providerRegistry.js`, `smsQueue.js`, `campaignSender.js`; `backend/routes/marketingSms.js`; `backend/scripts/integration-tests/marketing-sms.js` (10 assertions: connection CRUD/role-gating, a real consent-gated send through the mock provider with one permanent failure, auto-suppression, usage metering, the `send_sms` journey action with merge tags, cross-tenant isolation); `frontend/src/marketing/SmsSection.jsx`.
+
+**Files changed:** `backend/lib/journeyActions.js` (`send_sms` executor, reusing `lib/emailRenderer.js`'s `applyMergeTags`/`mergeContextFromContact` as-is — SMS is plain text, no reason to re-invent merge-tag substitution); `backend/lib/plans.js`/`entitlements.js` (`smsSendsPerMonth`); `backend/lib/schemas.js` (`smsConnectionSchema`, `smsCampaignSchema`); `backend/server.js`, `backend/package.json`; `frontend/src/marketing/MarketingHub.jsx`/`MarketingNav.jsx`.
+
+**Scope decisions:**
+1. **No new "fallback campaign" object.** A tenant composes multichannel fallback from Phase 4's existing journey primitives (delay, condition, action nodes) — building a second, parallel "campaign with fallback rules" concept would duplicate the journey engine for no real benefit.
+2. **No delivery-status condition field yet.** A *true* "only SMS if WhatsApp wasn't delivered" condition needs `lib/journeyGraph.js`'s `evaluateCondition()` to see delivery state, which today only evaluates static contact fields (by design — pure, synchronous, no DB access). Threading per-tick send-result state into condition evaluation is a real, scoped-out change; today's composition sends both channels unconditionally rather than truly conditionally. Named explicitly here rather than overclaimed.
+3. **No dedicated unit-test file.** SMS's only new pure logic (merge-tag substitution) is reused unchanged from `lib/emailRenderer.js`, already unit-tested there — a second test file would just re-test the same function.
+
+**Tests run:** `npm test`: **121/121** (unchanged — no new pure logic). `npm run test:integration`: **21/21 scripts green** (new: `marketing-sms.js`, 10/10, re-run twice for determinism). `npm run test:all`: **exit 0**. Frontend `eslint .` clean; `next build` compiles (same pre-existing `/account` Suspense issue, untouched). **Visual verification**: lint + build only this round, not a full Playwright browser pass — an explicit, requested time-saving tradeoff for this phase, not an oversight; the UI reuses Email's/Journeys' already-visually-verified component patterns (`Panel`/`PanelHeader`/`Table`/`Modal`/`Drawer` with no new layout shapes), so the residual risk is low but real, and worth a manual look before relying on this tab in a live demo.
+
+**Known gaps:** Twilio/MSG91 need real credentials to move past "code-complete" (same posture as every other un-credentialed provider in this build). No delivery-status journey condition (scope decision #2). India DLT template/entity *registration* itself (an offline, provider-side process) is out of scope — only the fields a registered template needs are wired.
+
+---

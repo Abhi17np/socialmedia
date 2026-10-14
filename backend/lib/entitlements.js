@@ -14,7 +14,8 @@ const USAGE_COLUMN = {
   whatsappMessagesPerMonth: 'whatsapp_messages',
   aiGenerationsPerMonth: 'ai_generations',
   whatsappBroadcastSendsPerMonth: 'whatsapp_broadcast_sends',
-  emailSendsPerMonth: 'email_sends'
+  emailSendsPerMonth: 'email_sends',
+  smsSendsPerMonth: 'sms_sends'
 };
 
 function currentPeriod() {
