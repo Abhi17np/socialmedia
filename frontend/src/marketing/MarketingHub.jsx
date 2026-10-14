@@ -16,6 +16,7 @@ import EmailTab from './EmailTab';
 import JourneysSection from './JourneysSection';
 import FormsSection from './FormsSection';
 import SmsSection from './SmsSection';
+import OverviewSection from './OverviewSection';
 import AttributionSection from './AttributionSection';
 
 const MKT_API_BASE = `${API_BASE}/marketing`;
@@ -74,6 +75,7 @@ function MarketingHubInner({ authFetch, role }) {
         {tab === 'campaigns' && <CampaignsTab authFetch={authFetch} canManage={canManage} canAdmin={canAdmin} />}
         {tab === 'forms' && <FormsSection authFetch={authFetch} canManage={canManage} canAdmin={canAdmin} />}
         {tab === 'sms' && <SmsSection authFetch={authFetch} canManage={canManage} canAdmin={canAdmin} />}
+        {tab === 'overview' && <OverviewSection authFetch={authFetch} canAdmin={canAdmin} />}
         {tab === 'attribution' && <AttributionSection authFetch={authFetch} canAdmin={canAdmin} />}
         {tab === 'journeys' && <JourneysSection authFetch={authFetch} canManage={canManage} canAdmin={canAdmin} />}
         {tab === 'automation' && <AutomationTab authFetch={authFetch} canAdmin={canAdmin} />}

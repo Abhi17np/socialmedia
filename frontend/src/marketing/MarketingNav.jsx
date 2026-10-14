@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { usePathname, useSearchParams } from 'next/navigation';
-import { Megaphone, Zap, ShieldCheck, Mail, Workflow, FileText, TrendingUp, MessageSquare } from 'lucide-react';
+import { Megaphone, Zap, ShieldCheck, Mail, Workflow, FileText, TrendingUp, MessageSquare, LayoutDashboard } from 'lucide-react';
 import { atLeast } from '../roleRank';
 
 // Marketing Hub's own sidebar — see SalesNav.jsx's header comment for
@@ -10,6 +10,7 @@ import { atLeast } from '../roleRank';
 // Exported so the mobile bottom tab bar (app/(app)/layout.jsx) can
 // reuse the same list — see SalesNav.jsx's ITEMS export comment.
 export const ITEMS = [
+  { tab: 'overview', icon: LayoutDashboard, label: 'Overview', minRole: 'viewer' },
   { tab: 'campaigns', icon: Megaphone, label: 'Campaigns', minRole: 'viewer' },
   { tab: 'email', icon: Mail, label: 'Email', minRole: 'viewer' },
   { tab: 'sms', icon: MessageSquare, label: 'SMS', minRole: 'viewer' },
