@@ -77,6 +77,7 @@ app.use(API_PREFIX, platformRoutes.publicRouter);
 app.use(API_PREFIX, socialRoutes.publicRouter);
 app.use(API_PREFIX, salesEmailRoutes.publicRouter);
 app.use(API_PREFIX, billingRoutes.publicRouter);
+app.use(API_PREFIX, marketingRoutes.publicRouter);
 
 // requirePlatformAdmin is mounted at the more specific `${API_PREFIX}/platform`
 // path, and registered BEFORE the broader tenant mount below — Express
@@ -101,7 +102,7 @@ tenantRouter.use(teamRoutes);
 tenantRouter.use(whatsappRoutes);
 tenantRouter.use(salesRoutes);
 tenantRouter.use(salesEmailRoutes.protectedRouter);
-tenantRouter.use(marketingRoutes);
+tenantRouter.use(marketingRoutes.protectedRouter);
 // Scoped to '/ai' specifically (not a blanket tenantRouter.use()) so
 // aiLimiter's much tighter cap only governs AI Assist calls, not every
 // route registered after it — the same mounting-order lesson server.js

@@ -25,9 +25,19 @@ const { validate } = require('../middleware/validate');
 const { asyncHandler } = require('../lib/asyncHandler');
 const { recordAudit } = require('../lib/audit');
 const { retryRun } = require('../lib/automation');
-const { marketingCampaignSchema, automationRuleSchema } = require('../lib/schemas');
+const { marketingCampaignSchema, automationRuleSchema, suppressionCreateSchema, contactConsentUpdateSchema, preferenceUpdateSchema } = require('../lib/schemas');
+const { getConsentSummary, upsertConsent, setGlobalOptOut, addSuppression, removeSuppression, findContactByPreferenceToken, CHANNELS: CONSENT_CHANNELS } = require('../lib/consent');
+const rateLimit = require('express-rate-limit');
 
 const router = express.Router();
+const publicRouter = express.Router();
+
+// A recipient's "manage my preferences" link has no login — the token
+// itself (128 bits of randomness, migrations/025) is the access control,
+// same as every ESP's unsubscribe link. Rate-limited to blunt token
+// enumeration/brute-forcing; generous enough for a real visitor retrying
+// a save.
+const preferenceLimiter = rateLimit({ windowMs: 15 * 60 * 1000, limit: 60, standardHeaders: true, legacyHeaders: false, message: { error: 'Too many requests — please try again in a few minutes.' } });
 
 function requireSocialClient(res) {
   const client = getSocialClient();
@@ -37,6 +47,134 @@ function requireSocialClient(res) {
   }
   return client;
 }
+
+// -------------------------------------------------------------
+// Preference center — public, unauthenticated, token-gated (see
+// preferenceLimiter above). Lets a contact who received a marketing
+// email/WhatsApp message manage their own per-channel consent and/or
+// globally unsubscribe, without an account.
+// -------------------------------------------------------------
+
+publicRouter.get('/marketing/preferences/:token', preferenceLimiter, asyncHandler(async (req, res) => {
+  const client = requireSocialClient(res);
+  if (!client) return;
+  const contact = await findContactByPreferenceToken(client, req.params.token);
+  if (!contact) return res.status(404).json({ error: 'This preference link is invalid or has expired.' });
+  const summary = await getConsentSummary(client, contact.tenant_id, contact.id);
+  res.json({ displayName: contact.display_name, email: contact.email, phone: contact.phone, ...summary });
+}));
+
+publicRouter.post('/marketing/preferences/:token', preferenceLimiter, validate(preferenceUpdateSchema), asyncHandler(async (req, res) => {
+  const client = requireSocialClient(res);
+  if (!client) return;
+  const contact = await findContactByPreferenceToken(client, req.params.token);
+  if (!contact) return res.status(404).json({ error: 'This preference link is invalid or has expired.' });
+
+  const { channels, globalOptOut } = req.body;
+  for (const [channel, status] of Object.entries(channels)) {
+    await upsertConsent(client, contact.tenant_id, contact.id, channel, status, { source: 'preference_center' });
+  }
+  if (globalOptOut !== undefined) {
+    await setGlobalOptOut(client, contact.tenant_id, contact.id, globalOptOut);
+    if (globalOptOut) {
+      // A global unsubscribe also suppresses the identifiers outright —
+      // belt-and-braces so a later contact merge/re-import can't silently
+      // resurrect a channel this person explicitly turned off everywhere.
+      if (contact.email) await addSuppression(client, contact.tenant_id, 'email', contact.email, 'global_unsubscribe', { source: 'preference_center' });
+      if (contact.phone) {
+        await addSuppression(client, contact.tenant_id, 'whatsapp', contact.phone, 'global_unsubscribe', { source: 'preference_center' });
+        await addSuppression(client, contact.tenant_id, 'sms', contact.phone, 'global_unsubscribe', { source: 'preference_center' });
+      }
+    }
+  }
+  await recordAudit(client, { tenantId: contact.tenant_id, actorUserId: null, action: 'marketing.preferences_updated_by_contact', targetType: 'contact', targetId: contact.id, metadata: { channels, globalOptOut } });
+
+  const summary = await getConsentSummary(client, contact.tenant_id, contact.id);
+  res.json({ success: true, ...summary });
+}));
+
+// -------------------------------------------------------------
+// Suppression list & per-contact consent (admin-managed side of the
+// same model the preference center and every send-path gate read from —
+// backend/lib/consent.js).
+// -------------------------------------------------------------
+
+function pageParams(req) {
+  const page = Math.max(1, parseInt(req.query.page, 10) || 1);
+  const pageSize = Math.min(200, Math.max(1, parseInt(req.query.pageSize, 10) || 50));
+  return { page, pageSize, from: (page - 1) * pageSize, to: (page - 1) * pageSize + pageSize - 1 };
+}
+
+router.get('/marketing/suppression-list', requireHub('marketing'), asyncHandler(async (req, res) => {
+  const client = requireSocialClient(res);
+  if (!client) return;
+  const { page, pageSize, from, to } = pageParams(req);
+  let query = scoped(client, req.tenantId, 'suppression_list').select('*', { count: 'exact' });
+  if (req.query.channel && CONSENT_CHANNELS.includes(req.query.channel)) query = query.eq('channel', req.query.channel);
+  if (req.query.search) query = query.ilike('identifier', `%${req.query.search.replace(/[%,]/g, '')}%`);
+  query = query.order('created_at', { ascending: false }).range(from, to);
+  const { data, error, count } = await query;
+  if (error) throw error;
+  res.json({ entries: data, page, pageSize, total: count });
+}));
+
+router.post('/marketing/suppression-list', requireHub('marketing'), requireRole('admin'), validate(suppressionCreateSchema), asyncHandler(async (req, res) => {
+  const client = requireSocialClient(res);
+  if (!client) return;
+  const { channel, identifier, reason } = req.body;
+  const entry = await addSuppression(client, req.tenantId, channel, identifier, reason, { source: 'manual', actorUserId: req.userId });
+  await recordAudit(client, { tenantId: req.tenantId, actorUserId: req.userId, action: 'marketing.suppression_added', targetType: 'suppression_list', targetId: entry.id, metadata: { channel, reason } });
+  res.status(201).json({ entry });
+}));
+
+router.delete('/marketing/suppression-list/:id', requireHub('marketing'), requireRole('admin'), asyncHandler(async (req, res) => {
+  const client = requireSocialClient(res);
+  if (!client) return;
+  await removeSuppression(client, req.tenantId, req.params.id);
+  await recordAudit(client, { tenantId: req.tenantId, actorUserId: req.userId, action: 'marketing.suppression_removed', targetType: 'suppression_list', targetId: req.params.id });
+  res.json({ success: true });
+}));
+
+router.get('/marketing/contacts/:id/consent', requireHub('marketing'), asyncHandler(async (req, res) => {
+  const client = requireSocialClient(res);
+  if (!client) return;
+  const summary = await getConsentSummary(client, req.tenantId, req.params.id);
+  if (!summary) return res.status(404).json({ error: 'Contact not found.' });
+  res.json(summary);
+}));
+
+// Manual admin override — e.g. a customer emails support asking to be
+// unsubscribed and support records it here, same as a preference-center
+// self-service update but audit-attributed to the admin, not the contact.
+router.patch('/marketing/contacts/:id/consent', requireHub('marketing'), requireRole('admin'), validate(contactConsentUpdateSchema), asyncHandler(async (req, res) => {
+  const client = requireSocialClient(res);
+  if (!client) return;
+  const { data: contact } = await scoped(client, req.tenantId, 'contacts').select('id').eq('id', req.params.id).maybeSingle();
+  if (!contact) return res.status(404).json({ error: 'Contact not found.' });
+
+  const { channel, status, reason, version } = req.body;
+  const result = await upsertConsent(client, req.tenantId, req.params.id, channel, status, { source: 'manual', reason, expectedVersion: version });
+  if (result && result.conflict) {
+    return res.status(409).json({
+      error: 'This contact\'s consent was changed by someone else since you loaded it. Reload to see the latest version.',
+      code: 'VERSION_CONFLICT', currentVersion: result.currentVersion
+    });
+  }
+  await recordAudit(client, { tenantId: req.tenantId, actorUserId: req.userId, action: 'marketing.contact_consent_updated', targetType: 'contact', targetId: req.params.id, metadata: { channel, status, reason } });
+
+  const summary = await getConsentSummary(client, req.tenantId, req.params.id);
+  res.json(summary);
+}));
+
+router.patch('/marketing/contacts/:id/global-opt-out', requireHub('marketing'), requireRole('admin'), asyncHandler(async (req, res) => {
+  const client = requireSocialClient(res);
+  if (!client) return;
+  const optedOut = !!(req.body && req.body.optedOut);
+  const updated = await setGlobalOptOut(client, req.tenantId, req.params.id, optedOut);
+  if (!updated) return res.status(404).json({ error: 'Contact not found.' });
+  await recordAudit(client, { tenantId: req.tenantId, actorUserId: req.userId, action: 'marketing.contact_global_opt_out_set', targetType: 'contact', targetId: req.params.id, metadata: { optedOut } });
+  res.json({ contact: updated });
+}));
 
 // -------------------------------------------------------------
 // Campaigns
@@ -268,4 +406,4 @@ router.post('/marketing/automation-runs/:id/retry', requireHub('marketing'), req
   res.json({ run: latest });
 }));
 
-module.exports = router;
+module.exports = { publicRouter, protectedRouter: router };

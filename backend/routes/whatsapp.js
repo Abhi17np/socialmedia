@@ -41,6 +41,7 @@ const { recordAudit } = require('../lib/audit');
 const { getTenantPlan, currentUsage } = require('../lib/entitlements');
 const { limitsFor } = require('../lib/plans');
 const { resolveSegmentContacts, resolveExplicitContacts, countSegment } = require('../lib/audience');
+const { filterConsentedContacts } = require('../lib/consent');
 const broadcastQueue = require('../social/broadcastQueue');
 const { templateSchema, segmentSchema, whatsappCampaignSchema } = require('../lib/schemas');
 
@@ -208,9 +209,9 @@ router.delete('/whatsapp/segments/:id', requireRole('admin'), asyncHandler(async
 router.get('/whatsapp/segments/:id/preview', asyncHandler(async (req, res) => {
   const client = requireSocialClient(res);
   if (!client) return;
-  const { segment, count } = await countSegment(client, req.tenantId, req.params.id, { requirePhone: true });
+  const { segment, count, suppressedCount } = await countSegment(client, req.tenantId, req.params.id, { requirePhone: true, consentChannel: 'whatsapp' });
   if (!segment) return res.status(404).json({ error: 'Segment not found.' });
-  res.json({ segment, whatsappEligibleCount: count });
+  res.json({ segment, whatsappEligibleCount: count, suppressedCount: suppressedCount || 0 });
 }));
 
 // -------------------------------------------------------------
@@ -266,7 +267,7 @@ router.post('/whatsapp/campaigns', requireRole('member'), validate(whatsappCampa
   // kept in-memory and resolved again at send time alongside segment_id
   // would silently drop them, so persist them now as pending recipients.
   if (!segmentId && contactIds && contactIds.length > 0) {
-    const contacts = await resolveExplicitContacts(client, req.tenantId, contactIds, { requirePhone: true });
+    const contacts = await resolveExplicitContacts(client, req.tenantId, contactIds, { requirePhone: true, consentChannel: 'whatsapp' });
     if (contacts.length > 0) {
       await client.from('whatsapp_campaign_recipients').insert(contacts.map(c => ({
         tenant_id: req.tenantId, campaign_id: data.id, contact_id: c.id, phone: c.phone
@@ -305,16 +306,49 @@ router.post('/whatsapp/campaigns/:id/send', requireRole('admin'), asyncHandler(a
   }
 
   let recipients;
+  let suppressedContactIds = [];
   if (campaign.segment_id) {
-    const { contacts } = await resolveSegmentContacts(client, req.tenantId, campaign.segment_id, { requirePhone: true });
-    recipients = contacts;
+    // Fresh read against live contact/consent data — authoritative by
+    // construction, nothing further to re-check.
+    const result = await resolveSegmentContacts(client, req.tenantId, campaign.segment_id, { requirePhone: true, consentChannel: 'whatsapp' });
+    recipients = result.contacts;
+    suppressedContactIds = result.suppressed.map((c) => c.id);
   } else {
+    // These rows were snapshotted at campaign-creation time (already
+    // consent-filtered then) and could be stale by send time — re-check
+    // against live consent/suppression data now, since this is the one
+    // place every send ultimately passes through. See lib/consent.js's
+    // header for why this gate can never be skipped.
     const { data: existing, error: existingError } = await scoped(client, req.tenantId, 'whatsapp_campaign_recipients').select('id, contact_id, phone').eq('campaign_id', campaign.id);
     if (existingError) throw existingError;
-    recipients = existing || [];
+    const contactIds = (existing || []).map((r) => r.contact_id).filter(Boolean);
+    const liveContacts = contactIds.length > 0
+      ? (await scoped(client, req.tenantId, 'contacts').select('id, email, phone, global_opt_out_at').in('id', contactIds)).data || []
+      : [];
+    const { allowed, blocked } = await filterConsentedContacts(client, req.tenantId, liveContacts, 'whatsapp');
+    const allowedIds = new Set(allowed.map((c) => c.id));
+    recipients = (existing || []).filter((r) => allowedIds.has(r.contact_id));
+    suppressedContactIds = blocked.map((c) => c.id);
   }
 
-  if (recipients.length === 0) return res.status(400).json({ error: 'This campaign has no eligible recipients (no contact with a phone number matched).' });
+  // Mark any now-suppressed contact's recipient row distinctly so a
+  // stale 'pending' row never gets picked up by the status='pending'
+  // query below (this send attempt or a future resend) and the
+  // per-recipient status table in the UI shows the real reason instead
+  // of "pending" forever.
+  if (suppressedContactIds.length > 0) {
+    await client.from('whatsapp_campaign_recipients')
+      .update({ status: 'suppressed', error: 'Opted out, globally unsubscribed, or on the suppression list as of send time.' })
+      .eq('campaign_id', campaign.id).eq('status', 'pending').in('contact_id', suppressedContactIds);
+  }
+
+  if (recipients.length === 0) {
+    return res.status(400).json(
+      suppressedContactIds.length > 0
+        ? { error: `All ${suppressedContactIds.length} matched contact(s) have opted out of WhatsApp, globally unsubscribed, or are on the suppression list — nothing to send.`, code: 'ALL_RECIPIENTS_SUPPRESSED' }
+        : { error: 'This campaign has no eligible recipients (no contact with a phone number matched).' }
+    );
+  }
 
   // Pre-checked against the whole batch, not just "is at least one send
   // allowed" (assertWithinLimit's usual per-request check) — a campaign
@@ -340,15 +374,20 @@ router.post('/whatsapp/campaigns/:id/send', requireRole('admin'), asyncHandler(a
     if (insertError) throw insertError;
   }
 
-  const { data: recipientRows, error: rowsError } = await scoped(client, req.tenantId, 'whatsapp_campaign_recipients').select('id, phone').eq('campaign_id', campaign.id).eq('status', 'pending');
+  // Scoped to this send's own consented contact_ids, not just
+  // status='pending' for the whole campaign — a defense-in-depth measure
+  // against any other stale pending row (e.g. from an interrupted
+  // earlier attempt) for a contact that isn't in this send's allowed set.
+  const allowedContactIds = recipients.map((r) => r.contact_id || r.id).filter(Boolean);
+  const { data: recipientRows, error: rowsError } = await scoped(client, req.tenantId, 'whatsapp_campaign_recipients').select('id, phone').eq('campaign_id', campaign.id).eq('status', 'pending').in('contact_id', allowedContactIds);
   if (rowsError) throw rowsError;
 
   await client.from('whatsapp_campaigns').update({ status: 'sending', total_recipients: recipientRows.length, updated_at: new Date().toISOString() }).eq('id', campaign.id);
 
   await broadcastQueue.enqueueCampaign(campaign, recipientRows, template);
 
-  await recordAudit(client, { tenantId: req.tenantId, actorUserId: req.userId, action: 'whatsapp.campaign_sent', targetType: 'whatsapp_campaign', targetId: campaign.id, metadata: { recipientCount: recipientRows.length } });
-  res.json({ success: true, queued: recipientRows.length });
+  await recordAudit(client, { tenantId: req.tenantId, actorUserId: req.userId, action: 'whatsapp.campaign_sent', targetType: 'whatsapp_campaign', targetId: campaign.id, metadata: { recipientCount: recipientRows.length, suppressedCount: suppressedContactIds.length } });
+  res.json({ success: true, queued: recipientRows.length, suppressed: suppressedContactIds.length });
 }));
 
 router.post('/whatsapp/campaigns/:id/cancel', requireRole('admin'), asyncHandler(async (req, res) => {

@@ -13,7 +13,7 @@
 const express = require('express');
 const multer = require('multer');
 const { getSocialClient } = require('../social/db');
-const { scoped } = require('../lib/query');
+const { scoped, updateScopedWithVersion } = require('../lib/query');
 const { requireRole, ROLE_RANK } = require('../middleware/tenant');
 const { requireHub } = require('../middleware/hubs');
 const { validate } = require('../middleware/validate');
@@ -1082,24 +1082,6 @@ function sumByCurrency(items, amountOf, currencyOf = (d) => d.currency || 'INR')
 
 function addToCurrencyMap(map, currency, amount) {
   map[currency] = (map[currency] || 0) + amount;
-}
-
-// Optimistic concurrency: a PATCH that includes `version` only applies
-// if the row hasn't moved on since the client loaded it (bump_version()
-// trigger, migration 023). Distinguishes "no such row" (404) from "row
-// exists but someone else changed it first" (409) — the two look
-// identical to a plain `.update().eq('id', id)` once zero rows match,
-// so a second read is needed to tell them apart.
-async function updateScopedWithVersion(client, tenantId, table, id, patch, clientVersion) {
-  let query = scoped(client, tenantId, table).update(patch).eq('id', id);
-  if (clientVersion !== undefined) query = query.eq('version', clientVersion);
-  const { data, error } = await query.select('*').single();
-  if (!error && data) return { data };
-
-  const { data: existing } = await scoped(client, tenantId, table).select('id, version').eq('id', id).maybeSingle();
-  if (!existing) return { notFound: true };
-  if (clientVersion !== undefined && existing.version !== clientVersion) return { conflict: true, currentVersion: existing.version };
-  return { error: error || new Error(`Update to ${table} affected no rows for an unknown reason`) };
 }
 
 router.get('/sales/dashboard', requireHub('sales'), asyncHandler(async (req, res) => {

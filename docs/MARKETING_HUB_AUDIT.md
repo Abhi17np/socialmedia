@@ -195,7 +195,7 @@ brief) · **MISSING** (nothing exists).
 |---|---|---|---|
 | A1 | Dynamic segment rule builder (AND/OR, contact/tag/score/lifecycle/channel/deal/behavioral) | PARTIAL | `audience_segments` + `lib/audience.js` exist but filter shape is tag/hasPhone only — no AND/OR groups, no deal/behavioral/lifecycle fields |
 | A2 | Static lists + import, real-time count preview | PARTIAL | Preview endpoint exists (`/whatsapp/segments/:id/preview`); no static-list concept distinct from dynamic segments; import reuses Sales Hub's contact CSV import, untested for marketing-specific use |
-| A3 | Consent & preference model, server-side enforcement | MISSING | See §3 — highest-priority gap |
+| A3 | Consent & preference model, server-side enforcement | DONE (2026-10-14, Phase 1) | `contact_consents`/`suppression_list`/`global_opt_out_at` (migration 025) + `lib/consent.js`, enforced in `routes/whatsapp.js`'s send path (re-checked live, not just at campaign creation), public preference center, admin suppression-list UI. Verified end to end by `marketing-consent.js` (17/17) — a suppressed/opted-out contact never reaches the real send call. See `MARKETING_HUB_IMPLEMENTATION.md`'s Phase 1 entry. |
 | B. Email Marketing (entire module) | MISSING | No provider abstraction, editor, tracking, compliance, A/B testing, domain mgmt |
 | C1 | WhatsApp unified into Marketing Hub campaigns | DONE | `marketing_campaign_whatsapp` link + rollup, verified live |
 | C2 | SMS channel | MISSING | No code at all |

@@ -3,14 +3,14 @@
 import { Suspense, useEffect, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import {
-  RefreshCw, Plus, Megaphone, Zap, Link2, CalendarDays, MessageCircle
+  RefreshCw, Plus, Megaphone, Zap, Link2, CalendarDays, MessageCircle, ShieldCheck, Trash2
 } from 'lucide-react';
 import { API_BASE } from '../apiBase';
 import { atLeast } from '../roleRank';
 import { Page, PageBar, PageBody } from '../ui/page';
 import {
   Button, IconButton, Panel, PanelHeader, Table, Th, Td, Input, Textarea, Select, Field,
-  Banner, Modal, Drawer, EmptyState, Skeleton, Chip, StatStrip, Stat
+  Banner, Modal, Drawer, EmptyState, Skeleton, Chip, StatStrip, Stat, Pagination, ConfirmDialog
 } from '../ui';
 
 const MKT_API_BASE = `${API_BASE}/marketing`;
@@ -68,6 +68,7 @@ function MarketingHubInner({ authFetch, role }) {
       <PageBody>
         {tab === 'campaigns' && <CampaignsTab authFetch={authFetch} canManage={canManage} canAdmin={canAdmin} />}
         {tab === 'automation' && <AutomationTab authFetch={authFetch} canAdmin={canAdmin} />}
+        {tab === 'audience' && <SuppressionTab authFetch={authFetch} canAdmin={canAdmin} />}
       </PageBody>
     </Page>
   );
@@ -375,6 +376,158 @@ function AutomationTab({ authFetch, canAdmin }) {
           )}
         </div>
       </Drawer>
+    </>
+  );
+}
+
+// ------------------------------------------------------- Consent & suppression
+
+const CHANNEL_LABELS = { email: 'Email', whatsapp: 'WhatsApp', sms: 'SMS' };
+const REASON_LABELS = {
+  hard_bounce: 'Hard bounce', complaint: 'Spam complaint', manual: 'Manual',
+  unsubscribe_link: 'Unsubscribe link', global_unsubscribe: 'Global unsubscribe'
+};
+
+/**
+ * The admin-facing half of backend/lib/consent.js's model — a contact's
+ * own preference-center page (no login, reached from a send's
+ * unsubscribe link) is the self-service half; this is where support/ops
+ * record a suppression manually (e.g. a customer emails asking to be
+ * removed) or review who's been suppressed and why. Every row here is
+ * the exact same data every send path checks server-side before
+ * queueing — see routes/whatsapp.js's /campaigns/:id/send.
+ */
+function SuppressionTab({ authFetch, canAdmin }) {
+  const [entries, setEntries] = useState(null);
+  const [page, setPage] = useState(1);
+  const [total, setTotal] = useState(null);
+  const [channel, setChannel] = useState('');
+  const [search, setSearch] = useState('');
+  const [error, setError] = useState(null);
+  const [open, setOpen] = useState(false);
+  const [form, setForm] = useState({ channel: 'whatsapp', identifier: '', reason: 'manual' });
+  const [pendingDelete, setPendingDelete] = useState(null);
+  const pageSize = 25;
+
+  const load = () => {
+    const params = new URLSearchParams({ page: String(page), pageSize: String(pageSize) });
+    if (channel) params.set('channel', channel);
+    if (search) params.set('search', search);
+    authFetch(`${MKT_API_BASE}/suppression-list?${params}`)
+      .then((r) => r.json())
+      .then((d) => { setEntries(d.entries || []); setTotal(d.total ?? 0); })
+      .catch((e) => setError(e.message));
+  };
+  useEffect(load, [page, channel, search]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const create = async () => {
+    try {
+      const res = await authFetch(`${MKT_API_BASE}/suppression-list`, { method: 'POST', body: JSON.stringify(form) });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Could not add suppression entry.');
+      setOpen(false);
+      setForm({ channel: 'whatsapp', identifier: '', reason: 'manual' });
+      setPage(1);
+      load();
+    } catch (err) {
+      setError(err.message);
+    }
+  };
+
+  const remove = async () => {
+    if (!pendingDelete) return;
+    try {
+      const res = await authFetch(`${MKT_API_BASE}/suppression-list/${pendingDelete.id}`, { method: 'DELETE' });
+      if (!res.ok) { const data = await res.json(); throw new Error(data.error || 'Could not remove entry.'); }
+      setPendingDelete(null);
+      load();
+    } catch (err) {
+      setError(err.message);
+    }
+  };
+
+  return (
+    <>
+      {error && <Banner tone="danger">{error}</Banner>}
+      <Banner tone="info" className="mb-3">
+        Suppressed identifiers are blocked from every send server-side, automatically — this list is for visibility and manual
+        additions, not something a sender needs to check by hand. A contact can also unsubscribe themselves from their own
+        preference-center link.
+      </Banner>
+      <Panel className="overflow-hidden">
+        <PanelHeader
+          title="Suppression list"
+          meta={total !== null ? `${total} total` : undefined}
+          action={
+            <div className="flex items-center gap-2">
+              <Input placeholder="Search identifier…" value={search} onChange={(e) => { setPage(1); setSearch(e.target.value); }} className="h-8 w-44" aria-label="Search suppression list" />
+              <Select value={channel} onChange={(e) => { setPage(1); setChannel(e.target.value); }} className="h-8" aria-label="Filter by channel">
+                <option value="">All channels</option>
+                {Object.entries(CHANNEL_LABELS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+              </Select>
+              <IconButton icon={RefreshCw} label="Refresh" onClick={load} />
+              {canAdmin && <Button size="sm" variant="primary" icon={Plus} onClick={() => setOpen(true)}>Add suppression</Button>}
+            </div>
+          }
+        />
+        {entries === null ? (
+          <div className="p-4 space-y-3"><Skeleton className="h-9" /><Skeleton className="h-9" /></div>
+        ) : entries.length === 0 ? (
+          <EmptyState icon={ShieldCheck} title="Nothing suppressed" description="Hard bounces, spam complaints, global unsubscribes and manual additions will show up here." />
+        ) : (
+          <Table>
+            <thead><tr><Th>Channel</Th><Th>Identifier</Th><Th>Reason</Th><Th>Added</Th>{canAdmin && <Th align="right"> </Th>}</tr></thead>
+            <tbody>
+              {entries.map((e) => (
+                <tr key={e.id} className="hover:bg-canvas transition-colors">
+                  <Td><Chip tone="neutral">{CHANNEL_LABELS[e.channel] || e.channel}</Chip></Td>
+                  <Td><span className="font-mono text-xs">{e.identifier}</span></Td>
+                  <Td>{REASON_LABELS[e.reason] || e.reason}</Td>
+                  <Td>{new Date(e.created_at).toLocaleDateString()}</Td>
+                  {canAdmin && (
+                    <Td align="right">
+                      <IconButton icon={Trash2} label={`Remove suppression for ${e.identifier}`} onClick={() => setPendingDelete(e)} />
+                    </Td>
+                  )}
+                </tr>
+              ))}
+            </tbody>
+          </Table>
+        )}
+        <Pagination page={page} pageSize={pageSize} total={total} onPageChange={setPage} />
+      </Panel>
+
+      <Modal
+        open={open}
+        onClose={() => setOpen(false)}
+        title="Add a manual suppression"
+        footer={<><Button onClick={() => setOpen(false)}>Cancel</Button><Button variant="primary" onClick={create} disabled={!form.identifier.trim()}>Add</Button></>}
+      >
+        <div className="flex flex-col gap-3">
+          <Field label="Channel">
+            <Select value={form.channel} onChange={(e) => setForm({ ...form, channel: e.target.value })}>
+              {Object.entries(CHANNEL_LABELS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+            </Select>
+          </Field>
+          <Field label={form.channel === 'email' ? 'Email address' : 'Phone number'}>
+            <Input value={form.identifier} onChange={(e) => setForm({ ...form, identifier: e.target.value })} placeholder={form.channel === 'email' ? 'name@company.com' : '91XXXXXXXXXX'} autoFocus />
+          </Field>
+          <Field label="Reason">
+            <Select value={form.reason} onChange={(e) => setForm({ ...form, reason: e.target.value })}>
+              {Object.entries(REASON_LABELS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+            </Select>
+          </Field>
+        </div>
+      </Modal>
+
+      <ConfirmDialog
+        open={!!pendingDelete}
+        title="Remove this suppression?"
+        body={pendingDelete ? `${pendingDelete.identifier} will become eligible for ${CHANNEL_LABELS[pendingDelete.channel] || pendingDelete.channel} sends again.` : ''}
+        confirmLabel="Remove"
+        onConfirm={remove}
+        onCancel={() => setPendingDelete(null)}
+      />
     </>
   );
 }

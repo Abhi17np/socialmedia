@@ -57,4 +57,28 @@ function scoped(client, tenantId, table) {
   });
 }
 
-module.exports = { scoped };
+/**
+ * Optimistic concurrency: a PATCH that includes `clientVersion` only
+ * applies if the row hasn't moved on since the client loaded it
+ * (bump_version() trigger, migrations/023_optimistic_concurrency.sql and
+ * migrations/025_consent_preferences.sql for contact_consents).
+ * Distinguishes "no such row" (404) from "row exists but someone else
+ * changed it first" (409) — the two look identical to a plain
+ * `.update().eq('id', id)` once zero rows match, so a second read is
+ * needed to tell them apart. Originally local to routes/sales.js; moved
+ * here once routes/marketing.js needed the exact same shape for
+ * contact_consents rather than duplicating it.
+ */
+async function updateScopedWithVersion(client, tenantId, table, id, patch, clientVersion) {
+  let query = scoped(client, tenantId, table).update(patch).eq('id', id);
+  if (clientVersion !== undefined) query = query.eq('version', clientVersion);
+  const { data, error } = await query.select('*').single();
+  if (!error && data) return { data };
+
+  const { data: existing } = await scoped(client, tenantId, table).select('id, version').eq('id', id).maybeSingle();
+  if (!existing) return { notFound: true };
+  if (clientVersion !== undefined && existing.version !== clientVersion) return { conflict: true, currentVersion: existing.version };
+  return { error: error || new Error(`Update to ${table} affected no rows for an unknown reason`) };
+}
+
+module.exports = { scoped, updateScopedWithVersion };

@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { usePathname, useSearchParams } from 'next/navigation';
-import { Megaphone, Zap } from 'lucide-react';
+import { Megaphone, Zap, ShieldCheck } from 'lucide-react';
 import { atLeast } from '../roleRank';
 
 // Marketing Hub's own sidebar — see SalesNav.jsx's header comment for
@@ -11,7 +11,8 @@ import { atLeast } from '../roleRank';
 // reuse the same list — see SalesNav.jsx's ITEMS export comment.
 export const ITEMS = [
   { tab: 'campaigns', icon: Megaphone, label: 'Campaigns', minRole: 'viewer' },
-  { tab: 'automation', icon: Zap, label: 'Automation', minRole: 'viewer' }
+  { tab: 'automation', icon: Zap, label: 'Automation', minRole: 'viewer' },
+  { tab: 'audience', icon: ShieldCheck, label: 'Consent & Suppression', minRole: 'viewer' }
 ];
 
 function MarketingNav({ role }) {

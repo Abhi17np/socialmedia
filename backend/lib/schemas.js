@@ -413,6 +413,28 @@ const updateCustomFieldDefinitionSchema = z.object({
   position: z.number().int().min(0).max(1000).optional()
 }).refine(v => Object.keys(v).length > 0, { message: 'Nothing to update.' });
 
+const CONSENT_CHANNELS = ['email', 'whatsapp', 'sms'];
+
+const preferenceUpdateSchema = z.object({
+  channels: z.record(z.enum(CONSENT_CHANNELS), z.enum(['opted_in', 'opted_out'])).optional().default({}),
+  globalOptOut: z.boolean().optional()
+}).refine(v => Object.keys(v.channels).length > 0 || v.globalOptOut !== undefined, { message: 'Nothing to update.' });
+
+const SUPPRESSION_REASONS = ['hard_bounce', 'complaint', 'manual', 'unsubscribe_link', 'global_unsubscribe'];
+
+const suppressionCreateSchema = z.object({
+  channel: z.enum(CONSENT_CHANNELS),
+  identifier: z.string().trim().min(3).max(320),
+  reason: z.enum(SUPPRESSION_REASONS).optional().default('manual')
+});
+
+const contactConsentUpdateSchema = z.object({
+  channel: z.enum(CONSENT_CHANNELS),
+  status: z.enum(['opted_in', 'opted_out']),
+  reason: z.string().trim().max(500).optional(),
+  version: z.number().int().optional()
+});
+
 module.exports = {
   signupSchema, loginSchema, createPostSchema, checkoutSchema, addMemberSchema, updateMemberSchema,
   savedReplySchema, draftPostSchema, whatsappEmbeddedSignupSchema, inboxReplySchema, updateInteractionSchema,
@@ -428,5 +450,6 @@ module.exports = {
   sequenceSchema, updateSequenceSchema, sequenceStepSchema, sequenceEnrollSchema, SEQUENCE_ACTION_TYPES,
   savedViewSchema, updateSavedViewSchema, SAVED_VIEW_LIST_TYPES,
   mergeContactsSchema, mergeCompaniesSchema,
-  marketingCampaignSchema, automationRuleSchema
+  marketingCampaignSchema, automationRuleSchema,
+  preferenceUpdateSchema, suppressionCreateSchema, contactConsentUpdateSchema, CONSENT_CHANNELS, SUPPRESSION_REASONS
 };
