@@ -8,6 +8,7 @@ import {
   Banner, Modal, EmptyState, Skeleton, Chip, ConfirmDialog
 } from '../ui';
 import EmailBlockEditor from './EmailBlockEditor';
+import AiGenerateButton from './AiGenerateButton';
 
 const MKT_API_BASE = `${API_BASE}/marketing`;
 
@@ -140,6 +141,18 @@ export default function EmailTemplatesSection({ authFetch, canManage, canAdmin }
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div className="flex flex-col gap-3">
               <Field label="Name"><Input value={editing.name} onChange={(e) => setEditing({ ...editing, name: e.target.value })} autoFocus /></Field>
+              <AiGenerateButton
+                authFetch={authFetch}
+                endpoint="email-copy"
+                label="Draft subject & copy with AI"
+                placeholder="e.g. Announce our autumn sale, 20% off, ends Friday"
+                buildBody={(brief) => ({ brief })}
+                onResult={({ subject, body }) => setEditing((prev) => ({
+                  ...prev,
+                  subject: subject || prev.subject,
+                  blocks: body ? [{ type: 'text', text: body }] : prev.blocks
+                }))}
+              />
               <Field label="Subject" hint="Merge tags like {{firstName|there}} work here too"><Input value={editing.subject} onChange={(e) => setEditing({ ...editing, subject: e.target.value })} /></Field>
               <Field label="Preheader (optional)"><Input value={editing.preheader || ''} onChange={(e) => setEditing({ ...editing, preheader: e.target.value })} /></Field>
               <div>

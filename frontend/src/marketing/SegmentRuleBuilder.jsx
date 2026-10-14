@@ -2,6 +2,7 @@
 
 import { Plus, Trash2 } from 'lucide-react';
 import { Button, IconButton, Select, Input, PillSelect } from '../ui';
+import AiGenerateButton from './AiGenerateButton';
 
 /**
  * A two-level AND/OR segment rule builder: the top level combines groups
@@ -161,8 +162,17 @@ function emptyRoot() {
   return { logic: 'AND', children: [{ logic: 'AND', children: [newCondition()] }] };
 }
 
-/** `value`/`onChange` manage the v2 root tree directly (always a two-level group-of-groups shape) — the parent owns persistence. */
-export default function SegmentRuleBuilder({ value, onChange }) {
+// The AI's output is a generic nested tree; this builder only renders a
+// two-level group-of-groups shape, so any top-level child missing its own
+// `children` (a bare condition) is wrapped into a single-condition group —
+// still a valid v2 tree for lib/segmentCompiler.js, just flattened for display.
+function normalizeAiRoot(aiRoot) {
+  const toGroup = (node) => (node.children ? node : { logic: 'AND', children: [node] });
+  return { logic: aiRoot.logic === 'OR' ? 'OR' : 'AND', children: (aiRoot.children || []).map(toGroup) };
+}
+
+/** `value`/`onChange` manage the v2 root tree directly (always a two-level group-of-groups shape) — the parent owns persistence. `authFetch`, if given, also shows a "Describe your audience" AI Assist entry point (Phase 9). */
+export default function SegmentRuleBuilder({ value, onChange, authFetch }) {
   const root = value || emptyRoot();
   const groups = root.children;
 
@@ -173,6 +183,16 @@ export default function SegmentRuleBuilder({ value, onChange }) {
 
   return (
     <div className="flex flex-col gap-2">
+      {authFetch && (
+        <AiGenerateButton
+          authFetch={authFetch}
+          endpoint="segment-filter"
+          label="Describe your audience with AI"
+          placeholder="e.g. Leads with a score over 50 who haven't opened an email in 30 days"
+          buildBody={(description) => ({ description })}
+          onResult={({ filter }) => onChange(normalizeAiRoot(filter.root))}
+        />
+      )}
       {groups.length > 1 && (
         <div className="flex items-center gap-1.5 text-xs text-muted">
           Match

@@ -401,7 +401,7 @@ function SegmentsTab({ authFetch, segments, setSegments, canManage, setError }) 
             </PillSelect>
           </Field>
           {form.segmentType === 'dynamic' ? (
-            <SegmentRuleBuilder value={form.root} onChange={(root) => setForm({ ...form, root })} />
+            <SegmentRuleBuilder value={form.root} onChange={(root) => setForm({ ...form, root })} authFetch={authFetch} />
           ) : (
             <p className="text-xs text-muted">Add contacts to the list after creating it, from "Manage members".</p>
           )}

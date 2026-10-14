@@ -1,9 +1,9 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { RefreshCw, Mail, MessageCircle, MessageSquare, FileText, Workflow, TrendingUp, ScrollText } from 'lucide-react';
+import { RefreshCw, Mail, MessageCircle, MessageSquare, FileText, Workflow, TrendingUp, ScrollText, Sparkles } from 'lucide-react';
 import { API_BASE } from '../apiBase';
-import { IconButton, Panel, PanelHeader, StatStrip, Stat, Table, Th, Td, EmptyState, Skeleton, Pagination } from '../ui';
+import { Button, IconButton, Panel, PanelHeader, StatStrip, Stat, Table, Th, Td, EmptyState, Skeleton, Pagination } from '../ui';
 import { money } from '../sales/format';
 
 const MKT_API_BASE = `${API_BASE}/marketing`;
@@ -23,6 +23,24 @@ export default function OverviewSection({ authFetch, canAdmin }) {
   const [auditPage, setAuditPage] = useState(1);
   const [auditTotal, setAuditTotal] = useState(null);
   const [error, setError] = useState(null);
+  const [insights, setInsights] = useState(null);
+  const [insightsLoading, setInsightsLoading] = useState(false);
+  const [insightsError, setInsightsError] = useState(null);
+
+  const generateInsights = async () => {
+    setInsightsLoading(true);
+    setInsightsError(null);
+    try {
+      const res = await authFetch(`${MKT_API_BASE}/ai/insights`, { method: 'POST', body: JSON.stringify({ overview }) });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'AI Assist failed.');
+      setInsights(data.summary);
+    } catch (e) {
+      setInsightsError(e.message);
+    } finally {
+      setInsightsLoading(false);
+    }
+  };
 
   const load = () => {
     authFetch(`${MKT_API_BASE}/overview`).then((r) => r.json()).then(setOverview).catch((e) => setError(e.message));
@@ -41,6 +59,20 @@ export default function OverviewSection({ authFetch, canAdmin }) {
   return (
     <div className="flex flex-col gap-3">
       {error && <div className="text-xs text-danger">{error}</div>}
+
+      {overview !== null && (
+        <Panel className="p-3">
+          <div className="flex items-center justify-between gap-2 mb-1.5">
+            <div className="eyebrow flex items-center gap-1.5"><Sparkles size={12} /> AI insights</div>
+            <Button size="sm" variant="ghost" icon={Sparkles} loading={insightsLoading} onClick={generateInsights}>
+              {insights ? 'Regenerate' : 'Generate insights'}
+            </Button>
+          </div>
+          {insightsError && <div className="text-xs text-danger">{insightsError}</div>}
+          {insights && <p className="text-xs leading-relaxed">{insights}</p>}
+          {!insights && !insightsError && <p className="text-xs text-muted">A short AI-written summary of the numbers below, highlighting the most actionable one.</p>}
+        </Panel>
+      )}
 
       <Panel className="overflow-hidden">
         <PanelHeader title="Overview" action={<IconButton icon={RefreshCw} label="Refresh" onClick={load} />} />

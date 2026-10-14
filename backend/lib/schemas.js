@@ -602,6 +602,23 @@ const leadFormSchema = z.object({
   version: z.number().int().optional()
 });
 
+const aiEmailCopySchema = z.object({
+  brief: z.string().trim().min(1).max(2000),
+  tone: z.string().trim().max(100).optional()
+});
+
+const aiSmsCopySchema = z.object({
+  brief: z.string().trim().min(1).max(2000)
+});
+
+const aiSegmentFilterSchema = z.object({
+  description: z.string().trim().min(1).max(2000)
+});
+
+const aiInsightsSchema = z.object({
+  overview: z.record(z.any())
+});
+
 module.exports = {
   signupSchema, loginSchema, createPostSchema, checkoutSchema, addMemberSchema, updateMemberSchema,
   savedReplySchema, draftPostSchema, whatsappEmbeddedSignupSchema, inboxReplySchema, updateInteractionSchema,
@@ -622,5 +639,6 @@ module.exports = {
   emailConnectionSchema, emailDomainSchema, emailTemplateSchema, emailCampaignSchema, emailSendTestSchema, EMAIL_PROVIDERS, EMAIL_BLOCK_TYPES,
   smsConnectionSchema, smsCampaignSchema, SMS_PROVIDERS,
   journeySchema, journeyEnrollSchema, JOURNEY_TRIGGER_TYPES,
-  leadFormSchema, leadFormFieldSchema
+  leadFormSchema, leadFormFieldSchema,
+  aiEmailCopySchema, aiSmsCopySchema, aiSegmentFilterSchema, aiInsightsSchema
 };

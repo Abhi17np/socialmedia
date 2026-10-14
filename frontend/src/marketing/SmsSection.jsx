@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { RefreshCw, Plus, Send, Ban, MessageSquare } from 'lucide-react';
 import { API_BASE } from '../apiBase';
 import { Button, IconButton, Panel, PanelHeader, Table, Th, Td, Input, Textarea, Select, Field, Banner, Modal, Drawer, EmptyState, Skeleton, Chip, ConfirmDialog } from '../ui';
+import AiGenerateButton from './AiGenerateButton';
 
 const MKT_API_BASE = `${API_BASE}/marketing`;
 const WA_API_BASE = `${API_BASE}/whatsapp`;
@@ -204,6 +205,14 @@ export default function SmsSection({ authFetch, canManage, canAdmin }) {
               {segments.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
             </Select>
           </Field>
+          <AiGenerateButton
+            authFetch={authFetch}
+            endpoint="sms-copy"
+            label="Draft message with AI"
+            placeholder="e.g. Remind about an abandoned cart, friendly tone"
+            buildBody={(brief) => ({ brief })}
+            onResult={({ body }) => setForm((prev) => ({ ...prev, body: body || prev.body }))}
+          />
           <Field label="Message" hint={`${form.body.length}/1600 — merge tags: {{firstName|there}}, {{displayName}}`}>
             <Textarea rows={4} value={form.body} onChange={(e) => setForm({ ...form, body: e.target.value })} placeholder="Hi {{firstName|there}}, 20% off today!" />
           </Field>
