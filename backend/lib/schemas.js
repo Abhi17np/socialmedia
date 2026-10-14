@@ -327,7 +327,7 @@ const companyBulkActionSchema = z.object({
   value: z.string().trim().max(100).nullable().optional()
 });
 
-const LEAD_SCORING_CONDITION_TYPES = ['has_email', 'has_phone', 'has_company', 'tag_equals', 'lead_status_equals'];
+const LEAD_SCORING_CONDITION_TYPES = ['has_email', 'has_phone', 'has_company', 'tag_equals', 'lead_status_equals', 'email_opened_any', 'email_clicked_any', 'form_submitted_any', 'journey_completed_any'];
 const CONDITION_TYPES_NEEDING_VALUE = ['tag_equals', 'lead_status_equals'];
 
 const leadScoringRuleSchema = z.object({
@@ -540,7 +540,7 @@ const journeyGraphSchema = z.object({
   edges: z.array(journeyEdgeSchema).max(200)
 });
 
-const JOURNEY_TRIGGER_TYPES = ['contact_created', 'contact_tag_added', 'deal_stage_changed', 'deal_won', 'deal_lost', 'email_opened', 'email_clicked', 'form_submitted'];
+const JOURNEY_TRIGGER_TYPES = ['contact_created', 'contact_tag_added', 'deal_stage_changed', 'deal_won', 'deal_lost', 'email_opened', 'email_clicked', 'form_submitted', 'became_mql'];
 
 const journeySchema = z.object({
   name: z.string().trim().min(1).max(200),

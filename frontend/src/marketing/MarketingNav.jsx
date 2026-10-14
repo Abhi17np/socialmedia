@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { usePathname, useSearchParams } from 'next/navigation';
-import { Megaphone, Zap, ShieldCheck, Mail, Workflow, FileText } from 'lucide-react';
+import { Megaphone, Zap, ShieldCheck, Mail, Workflow, FileText, TrendingUp } from 'lucide-react';
 import { atLeast } from '../roleRank';
 
 // Marketing Hub's own sidebar — see SalesNav.jsx's header comment for
@@ -14,6 +14,7 @@ export const ITEMS = [
   { tab: 'email', icon: Mail, label: 'Email', minRole: 'viewer' },
   { tab: 'forms', icon: FileText, label: 'Forms', minRole: 'viewer' },
   { tab: 'journeys', icon: Workflow, label: 'Journeys', minRole: 'viewer' },
+  { tab: 'attribution', icon: TrendingUp, label: 'Attribution', minRole: 'viewer' },
   { tab: 'automation', icon: Zap, label: 'Automation', minRole: 'viewer' },
   { tab: 'audience', icon: ShieldCheck, label: 'Consent & Suppression', minRole: 'viewer' }
 ];

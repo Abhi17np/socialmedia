@@ -22,8 +22,9 @@
  */
 
 const { scoped } = require('./query');
-const { findNode, nextNodeId, validateGraph, evaluateCondition, conditionEdge, pickSplitEdge, outgoingEdges } = require('./journeyGraph');
+const { findNode, nextNodeId, validateGraph, evaluateCondition, conditionEdge, pickSplitEdge } = require('./journeyGraph');
 const { ACTION_EXECUTORS } = require('./journeyActions');
+const { recomputeLeadScore } = require('./leadScoring');
 
 const MAX_STEPS_PER_TICK = 50;
 
@@ -42,19 +43,24 @@ async function evaluateGoal(client, tenantId, goalConfig, contact) {
   return evaluateCondition(goalConfig, contact);
 }
 
-async function finishEnrollment(client, enrollmentId, status) {
+async function finishEnrollment(client, tenantId, enrollmentId, contactId, status) {
   await client.from('workflow_enrollments').update({ status, completed_at: new Date().toISOString(), next_action_at: null }).eq('id', enrollmentId);
+  // Scores 'journey_completed_any' lead-scoring rules (lib/leadScoring.js)
+  // live the moment a journey genuinely finishes — not for 'exited'/
+  // 'failed', which aren't a real completion by any definition a tenant
+  // would expect that rule to mean.
+  if (status === 'completed' || status === 'goal_met') await recomputeLeadScore(client, tenantId, contactId);
 }
 
 /** Runs one enrollment forward as far as it can go right now. Never throws — a broken journey step must not crash the trigger/sweep that called this. */
 async function runEnrollmentTick(client, tenantId, enrollment) {
   try {
     const { data: workflow } = await scoped(client, tenantId, 'workflow_definitions').select('*').eq('id', enrollment.workflow_id).maybeSingle();
-    if (!workflow || !workflow.is_active) { await finishEnrollment(client, enrollment.id, 'exited'); return; }
+    if (!workflow || !workflow.is_active) { await finishEnrollment(client, tenantId, enrollment.id, enrollment.contact_id, 'exited'); return; }
 
     const graph = workflow.graph_json;
     const { data: contact } = await scoped(client, tenantId, 'contacts').select('*').eq('id', enrollment.contact_id).maybeSingle();
-    if (!contact) { await finishEnrollment(client, enrollment.id, 'exited'); return; }
+    if (!contact) { await finishEnrollment(client, tenantId, enrollment.id, enrollment.contact_id, 'exited'); return; }
 
     let currentNodeId = enrollment.current_node_id;
     let dealId = enrollment.deal_id;
@@ -68,7 +74,7 @@ async function runEnrollmentTick(client, tenantId, enrollment) {
       }
 
       const node = findNode(graph, currentNodeId);
-      if (!node) { await finishEnrollment(client, enrollment.id, 'failed'); return; }
+      if (!node) { await finishEnrollment(client, tenantId, enrollment.id, enrollment.contact_id, 'failed'); return; }
 
       if (node.type === 'delay') {
         const dueAt = new Date(Date.now() + delayMs(node.config)).toISOString();
@@ -119,8 +125,8 @@ async function runEnrollmentTick(client, tenantId, enrollment) {
     // the goal once more against the final state before closing out, so
     // "the last action happened to satisfy the goal" still counts.
     const { data: finalContact } = await scoped(client, tenantId, 'contacts').select('*').eq('id', enrollment.contact_id).maybeSingle();
-    if (await evaluateGoal(client, tenantId, workflow.goal_config, finalContact)) await finishEnrollment(client, enrollment.id, 'goal_met');
-    else await finishEnrollment(client, enrollment.id, 'completed');
+    if (await evaluateGoal(client, tenantId, workflow.goal_config, finalContact)) await finishEnrollment(client, tenantId, enrollment.id, enrollment.contact_id, 'goal_met');
+    else await finishEnrollment(client, tenantId, enrollment.id, enrollment.contact_id, 'completed');
   } catch (err) {
     console.error(`[journeyEngine] enrollment ${enrollment.id} tick failed:`, err.message);
   }
@@ -154,7 +160,7 @@ async function enrollContact(client, tenantId, workflowId, contactId, { dealId =
 
   await logEvent(client, tenantId, enrollment.id, triggerNode.id, 'trigger', 'completed', {});
   if (startNodeId) await runEnrollmentTick(client, tenantId, enrollment);
-  else await finishEnrollment(client, enrollment.id, 'completed');
+  else await finishEnrollment(client, tenantId, enrollment.id, enrollment.contact_id, 'completed');
   return { enrollmentId: enrollment.id, alreadyEnrolled: false };
 }
 

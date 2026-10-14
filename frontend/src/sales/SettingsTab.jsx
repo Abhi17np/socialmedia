@@ -154,10 +154,17 @@ function CustomFieldsPanel({ authFetch, SALES_API_BASE }) {
 
 // ---------------------------------------------------------- Lead scoring
 
-const CONDITION_TYPES = ['has_email', 'has_phone', 'has_company', 'tag_equals', 'lead_status_equals'];
+const CONDITION_TYPES = [
+  'has_email', 'has_phone', 'has_company', 'tag_equals', 'lead_status_equals',
+  'email_opened_any', 'email_clicked_any', 'form_submitted_any', 'journey_completed_any'
+];
 const CONDITION_LABELS = {
   has_email: 'Has an email address', has_phone: 'Has a phone number', has_company: 'Belongs to a company',
-  tag_equals: 'Has tag', lead_status_equals: 'Lead status is'
+  tag_equals: 'Has tag', lead_status_equals: 'Lead status is',
+  // Marketing engagement (Phase 6) — folded into the same scoring model,
+  // computed live from real Marketing Hub events (lib/leadScoring.js).
+  email_opened_any: 'Opened a marketing email', email_clicked_any: 'Clicked a link in a marketing email',
+  form_submitted_any: 'Submitted a lead form', journey_completed_any: 'Completed a journey'
 };
 const CONDITION_NEEDS_VALUE = ['tag_equals', 'lead_status_equals'];
 
@@ -241,7 +248,12 @@ function LeadScoringPanel({ authFetch, SALES_API_BASE }) {
           <Field label="Name"><Input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="Has email" autoFocus /></Field>
           <Field label="Condition">
             <Select value={form.conditionType} onChange={(e) => setForm({ ...form, conditionType: e.target.value })}>
-              {CONDITION_TYPES.map((t) => <option key={t} value={t}>{CONDITION_LABELS[t]}</option>)}
+              <optgroup label="Contact attributes">
+                {CONDITION_TYPES.slice(0, 5).map((t) => <option key={t} value={t}>{CONDITION_LABELS[t]}</option>)}
+              </optgroup>
+              <optgroup label="Marketing engagement">
+                {CONDITION_TYPES.slice(5).map((t) => <option key={t} value={t}>{CONDITION_LABELS[t]}</option>)}
+              </optgroup>
             </Select>
           </Field>
           {CONDITION_NEEDS_VALUE.includes(form.conditionType) && (

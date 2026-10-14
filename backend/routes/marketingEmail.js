@@ -22,6 +22,7 @@ const { validate } = require('../middleware/validate');
 const { asyncHandler } = require('../lib/asyncHandler');
 const { recordAudit } = require('../lib/audit');
 const { upsertConsent, addSuppression } = require('../lib/consent');
+const { recomputeLeadScore } = require('../lib/leadScoring');
 const { sendViaTenantProvider } = require('../lib/email/providerRegistry');
 const { renderEmailForRecipient } = require('../lib/email/sendPipeline');
 const { decodeClickDestination, TRANSPARENT_GIF } = require('../lib/email/compliance');
@@ -388,9 +389,17 @@ router.get('/marketing/email/campaigns/:id/report', requireHub('marketing'), asy
 // recipient's email client, not an authenticated tenant session)
 // -------------------------------------------------------------
 
+// Both of these recompute engagement-based lead score (Phase 6) in the
+// same fire-and-forget call that already fires the journey trigger —
+// one extra query against an already-fetched recipient row, not a
+// second round trip. Never awaited by the route handler itself: a
+// recipient's mail client is waiting on this response for a 1x1 pixel
+// or a redirect, not for a score recompute.
 async function fireEmailJourneyTrigger(client, recipientId, triggerType) {
   const { data: recipient } = await client.from('email_campaign_recipients').select('tenant_id, contact_id').eq('id', recipientId).maybeSingle();
-  if (recipient) await fireWorkflowTrigger(client, recipient.tenant_id, triggerType, { contactId: recipient.contact_id });
+  if (!recipient) return;
+  await fireWorkflowTrigger(client, recipient.tenant_id, triggerType, { contactId: recipient.contact_id });
+  await recomputeLeadScore(client, recipient.tenant_id, recipient.contact_id);
 }
 
 publicRouter.get('/marketing/email/track/open/:recipientId', asyncHandler(async (req, res) => {
