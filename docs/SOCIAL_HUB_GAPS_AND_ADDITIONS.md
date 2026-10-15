@@ -714,7 +714,121 @@ regression check: all still fully passing (see the full
 
 **Blockers / deployment requirements**: none new.
 
-## 11. What's still deliberately deferred (not silently dropped)
+## 11. Round 9 — Crisis Intelligence
+
+**No documented scope existed for this one, unlike every prior round**:
+Phase 1's original prioritization of "Crisis Intelligence" happened
+outside this repo — nothing in `SOCIAL_HUB_FEATURES.md`, this file, or
+any commit described what it should mean here. Designed from scratch
+against this app's own established constraints instead of a written
+spec: Global Rule 1 (official APIs/permitted data only) plus this app's
+own existing, documented limitation that there is no social listening
+beyond owned accounts (Round 8's "deferred" list above) ruled out the
+most obvious reading of "crisis intelligence" — open-web/news/hashtag
+monitoring for a brewing PR crisis the tenant hasn't felt yet. What's
+actually buildable honestly, with real data this app already collects,
+is different and still valuable: detecting an abnormal SURGE in how
+much a tenant's own audience is suddenly messaging/mentioning them,
+across their own connected accounts.
+
+**What was built**: a `crisis_alerts` table (migration 041); a 15-minute
+sweep (`backend/social/crisisSweep.js`) that counts real inbound
+`inbox_messages` + `mentions` rows in a trailing 3-hour window per
+tenant and compares that count against a trailing 14-window (42-hour)
+baseline using a real z-score (`backend/lib/crisisDetection.js`); a
+CRUD + lifecycle route (`backend/routes/crisis.js`: list, detail with
+real evidence, acknowledge, resolve); and a pull-based AI summary
+endpoint (`POST /ai/crisis-alerts/:id/summarize`,
+`lib/ai.js`'s `summarizeCrisis`).
+
+**Deliberately NOT sentiment-based, and zero AI in the decision to
+alert at all** — a genuine crisis is first and foremost a volume
+anomaly, which this app can measure honestly with zero AI involvement;
+sentiment classification already exists in this app
+(`classifyMessage`, Phase 1) but is single-message and pull-based by
+design, which doesn't compose into "alert me automatically." Keeping
+detection itself 100% statistical, with AI strictly as an optional,
+human-triggered second step on top of an already-detected surge,
+preserves this app's existing "AI is pull-based, human decides, nothing
+auto-sent" philosophy rather than quietly breaking it to get automatic
+alerting — see Round 5's `lib/experimentStats.js` for the precedent of
+"real statistics, not an AI judgment call, for anything this app treats
+as a decision."
+
+**The same statistical rigor as the Content Experiment Engine, applied
+to volume instead of engagement rate**: a non-negotiable minimum-count
+floor (`minCount`, default 5) is checked BEFORE any z-score math runs —
+a tenant going from 0 to 2 messages is never a "crisis" by this app's
+own definition, however large the relative jump looks, the same
+"refuse below a floor" principle `evaluateExperiment()` applies to
+audience size. When the trailing baseline has zero variance (every
+historical window had the identical count, often 0), a z-score is
+undefined, not infinite — `detectSpike()` falls back to an honest
+"did this clear baseline + floor" check and reports `zScore: null`
+rather than fabricating a number.
+
+**An open alert is one ongoing incident, not a new row every tick**:
+the sweep skips creating a new alert for a tenant that already has one
+open, so a sustained surge reads as one alert through to resolution;
+a fresh surge after a previous alert is resolved correctly opens a new
+one — confirmed directly in the integration test, not just asserted.
+
+**Every alert carries its real evidence**: the detail route resolves an
+alert's window back to the actual `inbox_messages`/`mentions` rows that
+made it up (`lib/crisisEvidence.js`, shared by the detail route and the
+AI summary endpoint so they can never see two different realities of
+the same window). The AI summary names dominant themes and which
+messages most need a reply, every theme required to cite the specific
+numbered message(s) it's drawn from — citations re-validated
+server-side against the real message count before reaching the UI,
+the exact same discipline Round 8's `analyzeCompetitorGaps()`
+established. Nothing in this feature auto-replies, auto-posts, or
+notifies anyone outside this app — an alert is a prompt to go look,
+surfaced as a banner on the Dashboard.
+
+**New endpoints**: `GET /social/crisis-alerts`,
+`GET /social/crisis-alerts/:id`,
+`PATCH /social/crisis-alerts/:id/{acknowledge,resolve}`,
+`POST /ai/crisis-alerts/:id/summarize`. There is deliberately no
+"create alert" endpoint — alerts only ever come from the real sweep,
+never from a human typing in a number this app didn't measure.
+
+**Files added**: `backend/migrations/041_crisis_intelligence.sql`;
+`backend/lib/crisisDetection.js` (pure `computeBaseline()`/
+`detectSpike()`, DB/network-free); `backend/social/crisisSweep.js`;
+`backend/lib/crisisEvidence.js`; `backend/routes/crisis.js`;
+`backend/test/crisisDetection.test.js` (8 unit tests);
+`backend/scripts/integration-tests/social-crisis.js` (9 assertions
+against a live Postgres+PostgREST stack); `frontend/src/social/
+CrisisAlerts.jsx`.
+
+**Files changed**: `backend/lib/ai.js` (`summarizeCrisis`);
+`backend/routes/ai.js` (the new endpoint); `backend/server.js` (mounts
+the routes, starts/stops the sweep); `frontend/src/social/Dashboard.jsx`
+(an open-alert banner); `frontend/src/social/SocialNav.jsx` and
+`frontend/src/viewPaths.js` (new nav item).
+
+**Tests run**: `npm test`: **196/196** (8 new `crisisDetection.test.js`
+cases, zero regressions). Backend `eslint .` clean on every
+changed/added file (5 pre-existing lint errors in unrelated files not
+touched this round, not newly introduced). Integration (live local
+Postgres+PostgREST): new `social-crisis.js` **9/9** — no alert before
+the sweep runs even with baseline data seeded, a REAL end-to-end sweep
+run against seeded `inbox_messages`/`mentions` correctly computing a
+20-vs-baseline-2 surge with z=18 and opening an alert, a second sweep
+tick not duplicating that open alert, the detail view resolving to the
+real 15 inbox + 5 mention messages that made up the window, tenant
+isolation, acknowledge (member+) and resolve (admin+) role gating and
+real persistence with 409 on a repeat action, a fresh surge after
+resolution opening a new alert, and the AI endpoint's fail-closed 503.
+Full `npm run test:integration` (32 scripts) re-run clean, zero
+regressions anywhere. Frontend `eslint .` clean; `next build` compiles
+(same pre-existing, unrelated `/account` Suspense issue every prior
+round also hit).
+
+**Blockers / deployment requirements**: none new.
+
+## 12. What's still deliberately deferred (not silently dropped)
 
 - **Real, personalized best-time-to-post**, specifically. Per-post data
   now exists (likes/comments/shares/views — see Round 3 above), but
@@ -743,6 +857,12 @@ regression check: all still fully passing (see the full
 - **Competitor Opportunity Radar has no Facebook, LinkedIn, or Google
   Business support** — three different real reasons, not one gap; see
   Round 8 above.
+- **Crisis Intelligence only detects a surge on a tenant's own connected
+  accounts** — the same open-web-listening gap as the bullet above,
+  applied to crisis detection specifically: a crisis unfolding somewhere
+  this app can't see won't trigger an alert until it reaches your own
+  channels as real inbound volume. See Round 9 above for why this was
+  the honest scope, not a smaller version of real social listening.
 - **A drag-and-drop visual content calendar editor** beyond the existing
   month-view calendar (which is read/schedule, not a kanban-style
   approval board).

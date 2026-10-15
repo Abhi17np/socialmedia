@@ -199,6 +199,36 @@ analysis against competitors and what shipped in which round, see
 - **Facebook, LinkedIn, and Google Business are deliberately excluded** — see
   Known Limitations below for the specific, real reason per platform.
 
+## Crisis Intelligence
+
+- **Real surge detection, not sentiment and not open-web listening** — a
+  background sweep (`backend/social/crisisSweep.js`, every 15 minutes)
+  counts actual inbound DMs/mentions/comments across a tenant's own
+  connected accounts in a trailing 3-hour window and compares it against
+  a real 14-window (42-hour) trailing baseline using a z-score
+  (`backend/lib/crisisDetection.js`) — the exact same "real statistics,
+  non-negotiable minimum-data floor" rigor the Content Experiment
+  Engine's two-proportion test uses, applied here to volume instead of
+  engagement rate. Zero AI involved in deciding whether to alert at all.
+- **A non-negotiable minimum-count floor** before any statistics run —
+  a quiet tenant going from 0 to 2 messages is never a "crisis" by this
+  app's own definition, however large the relative jump looks.
+- **An open alert never gets silently duplicated** while it's still
+  open, and a fresh surge after a resolved one opens a new alert — one
+  ongoing incident reads as one alert, not a new row every 15 minutes.
+- **Every alert shows its real evidence** — the actual messages/mentions
+  that made up the flagged window, not just the count that triggered it.
+- **An optional, pull-based AI summary** (same metered,
+  `ANTHROPIC_API_KEY`-gated posture as every other AI Assist feature):
+  reads the real flagged messages and names the dominant theme(s) and
+  which messages most need a reply — every theme must cite which actual
+  numbered message(s) support it, re-validated server-side before
+  reaching the UI, so a hallucinated citation can never surface as
+  evidence. Nothing in this feature auto-replies, auto-posts, or
+  notifies anyone outside this app.
+- **Acknowledge (member+) / resolve (admin+) lifecycle**, audit-logged,
+  surfaced as a banner on the Social Hub Dashboard when an alert is open.
+
 ## Billing & Usage
 
 - **Razorpay subscriptions** + real usage metering (`increment_usage` Postgres RPC),
@@ -230,6 +260,13 @@ analysis against competitors and what shipped in which round, see
 
 ## Known Limitations (not built, or deliberately deferred)
 
+- **Crisis Intelligence only sees volume on a tenant's own connected accounts** — it
+  has no open-web listening (no keyword/hashtag/news monitoring), so a crisis
+  unfolding somewhere this app can't see (a viral post on someone else's account, a
+  news story that hasn't yet driven DMs/mentions your way) won't trigger an alert
+  until it actually reaches your own channels as real inbound volume. This is the
+  same "official APIs/own accounts only" boundary Competitor Opportunity Radar and
+  the rest of this app respect — not a smaller version of real social listening.
 - **No per-post analytics for LinkedIn or Google Business**, and **no per-post reach/
   impressions for any platform** — real, current platform/permission limits, not an
   unbuilt feature (see `docs/SOCIAL_HUB_GAPS_AND_ADDITIONS.md`'s Round 3 for the exact

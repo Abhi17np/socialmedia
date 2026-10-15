@@ -2,7 +2,7 @@
 
 import React, { useEffect, useState } from 'react';
 import {
-  RefreshCw, PenSquare, CalendarClock, ArrowRight, Share2, Inbox as InboxIcon
+  RefreshCw, PenSquare, CalendarClock, ArrowRight, Share2, Inbox as InboxIcon, Siren
 } from 'lucide-react';
 import { SOCIAL_API_BASE } from './api';
 import { Page, PageBar, PageBody } from '../ui/page';
@@ -51,6 +51,7 @@ function Dashboard({ authFetch, setCurrentView }) {
   const [summary, setSummary] = useState(null);
   const [interactions, setInteractions] = useState(null);
   const [posts, setPosts] = useState(null);
+  const [openCrisisAlerts, setOpenCrisisAlerts] = useState([]);
   const [error, setError] = useState(null);
   const [refreshing, setRefreshing] = useState(false);
 
@@ -58,10 +59,11 @@ function Dashboard({ authFetch, setCurrentView }) {
     setError(null);
     setRefreshing(true);
     try {
-      const [summaryRes, interactionsRes, postsRes] = await Promise.all([
+      const [summaryRes, interactionsRes, postsRes, crisisRes] = await Promise.all([
         authFetch(`${SOCIAL_API_BASE}/analytics/summary`),
         authFetch(`${SOCIAL_API_BASE}/interactions`),
-        authFetch(`${SOCIAL_API_BASE}/posts`)
+        authFetch(`${SOCIAL_API_BASE}/posts`),
+        authFetch(`${SOCIAL_API_BASE}/crisis-alerts?status=open`)
       ]);
       const summaryData = await summaryRes.json();
       if (!summaryRes.ok) throw new Error(summaryData.error || 'Could not load analytics.');
@@ -72,6 +74,9 @@ function Dashboard({ authFetch, setCurrentView }) {
 
       const postsData = await postsRes.json();
       setPosts(postsRes.ok ? postsData.posts || [] : []);
+
+      const crisisData = await crisisRes.json();
+      setOpenCrisisAlerts(crisisRes.ok ? crisisData.alerts || [] : []);
     } catch (err) {
       setError(err.message);
       setSummary([]);
@@ -129,6 +134,22 @@ function Dashboard({ authFetch, setCurrentView }) {
       />
 
       <PageBody>
+        {openCrisisAlerts.length > 0 && (
+          <Banner
+            tone="danger"
+            icon={Siren}
+            action={
+              <Button size="sm" variant="ghost" onClick={() => setCurrentView('social-crisis')}>
+                Review
+              </Button>
+            }
+          >
+            {openCrisisAlerts.length === 1
+              ? `Unusual surge in inbound messages detected — ${openCrisisAlerts[0].message_count} in the last 3 hours, well above your normal volume.`
+              : `${openCrisisAlerts.length} unusual surges in inbound messages detected — review them in Crisis Alerts.`}
+          </Banner>
+        )}
+
         {error && <Banner tone="danger">{error}</Banner>}
 
         {!loading && accounts.length === 0 ? (

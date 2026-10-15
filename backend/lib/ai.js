@@ -262,4 +262,61 @@ async function analyzeCompetitorGaps({ ownCaptions, competitorCaptions, competit
   }
 }
 
-module.exports = { getAnthropicClient, draftPost, draftReply, suggestHashtags, classifyMessage, repurposeContent, analyzeCompetitorGaps };
+/**
+ * Crisis Intelligence's optional summary — the one qualitative step in
+ * that feature, deliberately AFTER a real statistical surge is already
+ * detected (lib/crisisDetection.js, zero AI involved in the detection
+ * itself — see that file's header for why). Reads the actual messages
+ * that make up the flagged window and asks for: the dominant theme(s)
+ * driving it, and which of those messages most need a reply — each
+ * theme required to cite which numbered message(s) it's drawn from, the
+ * same evidence discipline analyzeCompetitorGaps() uses, re-validated
+ * server-side below so a hallucinated citation can never reach a human
+ * as "evidence." This never runs automatically — a human looks at an
+ * open alert and explicitly asks for it (POST /ai/crisis-alerts/:id/
+ * summarize), same pull-based, metered posture as every AI feature here.
+ */
+async function summarizeCrisis({ messages, brandContext }) {
+  const anthropic = getAnthropicClient();
+  if (!anthropic) throw unavailableError();
+
+  const messageBlock = messages.map((m, i) => `${i + 1}. [${m.platform}] ${m.text || '(no text)'}`).join('\n');
+
+  const response = await anthropic.messages.create({
+    model: MODEL,
+    max_tokens: 1536,
+    output_config: { effort: 'low' },
+    system: [
+      'You read a surge of inbound social messages/comments/mentions a business received in a short window and summarize what\'s driving it.',
+      'Respond with ONLY a JSON object, no markdown fences, no explanation, shaped exactly like:',
+      '{"themes":[{"theme":"...","evidence":[1,3]}],"priorityMessages":[2,5],"note":"..."}',
+      '"evidence" MUST be the 1-based index number(s) of the specific numbered messages below that support that theme — never invent a theme with no matching numbered message.',
+      '"priorityMessages" is the 1-based indices of messages most urgently needing a human reply (angry/complaining/time-sensitive) — may be empty.',
+      '"note" is one short sentence of overall context (e.g. whether this looks like one shared complaint or several unrelated things). State uncertainty plainly if the messages are too mixed to summarize confidently.',
+      'Up to 5 themes.' + (brandContext || '')
+    ].join(' '),
+    messages: [{ role: 'user', content: `Messages in this window:\n${messageBlock}` }]
+  });
+  if (response.stop_reason === 'refusal') throw refusedError(response.stop_details);
+
+  try {
+    const parsed = JSON.parse(textOf(response).replace(/^```json\s*|\s*```$/g, ''));
+    if (!parsed || typeof parsed !== 'object' || !Array.isArray(parsed.themes)) throw new Error('malformed shape');
+
+    const validIndex = (i) => Number.isInteger(i) && i >= 1 && i <= messages.length;
+    return {
+      themes: parsed.themes
+        .filter((t) => t && typeof t.theme === 'string' && Array.isArray(t.evidence))
+        .map((t) => ({ theme: t.theme, evidence: t.evidence.filter(validIndex) }))
+        .filter((t) => t.evidence.length > 0),
+      priorityMessages: Array.isArray(parsed.priorityMessages) ? parsed.priorityMessages.filter(validIndex) : [],
+      note: typeof parsed.note === 'string' ? parsed.note : ''
+    };
+  } catch {
+    const err = new Error('AI Assist could not summarize this alert — try again, or review the messages directly.');
+    err.statusCode = 422;
+    throw err;
+  }
+}
+
+module.exports = { getAnthropicClient, draftPost, draftReply, suggestHashtags, classifyMessage, repurposeContent, analyzeCompetitorGaps, summarizeCrisis };

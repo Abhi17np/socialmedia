@@ -29,6 +29,7 @@ const trackedLinksRoutes = require('./routes/trackedLinks');
 const experimentsRoutes = require('./routes/experiments');
 const conversionJourneysRoutes = require('./routes/conversionJourneys');
 const competitorsRoutes = require('./routes/competitors');
+const crisisRoutes = require('./routes/crisis');
 const socialScheduler = require('./social/scheduler');
 const socialPollers = require('./social/pollers');
 const broadcastQueue = require('./social/broadcastQueue');
@@ -38,6 +39,7 @@ const scheduledSendSweep = require('./lib/email/scheduledSendSweep');
 const abWinnerSweep = require('./lib/email/abWinnerSweep');
 const experimentSweep = require('./lib/experimentSweep');
 const competitorSweep = require('./social/competitorSweep');
+const crisisSweep = require('./social/crisisSweep');
 const journeySweep = require('./lib/journeySweep');
 const sequenceScheduler = require('./lib/sequenceScheduler');
 
@@ -141,6 +143,7 @@ tenantRouter.use(trackedLinksRoutes.router);
 tenantRouter.use(experimentsRoutes);
 tenantRouter.use(conversionJourneysRoutes);
 tenantRouter.use(competitorsRoutes);
+tenantRouter.use(crisisRoutes);
 tenantRouter.use(attributionRoutes);
 tenantRouter.use(marketingAiRoutes);
 // Scoped to '/ai' specifically (not a blanket tenantRouter.use()) so
@@ -188,6 +191,7 @@ if (require.main === module) {
     abWinnerSweep.start();
     experimentSweep.start();
     competitorSweep.start();
+    crisisSweep.start();
     journeySweep.start();
     sequenceScheduler.start();
   });
@@ -224,6 +228,7 @@ if (require.main === module) {
       abWinnerSweep.stop();           // the A/B winner-decision sweep interval
       experimentSweep.stop();         // the content-experiment decision sweep interval
       competitorSweep.stop();         // the competitor radar daily sync interval
+      crisisSweep.stop();             // the crisis surge-detection sweep interval
       journeySweep.stop();            // the journey delay-resume sweep interval
       sequenceScheduler.stop();       // the Sales Hub sequence sweep interval
       const closed = new Promise((resolve, reject) => server.close(err => (err ? reject(err) : resolve())));

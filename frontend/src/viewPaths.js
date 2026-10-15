@@ -11,5 +11,6 @@ export const VIEW_TO_PATH = {
   'social-accounts': '/connect-accounts',
   'social-team': '/team',
   'social-billing': '/billing',
-  'social-experiments': '/experiments'
+  'social-experiments': '/experiments',
+  'social-crisis': '/crisis-alerts'
 };

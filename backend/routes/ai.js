@@ -13,10 +13,11 @@ const { assertWithinLimit, recordUsage } = require('../lib/entitlements');
 const { validate } = require('../middleware/validate');
 const { requireRole } = require('../middleware/tenant');
 const { draftPostSchema, hashtagSuggestSchema, repurposeSchema, competitorGapsSchema } = require('../lib/schemas');
-const { draftPost, draftReply, suggestHashtags, classifyMessage, repurposeContent, analyzeCompetitorGaps, getAnthropicClient } = require('../lib/ai');
+const { draftPost, draftReply, suggestHashtags, classifyMessage, repurposeContent, analyzeCompetitorGaps, summarizeCrisis, getAnthropicClient } = require('../lib/ai');
 const { getBrandProfile, buildBrandContext, checkBrandViolations } = require('../lib/brandMemory');
 const { findDuplicateWarning, mediaRequirementWarnings } = require('../lib/repurposing');
 const { getUsableAccount } = require('../social/accounts');
+const { gatherEvidence } = require('../lib/crisisEvidence');
 
 const router = express.Router();
 
@@ -238,6 +239,49 @@ router.post('/compose/competitor-gaps', requireRole('member'), validate(competit
 
     await recordUsage(client, req.tenantId, 'aiGenerationsPerMonth');
     res.json({ gaps: resolvedGaps });
+  } catch (err) {
+    res.status(err.statusCode || 500).json({ error: err.message });
+  }
+});
+
+/**
+ * Crisis Intelligence's optional summary (lib/ai.js's summarizeCrisis).
+ * viewer+ matches /inbox/:id/analyze's own bar — reading a summary of
+ * already-visible messages is no more privileged than reading the
+ * messages themselves. Reads the exact same real evidence the alert's
+ * own detail view shows (lib/crisisEvidence.js), never a second,
+ * possibly-different query. Checks AI Assist is configured before doing
+ * any work, same "fail closed early" discipline as the competitor-gaps
+ * endpoint above.
+ */
+router.post('/crisis-alerts/:id/summarize', async (req, res) => {
+  const client = requireSocialClient(res);
+  if (!client) return;
+  if (!getAnthropicClient()) return res.status(503).json({ error: 'AI Assist is not configured (ANTHROPIC_API_KEY in backend/.env).' });
+
+  try {
+    await assertWithinLimit(client, req.tenantId, 'aiGenerationsPerMonth');
+
+    const { data: alert, error: alertErr } = await scoped(client, req.tenantId, 'crisis_alerts').select('*').eq('id', req.params.id).maybeSingle();
+    if (alertErr) return res.status(500).json({ error: alertErr.message });
+    if (!alert) return res.status(404).json({ error: 'Crisis alert not found.' });
+
+    const messages = await gatherEvidence(client, req.tenantId, alert.window_start, alert.window_end);
+    if (messages.length === 0) {
+      return res.status(422).json({ error: 'No messages were found for this alert\'s window — nothing to summarize.' });
+    }
+
+    const profile = await getBrandProfile(client, req.tenantId);
+    const { themes, priorityMessages, note } = await summarizeCrisis({ messages, brandContext: buildBrandContext(profile) });
+
+    // Resolve 1-based indices back to the real message objects — same
+    // "never hand back a bare number" discipline as the competitor-gaps
+    // endpoint's evidence resolution above.
+    const resolvedThemes = themes.map((t) => ({ theme: t.theme, evidence: t.evidence.map((i) => messages[i - 1]) }));
+    const resolvedPriority = priorityMessages.map((i) => messages[i - 1]);
+
+    await recordUsage(client, req.tenantId, 'aiGenerationsPerMonth');
+    res.json({ themes: resolvedThemes, priorityMessages: resolvedPriority, note });
   } catch (err) {
     res.status(err.statusCode || 500).json({ error: err.message });
   }
