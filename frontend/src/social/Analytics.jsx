@@ -13,6 +13,7 @@ import {
   Skeleton, Input, cx
 } from '../ui';
 import { ChannelTile, channelColor, channelLabel } from '../ui/channel';
+import RevenueAttribution from './RevenueAttribution';
 
 // "Brand health" — one card per connected account plus an engagement
 // comparison, reading GET /social/analytics/summary (aggregate, per
@@ -173,7 +174,8 @@ function ChannelCard({ row, expanded, onToggle, detail }) {
   );
 }
 
-function Analytics({ authFetch }) {
+function Analytics({ authFetch, role }) {
+  const [tab, setTab] = useState('brandHealth'); // 'brandHealth' | 'attribution'
   const [summary, setSummary] = useState(null);
   const [windowDays, setWindowDays] = useState(30);
   const [error, setError] = useState(null);
@@ -279,9 +281,26 @@ function Analytics({ authFetch }) {
       />
 
       <PageBody>
-        {error && <Banner tone="danger">{error}</Banner>}
+        <div className="flex items-center gap-1 p-0.5 rounded-ui bg-sunken border border-hairline w-fit">
+          {[{ key: 'brandHealth', label: 'Brand health' }, { key: 'attribution', label: 'Revenue attribution' }].map((t) => (
+            <button
+              key={t.key}
+              onClick={() => setTab(t.key)}
+              className={cx(
+                'h-6 px-2.5 rounded text-[11px] font-medium transition-colors',
+                tab === t.key ? 'bg-card text-ink shadow-[var(--shadow-hover)]' : 'text-muted hover:text-ink'
+              )}
+            >
+              {t.label}
+            </button>
+          ))}
+        </div>
 
-        {!loading && rows.length === 0 ? (
+        {tab === 'attribution' && <RevenueAttribution authFetch={authFetch} role={role} />}
+
+        {tab === 'brandHealth' && error && <Banner tone="danger">{error}</Banner>}
+
+        {tab === 'brandHealth' && (!loading && rows.length === 0 ? (
           <Panel>
             <EmptyState
               icon={LineChartIcon}
@@ -365,7 +384,7 @@ function Analytics({ authFetch }) {
               </div>
             )}
           </>
-        )}
+        ))}
       </PageBody>
     </Page>
   );

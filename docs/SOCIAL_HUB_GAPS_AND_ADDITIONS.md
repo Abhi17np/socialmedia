@@ -411,7 +411,103 @@ also hit).
 
 **Blockers / deployment requirements**: none new.
 
-## 8. What's still deliberately deferred (not silently dropped)
+## 8. Round 6 — real Social Revenue Attribution, reusing Marketing Hub's engine completely
+
+**What was built**: `tracked_links` + five new UTM columns on
+`site_visits` (migration 039) — the missing plumbing
+`lib/attribution.js`'s existing, already-channel-agnostic multi-touch
+engine needed to ever see a social-sourced touchpoint at all.
+`distributeCredit()`/`getAttributionReport()` needed **zero changes**
+to support the new channel — proof this engine was built right the
+first time (Phase 6). A tenant creates a Tracked Link
+(`POST /social/tracked-links`) for a destination URL, pastes the
+returned short redirect into a post instead of the real link; every
+click (`GET /t/:id`) gets real UTM params appended
+(`utm_source=<platform>`, `utm_medium=social`, `utm_content=<this
+link's own id>`) before redirecting, and `click_count` is reliably
+incremented (awaited, not fire-and-forget, after the first draft of
+this traded a slightly riskier async pattern for a few ms of extra
+redirect latency — a sound trade for a non-hot path). If the
+destination is the tenant's own site with the Marketing Hub tracking
+snippet already installed (migration 033), the resulting pageview
+carries those same UTM params straight into `site_visits`
+(`routes/tracking.js` now parses and stores them via
+`lib/trackedLinks.js`'s `parseUtmParams()`) — which is exactly what
+`lib/attribution.js`'s new social channel reads, once that visit's
+`site_visitors` row resolves to a real contact (the same resolution
+`routes/leadForms.js` already performs on lead-form submit).
+
+**Mounted ungated, deliberately** — `GET /social/attribution` is a
+*second*, Social-Hub-owned mount of the identical report Marketing
+Hub's existing `GET /marketing/attribution` already serves, the same
+"WhatsApp broadcast is Social Hub's own feature, not behind the
+commercial gate" posture this codebase already established (see
+README.md). A tenant with Marketing Hub NOT enabled can call
+`/social/attribution` and see real revenue-by-channel for their own
+social activity, while `/marketing/attribution` on that exact same
+tenant correctly stays 403'd — verified directly in the integration
+test, not assumed.
+
+**Honest about what it can't see**: a social-sourced conversion is
+only attributable when the person actually clicked through a Tracked
+Link — a bare like/comment on a broadcast post, or someone who saw a
+post and visited the site directly later without clicking the link,
+genuinely can't be tied to that post. This is the same limitation
+every UTM-based attribution system has (including every competitor's,
+per Phase 1's research — none of Zoho/Buffer/Later/Agorapulse compute
+closed-loop revenue natively either), not something unique or hidden
+here.
+
+**New endpoints**: `POST`/`GET /social/tracked-links`,
+`PATCH /social/tracked-links/:id` (attach a real post after the fact —
+optional enrichment, not required for attribution to work, since
+`utm_content` already carries the link's own id), the public
+`GET /t/:id` redirect, `GET /social/attribution`.
+
+**Files added**: `backend/migrations/039_social_attribution.sql`;
+`backend/lib/trackedLinks.js` (pure `appendUtmParams`/`parseUtmParams`/
+`shortUrlFor`); `backend/routes/trackedLinks.js`;
+`backend/test/trackedLinks.test.js` (10 unit tests);
+`backend/scripts/integration-tests/social-attribution.js` (6
+assertions against a live Postgres+PostgREST stack — the full real
+pipeline: create a link, click its real redirect, feed the resulting
+pageview through the real tracking endpoint, resolve to a contact,
+close a deal, and read the real report — plus the hub-gating proof
+above); `frontend/src/social/RevenueAttribution.jsx`.
+
+**Files changed**: `backend/lib/attribution.js` (the new social
+channel — 3 additional fixed queries, still O(1) not per-contact;
+`CHANNEL_LABELS` gains `social: 'Social'`), `backend/routes/tracking.js`
+(parses and stores UTM params on every pageview), `backend/routes/social.js`
+(`GET /social/attribution`), `backend/server.js` (mounts
+`routes/trackedLinks.js`), `backend/lib/schemas.js`
+(`createTrackedLinkSchema`, `updateTrackedLinkSchema`);
+`frontend/src/social/Analytics.jsx` (a new "Revenue attribution" tab).
+
+**A second bug this round's own integration-test discipline caught
+before it shipped** (same class as Round 5's): the PATCH
+`/social/tracked-links/:id` handler's first draft chained
+`.update(patch).eq('id', id).select().single()` directly — `.single()`
+errors (not just a null `data`) on zero matched rows, so a wrong-tenant
+or nonexistent link id would have surfaced as a confusing 500 instead
+of a clean 404. Caught by re-reading the code against the exact
+pattern this bug follows from Round 5, before even running the test —
+fixed with the same fetch-then-404-then-update pattern every other
+PATCH in this codebase already uses.
+
+**Tests run**: `npm test`: **181/181** (171 prior + 10 new). Backend
+`eslint .` clean on every changed file. Integration (live local
+Postgres+PostgREST): new `social-attribution.js` **6/6**.
+`social-approval.js`, `social-post-analytics.js`,
+`social-brand-memory.js`, and `social-experiments.js` re-run as
+regression checks on the touched `routes/social.js`/`server.js`: all
+still fully passing. Frontend `eslint .` clean; `next build` compiles
+(same pre-existing, unrelated `/account` Suspense issue every prior
+round also hit).
+
+**Blockers / deployment requirements**: none new.
+
+## 9. What's still deliberately deferred (not silently dropped)
 
 - **Real, personalized best-time-to-post**, specifically. Per-post data
   now exists (likes/comments/shares/views — see Round 3 above), but

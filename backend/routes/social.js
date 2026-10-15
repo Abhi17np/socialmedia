@@ -26,6 +26,7 @@ const { requireRole } = require('../middleware/tenant');
 const { createPostSchema, savedReplySchema, whatsappEmbeddedSignupSchema, inboxReplySchema, updateInteractionSchema, brandMemorySchema } = require('../lib/schemas');
 const { getBrandProfile } = require('../lib/brandMemory');
 const { FOLLOWER_METRIC } = require('../lib/socialMetrics');
+const { getAttributionReport } = require('../lib/attribution');
 const socialQueue = require('../social/queue');
 const { asyncHandler } = require('../lib/asyncHandler');
 const { recordAudit } = require('../lib/audit');
@@ -737,6 +738,29 @@ protectedRouter.post('/social/inbox/:id/reply', validate(inboxReplySchema), asyn
     res.status(err.statusCode || 500).json({ error: err.message });
   }
 });
+
+/**
+ * Social Revenue Attribution (migration 039) — the same multi-touch
+ * engine Marketing Hub's GET /marketing/attribution already exposes,
+ * but mounted HERE, ungated: WhatsApp broadcast is already "Social
+ * Hub's own feature, not behind the Sales/Marketing commercial gate"
+ * (see README.md); this is the same posture applied to attribution,
+ * since a tenant without Marketing Hub enabled should still be able to
+ * see whether their own social posts' tracked links are driving real
+ * revenue. Reuses getAttributionReport() completely — no duplicated
+ * model logic, just a second, ungated mount point for the same report.
+ */
+protectedRouter.get('/social/attribution', asyncHandler(async (req, res) => {
+  const client = requireSocialClient(res);
+  if (!client) return;
+  const { model, dateFrom, dateTo } = req.query;
+  try {
+    const report = await getAttributionReport(client, req.tenantId, { model: model || 'linear', dateFrom, dateTo });
+    res.json(report);
+  } catch (err) {
+    res.status(err.statusCode || 400).json({ error: err.message });
+  }
+}));
 
 protectedRouter.get('/social/analytics', async (req, res) => {
   const client = requireSocialClient(res);

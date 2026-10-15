@@ -22,6 +22,7 @@ const { getSocialClient } = require('../social/db');
 const { asyncHandler } = require('../lib/asyncHandler');
 const { requireHub } = require('../middleware/hubs');
 const { API_PREFIX } = require('../lib/apiPrefix');
+const { parseUtmParams } = require('../lib/trackedLinks');
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -54,8 +55,15 @@ publicRouter.post('/track/pageview', asyncHandler(async (req, res) => {
     { onConflict: 'id', ignoreDuplicates: false }
   );
   if (upsertResult.error) throw upsertResult.error;
+  // Parsed once, here, at ingest — migration 039's columns exist
+  // precisely so lib/attribution.js's social channel never has to
+  // re-parse the raw url string at report time. Most pageviews carry no
+  // UTM params at all (an organic visit, a bookmark) and all five come
+  // back null, same as before this feature existed.
+  const utm = parseUtmParams(url);
   const insertResult = await client.from('site_visits').insert({
-    tenant_id: tenantId, visitor_id: visitorId, url: String(url).slice(0, 2000), referrer: referrer ? String(referrer).slice(0, 2000) : null
+    tenant_id: tenantId, visitor_id: visitorId, url: String(url).slice(0, 2000), referrer: referrer ? String(referrer).slice(0, 2000) : null,
+    ...utm
   });
   if (insertResult.error) throw insertResult.error;
 

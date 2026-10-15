@@ -25,6 +25,7 @@ const leadFormsRoutes = require('./routes/leadForms');
 const attributionRoutes = require('./routes/attribution');
 const marketingAiRoutes = require('./routes/marketingAi');
 const trackingRoutes = require('./routes/tracking');
+const trackedLinksRoutes = require('./routes/trackedLinks');
 const experimentsRoutes = require('./routes/experiments');
 const socialScheduler = require('./social/scheduler');
 const socialPollers = require('./social/pollers');
@@ -102,6 +103,7 @@ app.use(API_PREFIX, marketingRoutes.publicRouter);
 app.use(API_PREFIX, marketingEmailRoutes.publicRouter);
 app.use(API_PREFIX, leadFormsRoutes.publicRouter);
 app.use(API_PREFIX, trackingRoutes.publicRouter);
+app.use(API_PREFIX, trackedLinksRoutes.publicRouter);
 
 // requirePlatformAdmin is mounted at the more specific `${API_PREFIX}/platform`
 // path, and registered BEFORE the broader tenant mount below — Express
@@ -132,6 +134,7 @@ tenantRouter.use(marketingSmsRoutes);
 tenantRouter.use(journeysRoutes);
 tenantRouter.use(leadFormsRoutes.router);
 tenantRouter.use(trackingRoutes.router);
+tenantRouter.use(trackedLinksRoutes.router);
 tenantRouter.use(experimentsRoutes);
 tenantRouter.use(attributionRoutes);
 tenantRouter.use(marketingAiRoutes);

@@ -82,6 +82,17 @@ const hashtagSuggestSchema = z.object({
 
 const CONFIDENCE_LEVELS = [0.90, 0.95, 0.99];
 
+const createTrackedLinkSchema = z.object({
+  destinationUrl: z.string().trim().url().max(2000),
+  platform: z.string().trim().max(50).optional(),
+  label: z.string().trim().max(200).optional()
+});
+
+const updateTrackedLinkSchema = z.object({
+  scheduledPostId: z.string().uuid().nullable().optional(),
+  label: z.string().trim().max(200).optional()
+});
+
 const createExperimentSchema = z.object({
   name: z.string().trim().min(1).max(200),
   variable: z.enum(['hook', 'caption', 'cta', 'format']),
@@ -672,6 +683,7 @@ module.exports = {
   signupSchema, loginSchema, createPostSchema, checkoutSchema, addMemberSchema, updateMemberSchema, hashtagSuggestSchema,
   savedReplySchema, draftPostSchema, whatsappEmbeddedSignupSchema, inboxReplySchema, updateInteractionSchema,
   repurposeSchema, brandMemorySchema, createExperimentSchema, CONFIDENCE_LEVELS,
+  createTrackedLinkSchema, updateTrackedLinkSchema,
   INTERACTION_STATUSES, INTERACTION_PRIORITIES, changePasswordSchema, forgotPasswordSchema, resetPasswordSchema,
   updateHubsSchema, templateSchema, segmentSchema, segmentMembersSchema, whatsappCampaignSchema,
   companySchema, contactSchema, updateContactSchema, dealSchema, updateDealSchema, moveDealStageSchema, salesActivitySchema,

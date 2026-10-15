@@ -125,6 +125,23 @@ analysis against competitors and what shipped in which round, see
   running experiment shows a **live preview** computed the same way, so a tenant isn't
   left watching silence until it resolves.
 
+## Revenue Attribution
+
+- **Tracked links** — create a short, UTM-tagged redirect for any destination URL,
+  paste it into a post instead of the real link. Every click is tagged with real
+  `utm_source`/`utm_medium=social`/`utm_content` params and counted (`click_count`),
+  independent of whether the destination has analytics installed.
+- **Multi-touch revenue attribution**, reusing Marketing Hub's existing engine
+  (`backend/lib/attribution.js`) completely — first-touch, last-touch, or linear —
+  extended with a 5th, Social-sourced channel once a tracked link's click leads to a
+  resolved contact who closes a deal. Mounted as its own **ungated** endpoint
+  (`GET /social/attribution`), the same "Social Hub's own feature, not behind the
+  commercial gate" posture WhatsApp broadcast already has — a tenant without Marketing
+  Hub enabled still sees whether their own social posts are driving real revenue.
+- Both assumptions this makes (who gets credit under each model; that a tracked link's
+  `utm_content` is the join key back to its platform/label) are surfaced in the report
+  itself, not hidden.
+
 ## WhatsApp Broadcast (Social Hub's own always-on feature, not behind the commercial gate)
 
 - **Template management**: create, submit to Meta for review, sync real approval status
@@ -179,6 +196,12 @@ analysis against competitors and what shipped in which round, see
   not shipped as a generic lookup-table guess dressed up as intelligence.
 - **No series-wide edit/cancel for recurring posts** — each occurrence in a series is
   managed individually.
+- **Social revenue attribution only sees a visit that went through a Tracked Link.** A
+  person who sees a post, remembers the brand, and visits directly later (no click
+  through the link) isn't attributable to that post — the same honest limitation every
+  UTM-based attribution system has, not unique to this one. No cross-device stitching
+  either (an anonymous visitor on their phone who later converts on their laptop is two
+  separate, unlinked visitor records).
 - **Content experiments are limited to exactly 2 variants (A/B, not A/B/C/…/n)** and to
   two posts on the **same** connected account — a named scope cut (multi-variant needs a
   multiple-comparisons correction this app doesn't implement; cross-account comparison
