@@ -104,6 +104,27 @@ analysis against competitors and what shipped in which round, see
   Known Limitations) — the per-post data above is daily, not broken out by hour, so
   there's still no real signal to compute a genuine "best hour" from.
 
+## AI Content Experiment Engine
+
+- **A/B content experiments** — compare two already-scheduled posts (same hook,
+  caption, CTA, or format, different variants) on the **same connected account**, so the
+  comparison is a real apples-to-apples one, not across different-sized audiences.
+- **A real two-proportion z-test** (`backend/lib/experimentStats.js`) decides a winner —
+  not a "highest raw rate wins" heuristic. Audience size (the account's own follower
+  count at post time) is the statistical denominator, which is what normalizes for
+  different-sized audiences; each variant is evaluated a configurable number of hours
+  after **its own** publish time, not a shared calendar date, which is what normalizes
+  for different posting times.
+- **Refuses to declare a winner below a configurable minimum audience size per
+  variant** — the literal, non-negotiable requirement this feature was built around, not
+  an afterthought on the statistical result. Reports the real sample size, z-score, and
+  p-value alongside every decision, including "not yet significant" ones.
+- Deliberately scoped to exactly two variants (classic A/B) — more than two would need a
+  multiple-comparisons correction this app doesn't implement; see Known Limitations.
+- A decision sweep runs every 15 minutes (`backend/lib/experimentSweep.js`); a still-
+  running experiment shows a **live preview** computed the same way, so a tenant isn't
+  left watching silence until it resolves.
+
 ## WhatsApp Broadcast (Social Hub's own always-on feature, not behind the commercial gate)
 
 - **Template management**: create, submit to Meta for review, sync real approval status
@@ -158,6 +179,10 @@ analysis against competitors and what shipped in which round, see
   not shipped as a generic lookup-table guess dressed up as intelligence.
 - **No series-wide edit/cancel for recurring posts** — each occurrence in a series is
   managed individually.
+- **Content experiments are limited to exactly 2 variants (A/B, not A/B/C/…/n)** and to
+  two posts on the **same** connected account — a named scope cut (multi-variant needs a
+  multiple-comparisons correction this app doesn't implement; cross-account comparison
+  needs a deeper audience-normalization model), not a silently missing capability.
 - **No social listening beyond owned accounts** — everything is scoped to the tenant's
   own connected accounts' mentions/comments/reviews, not keyword/hashtag/competitor
   monitoring.

@@ -7,7 +7,8 @@ import {
   CalendarDays,
   Inbox as InboxIcon,
   LineChart,
-  Megaphone
+  Megaphone,
+  FlaskConical
 } from 'lucide-react';
 import { atLeast } from '../roleRank';
 
@@ -30,6 +31,7 @@ const ITEMS = [
   { href: '/posts', icon: CalendarDays, label: 'Posts & schedule', minRole: 'viewer' },
   { href: '/inbox', icon: InboxIcon, label: 'Inbox', minRole: 'viewer', badge: 'inbox' },
   { href: '/analytics', icon: LineChart, label: 'Analytics', minRole: 'viewer' },
+  { href: '/experiments', icon: FlaskConical, label: 'Experiments', minRole: 'viewer' },
   { href: '/whatsapp', icon: Megaphone, label: 'WhatsApp Broadcast', minRole: 'viewer' }
 ];
 

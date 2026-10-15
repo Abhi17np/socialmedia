@@ -25,6 +25,7 @@ const { validate } = require('../middleware/validate');
 const { requireRole } = require('../middleware/tenant');
 const { createPostSchema, savedReplySchema, whatsappEmbeddedSignupSchema, inboxReplySchema, updateInteractionSchema, brandMemorySchema } = require('../lib/schemas');
 const { getBrandProfile } = require('../lib/brandMemory');
+const { FOLLOWER_METRIC } = require('../lib/socialMetrics');
 const socialQueue = require('../social/queue');
 const { asyncHandler } = require('../lib/asyncHandler');
 const { recordAudit } = require('../lib/audit');
@@ -757,7 +758,6 @@ protectedRouter.get('/social/analytics', async (req, res) => {
   }
 });
 
-const FOLLOWER_METRIC = { youtube: 'followers', facebook: 'fans', instagram: 'follower_count' };
 const REACH_METRIC = { facebook: 'impressions', instagram: 'reach' };
 const ENGAGEMENT_METRIC = { facebook: 'engaged_users' };
 const SUMMARY_WINDOW_DAYS = 30;

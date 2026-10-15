@@ -25,6 +25,7 @@ const leadFormsRoutes = require('./routes/leadForms');
 const attributionRoutes = require('./routes/attribution');
 const marketingAiRoutes = require('./routes/marketingAi');
 const trackingRoutes = require('./routes/tracking');
+const experimentsRoutes = require('./routes/experiments');
 const socialScheduler = require('./social/scheduler');
 const socialPollers = require('./social/pollers');
 const broadcastQueue = require('./social/broadcastQueue');
@@ -32,6 +33,7 @@ const emailQueue = require('./lib/email/emailQueue');
 const smsQueue = require('./lib/sms/smsQueue');
 const scheduledSendSweep = require('./lib/email/scheduledSendSweep');
 const abWinnerSweep = require('./lib/email/abWinnerSweep');
+const experimentSweep = require('./lib/experimentSweep');
 const journeySweep = require('./lib/journeySweep');
 const sequenceScheduler = require('./lib/sequenceScheduler');
 
@@ -130,6 +132,7 @@ tenantRouter.use(marketingSmsRoutes);
 tenantRouter.use(journeysRoutes);
 tenantRouter.use(leadFormsRoutes.router);
 tenantRouter.use(trackingRoutes.router);
+tenantRouter.use(experimentsRoutes);
 tenantRouter.use(attributionRoutes);
 tenantRouter.use(marketingAiRoutes);
 // Scoped to '/ai' specifically (not a blanket tenantRouter.use()) so
@@ -175,6 +178,7 @@ if (require.main === module) {
     smsQueue.start();
     scheduledSendSweep.start();
     abWinnerSweep.start();
+    experimentSweep.start();
     journeySweep.start();
     sequenceScheduler.start();
   });
@@ -209,6 +213,7 @@ if (require.main === module) {
       await smsQueue.stop();          // the marketing SMS worker/queue and its own Redis connection
       scheduledSendSweep.stop();      // the scheduled-email-campaign sweep interval
       abWinnerSweep.stop();           // the A/B winner-decision sweep interval
+      experimentSweep.stop();         // the content-experiment decision sweep interval
       journeySweep.stop();            // the journey delay-resume sweep interval
       sequenceScheduler.stop();       // the Sales Hub sequence sweep interval
       const closed = new Promise((resolve, reject) => server.close(err => (err ? reject(err) : resolve())));

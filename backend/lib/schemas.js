@@ -80,6 +80,20 @@ const hashtagSuggestSchema = z.object({
   platforms: z.array(z.string()).min(1)
 });
 
+const CONFIDENCE_LEVELS = [0.90, 0.95, 0.99];
+
+const createExperimentSchema = z.object({
+  name: z.string().trim().min(1).max(200),
+  variable: z.enum(['hook', 'caption', 'cta', 'format']),
+  minSampleSize: z.number().int().min(10).max(1000000).optional().default(100),
+  confidenceLevel: z.number().refine((v) => CONFIDENCE_LEVELS.includes(v), { message: 'confidenceLevel must be 0.90, 0.95, or 0.99' }).optional().default(0.95),
+  minObservationHours: z.number().int().min(1).max(720).optional().default(24),
+  variants: z.array(z.object({
+    key: z.string().trim().min(1).max(10),
+    scheduledPostId: z.string().uuid()
+  })).length(2)
+});
+
 const repurposeSchema = z.object({
   sourceContent: z.string().trim().min(1).max(10000),
   targetPlatforms: z.array(z.string()).min(1).max(10),
@@ -657,7 +671,7 @@ const aiInsightsSchema = z.object({
 module.exports = {
   signupSchema, loginSchema, createPostSchema, checkoutSchema, addMemberSchema, updateMemberSchema, hashtagSuggestSchema,
   savedReplySchema, draftPostSchema, whatsappEmbeddedSignupSchema, inboxReplySchema, updateInteractionSchema,
-  repurposeSchema, brandMemorySchema,
+  repurposeSchema, brandMemorySchema, createExperimentSchema, CONFIDENCE_LEVELS,
   INTERACTION_STATUSES, INTERACTION_PRIORITIES, changePasswordSchema, forgotPasswordSchema, resetPasswordSchema,
   updateHubsSchema, templateSchema, segmentSchema, segmentMembersSchema, whatsappCampaignSchema,
   companySchema, contactSchema, updateContactSchema, dealSchema, updateDealSchema, moveDealStageSchema, salesActivitySchema,

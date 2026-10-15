@@ -311,7 +311,107 @@ round also hit).
 **Blockers / deployment requirements**: none new — no new env vars, no
 new external credentials, no new provider dependency.
 
-## 7. What's still deliberately deferred (not silently dropped)
+## 7. Round 5 — a real AI Content Experiment Engine
+
+**What was built**: `content_experiments` + `content_experiment_variants`
+(migration 038) — every experiment groups exactly two ALREADY-EXISTING
+`scheduled_posts` rows as its variants (created and approved through
+the normal Composer/`POST /social/posts` path, never a parallel
+creation path). `backend/lib/experimentStats.js` implements a real
+two-proportion z-test (Abramowitz & Stegun erf approximation, no stats
+library dependency), exhaustively unit-tested against known standard-
+normal critical values and hand-verified p-values — deliberately NOT a
+copy of Marketing Hub's existing `abWinnerSweep.js`/`pickWinner()`,
+which has no significance or minimum-sample check at all (its own test
+file literally asserts "80% beats 10%, even with 100x fewer sends" as
+correct behavior). This feature's bar is higher on purpose, per the
+build's own brief: it refuses to declare a winner when either variant's
+audience is below a configurable minimum, before the statistical test
+is even run — not as an afterthought on the result.
+
+**Normalization, done honestly with what this app actually has**:
+"audience size" normalization uses each variant's connected account's
+own follower count (`analytics_snapshots`, nearest row at or before the
+post's `scheduled_at`) as the statistical denominator, not a raw
+engagement count — a variant with 10x the followers needs
+proportionally more engagement to "win," not just more in absolute
+terms. "Posting conditions" normalization is handled by requiring both
+variants to target the **same connected account** (enforced at creation,
+400 otherwise) and by evaluating each variant a configurable number of
+hours after **its own** publish time (approximated by `scheduled_at`,
+since there's no separate `published_at` column), not a shared calendar
+date — so two variants posted a week apart are each judged on an equal
+window of their own. Both are named, honest assumptions, not a deeper
+causal model this app doesn't have — stated to the tenant in the
+experiment's own detail view, not buried.
+
+**Deliberately scoped to exactly two variants** (classic A/B), not
+A/B/C/.../n — correctly comparing more than two needs a multiple-
+comparisons correction (e.g. Bonferroni) this app doesn't implement;
+shipping an uncorrected multi-variant test would systematically
+overstate confidence. A named scope cut, not a silently missing
+capability.
+
+**New endpoints**: `POST /experiments` (member+, validates same-
+account/single-account-per-post/no-reusing-a-post), `GET /experiments`
+(list), `GET /experiments/:id` (stored decision plus, for a still-
+`running` experiment, a **live preview** computed the exact same way
+the sweep will — so a tenant isn't left watching silence until it
+resolves), `PATCH /experiments/:id/cancel` (admin+, audit-logged). A
+new 15-min decision sweep (`lib/experimentSweep.js`) — slower than
+`abWinnerSweep`'s 5-min cadence since this does more per-tick DB work
+(two joined selects per experiment) and a decision an hour late doesn't
+matter here either.
+
+**Files added**: `backend/migrations/038_content_experiments.sql`;
+`backend/lib/experimentStats.js`, `backend/lib/experimentSweep.js`,
+`backend/lib/socialMetrics.js` (the `FOLLOWER_METRIC` map, extracted
+out of `routes/social.js` so this feature and the existing analytics
+summary share one mapping instead of maintaining two); `backend/routes/experiments.js`;
+`backend/test/experimentStats.test.js` (13 unit tests, including
+verified — not guessed — p-values for every "decided"/"not
+significant"/confidence-level-boundary case), `backend/test/experimentSweep.test.js`
+(4 unit tests); `backend/scripts/integration-tests/social-experiments.js`
+(9 assertions against a live Postgres+PostgREST stack, including a
+real end-to-end run of the actual sweep against seeded `post_analytics`/
+`analytics_snapshots` data — not hand-fed numbers — that correctly
+decides a winner, and a tiny-audience case that correctly refuses to
+decide despite a 90%-vs-5% raw rate gap); `frontend/src/social/Experiments.jsx`,
+`frontend/app/(app)/experiments/page.jsx`.
+
+**Files changed**: `backend/routes/social.js` (imports the extracted
+`FOLLOWER_METRIC` instead of its own copy), `backend/server.js` (mounts
+`routes/experiments.js`, starts/stops `experimentSweep`), `backend/lib/schemas.js`
+(`createExperimentSchema`); `frontend/src/social/SocialNav.jsx` (new
+"Experiments" nav item), `frontend/src/viewPaths.js`.
+
+**A real bug this round's own integration test caught before it
+shipped**: the first draft of `POST /experiments` threw a
+validation error with a real `statusCode` (400/404) from a helper
+function, but the route was wrapped in `asyncHandler` alone — which
+forwards any rejection to `server.js`'s generic catch-all middleware,
+and that middleware always responds 500 regardless of `err.statusCode`
+(confirmed by reading it: it does not check the field at all). Every
+validation failure would have come back as an opaque 500 instead of
+the intended 400/404. Fixed by wrapping that one call in its own
+try/catch and responding with `err.statusCode || 500`, the same
+pattern `POST /social/posts` already uses for `assertWithinLimit` —
+caught by `social-experiments.js`'s own assertions on the exact status
+codes, not just that *a* response came back.
+
+**Tests run**: `npm test`: **171/171** (154 prior + 17 new). Backend
+`eslint .` clean on every changed file. Integration (live local
+Postgres+PostgREST): new `social-experiments.js` **9/9**.
+`social-approval.js`, `social-post-analytics.js`, and
+`social-brand-memory.js` re-run as regression checks on the touched
+`routes/social.js`/`server.js`: all still fully passing. Frontend
+`eslint .` clean; `next build` compiles (22 pages now, same
+pre-existing, unrelated `/account` Suspense issue every prior round
+also hit).
+
+**Blockers / deployment requirements**: none new.
+
+## 8. What's still deliberately deferred (not silently dropped)
 
 - **Real, personalized best-time-to-post**, specifically. Per-post data
   now exists (likes/comments/shares/views — see Round 3 above), but
