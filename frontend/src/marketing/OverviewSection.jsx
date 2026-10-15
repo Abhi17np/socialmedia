@@ -1,32 +1,59 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { RefreshCw, Mail, MessageCircle, MessageSquare, TrendingUp, ScrollText, Sparkles } from 'lucide-react';
+import Link from 'next/link';
+import { RefreshCw, Mail, MessageCircle, MessageSquare, TrendingUp, ScrollText, Sparkles, Megaphone } from 'lucide-react';
 import { API_BASE } from '../apiBase';
-import { Button, IconButton, Panel, PanelHeader, StatStrip, Stat, Table, Th, Td, EmptyState, Skeleton, Pagination } from '../ui';
+import { cx, Button, IconButton, Panel, PanelHeader, StatStrip, Stat, Chip, Table, Th, Td, EmptyState, Skeleton, Pagination } from '../ui';
 import { money } from '../sales/format';
 
 const MKT_API_BASE = `${API_BASE}/marketing`;
 
+/* Null rather than a misleading 0% when there's nothing to divide by. */
+function pct(num, den) {
+  return den > 0 ? Math.round((num / den) * 100) : null;
+}
+
+const CHANNEL_TONES = {
+  brand: { icon: 'text-brand', badge: 'bg-brand-subtle', chip: 'brand' },
+  success: { icon: 'text-success', badge: 'bg-success-subtle', chip: 'success' },
+  info: { icon: 'text-info', badge: 'bg-info-subtle', chip: 'info' }
+};
+
 /* One flat, bordered channel tile — a compact 2-column stat grid instead
  * of the full-width StatStrip-per-channel this replaced, so Email/
  * WhatsApp/SMS sit side by side as one scannable row instead of three
- * stacked full-width strips. */
-function ChannelCard({ icon: Icon, label, tone, stats }) {
+ * stacked full-width strips. A tinted circular badge (one per card, not
+ * one per number) gives each channel a visual anchor without the
+ * per-stat colored-icon clutter DESIGN.md's StatStrip comment warns
+ * against. Campaign count of zero swaps the stat grid for a quiet
+ * placeholder instead of a wall of zeros. */
+function ChannelCard({ icon: Icon, label, tone, stats, rateLabel, rateValue, emptyHint }) {
+  const t = CHANNEL_TONES[tone];
+  const isEmpty = stats[0][1] === 0;
   return (
-    <div className="border border-hairline rounded-card p-3.5 bg-card flex flex-col gap-3">
-      <div className="flex items-center gap-1.5">
-        <Icon size={14} className={tone} />
-        <span className="text-xs font-medium text-ink">{label}</span>
-      </div>
-      <div className="grid grid-cols-2 gap-x-3 gap-y-3">
-        {stats.map(([statLabel, value]) => (
-          <div key={statLabel} className="min-w-0">
-            <div className="eyebrow truncate">{statLabel}</div>
-            <div className="mt-1 text-lg font-semibold tabular-nums text-ink leading-none">{value}</div>
+    <div className="h-full border border-hairline rounded-card p-3.5 bg-card flex flex-col gap-3.5">
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex items-center gap-2">
+          <div className={cx('w-7 h-7 rounded-full flex items-center justify-center shrink-0', t.badge)}>
+            <Icon size={14} className={t.icon} />
           </div>
-        ))}
+          <span className="text-xs font-semibold text-ink">{label}</span>
+        </div>
+        {!isEmpty && rateValue !== null && <Chip tone={t.chip}>{rateValue}% {rateLabel}</Chip>}
       </div>
+      {isEmpty ? (
+        <p className="text-xs text-muted leading-relaxed">{emptyHint}</p>
+      ) : (
+        <div className="grid grid-cols-2 gap-x-3 gap-y-3">
+          {stats.map(([statLabel, value]) => (
+            <div key={statLabel} className="min-w-0">
+              <div className="eyebrow truncate">{statLabel}</div>
+              <div className="mt-1 text-lg font-semibold tabular-nums text-ink leading-none">{value}</div>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -79,11 +106,16 @@ export default function OverviewSection({ authFetch, canAdmin }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [auditPage]);
 
+  const hasActivity = overview && (
+    overview.email.campaigns > 0 || overview.whatsapp.campaigns > 0 || overview.sms.campaigns > 0 ||
+    overview.forms.submissions > 0 || overview.journeys.active > 0 || overview.revenue.wonDeals > 0
+  );
+
   return (
     <div className="flex flex-col gap-3">
       {error && <div className="text-xs text-danger">{error}</div>}
 
-      {overview !== null && (
+      {hasActivity && (
         <Panel className="p-3.5">
           <div className="flex items-center justify-between gap-2 mb-2.5">
             <div className="flex items-center gap-1.5">
@@ -110,13 +142,30 @@ export default function OverviewSection({ authFetch, canAdmin }) {
           <div className="p-4 grid grid-cols-1 lg:grid-cols-3 gap-3">
             <Skeleton className="h-32" /><Skeleton className="h-32" /><Skeleton className="h-32" />
           </div>
+        ) : !hasActivity ? (
+          <EmptyState
+            icon={Megaphone}
+            title="No marketing activity yet"
+            description="Once you send an email or SMS campaign, publish a hosted form, or turn on a journey, this page fills in with real cross-channel numbers — no separate setup needed."
+            action={
+              <Link
+                href="/marketing?tab=campaigns"
+                className="inline-flex items-center justify-center gap-1.5 h-8 px-3 rounded-ui text-xs font-medium bg-brand hover:bg-brand-hover active:bg-brand-active text-white transition-colors"
+              >
+                <Megaphone size={15} /> Create your first campaign
+              </Link>
+            }
+          />
         ) : (
           <div className="p-4 flex flex-col gap-5">
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 items-stretch">
               <ChannelCard
                 icon={Mail}
                 label="Email"
-                tone="text-brand"
+                tone="brand"
+                rateLabel="open rate"
+                rateValue={pct(overview.email.opened, overview.email.sent)}
+                emptyHint="No email campaigns sent yet."
                 stats={[
                   ['Campaigns', overview.email.campaigns],
                   ['Sent', overview.email.sent],
@@ -127,7 +176,10 @@ export default function OverviewSection({ authFetch, canAdmin }) {
               <ChannelCard
                 icon={MessageCircle}
                 label="WhatsApp"
-                tone="text-success"
+                tone="success"
+                rateLabel="delivered"
+                rateValue={pct(overview.whatsapp.delivered, overview.whatsapp.sent)}
+                emptyHint="No WhatsApp campaigns sent yet."
                 stats={[
                   ['Campaigns', overview.whatsapp.campaigns],
                   ['Sent', overview.whatsapp.sent],
@@ -138,7 +190,10 @@ export default function OverviewSection({ authFetch, canAdmin }) {
               <ChannelCard
                 icon={MessageSquare}
                 label="SMS"
-                tone="text-info"
+                tone="info"
+                rateLabel="delivered"
+                rateValue={pct(overview.sms.sent - overview.sms.failed, overview.sms.sent)}
+                emptyHint="No SMS campaigns sent yet."
                 stats={[
                   ['Campaigns', overview.sms.campaigns],
                   ['Sent', overview.sms.sent],
