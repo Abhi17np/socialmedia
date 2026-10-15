@@ -78,10 +78,19 @@ analysis against competitors and what shipped in which round, see
 
 - **Account-level snapshots** (followers, reach, engagement) polled every 6 hours per
   platform's real API (`backend/social/pollers.js`).
+- **Per-post analytics** (likes/comments/shares for Facebook and Instagram, views/likes/
+  comments for YouTube), ingested every 6 hours per published post via each platform's
+  real, currently-stable API fields, stored historically in `post_analytics`, and
+  surfaced per post in `Posts.jsx` with an honest per-platform availability indicator.
+  Not available for LinkedIn or Google Business (real platform/permission limits, not
+  unbuilt — see `docs/SOCIAL_HUB_GAPS_AND_ADDITIONS.md`'s Round 3), and reach/impressions
+  specifically aren't collected for any platform yet (Meta's own metrics are mid-
+  deprecation as of this build — shipping a call to an unstable metric name would be
+  worse than not having it).
 - **Analytics dashboard** with per-platform breakdowns and a tenant-wide summary view.
-- Per-post analytics and a genuinely personalized "best time to post" are explicitly
-  **not** built yet (see Known Limitations) — anything claiming otherwise elsewhere
-  would be dressing up an industry-average guess as real intelligence.
+- A genuinely personalized "best time to post" is explicitly **not** built yet (see
+  Known Limitations) — the per-post data above is daily, not broken out by hour, so
+  there's still no real signal to compute a genuine "best hour" from.
 
 ## WhatsApp Broadcast (Social Hub's own always-on feature, not behind the commercial gate)
 
@@ -128,12 +137,13 @@ analysis against competitors and what shipped in which round, see
 
 ## Known Limitations (not built, or deliberately deferred)
 
-- **No per-post analytics.** `fetchAnalytics` in every adapter is page/account-level
-  only today — building real per-post metrics means adding per-post collection across
-  all 5 adapters, a separate undertaking.
-- **No genuinely personalized best-time-to-post.** There's no per-post, per-hour
-  engagement signal to compute it from yet (see above) — not shipped as a generic
-  lookup-table guess dressed up as intelligence.
+- **No per-post analytics for LinkedIn or Google Business**, and **no per-post reach/
+  impressions for any platform** — real, current platform/permission limits, not an
+  unbuilt feature (see `docs/SOCIAL_HUB_GAPS_AND_ADDITIONS.md`'s Round 3 for the exact
+  reason per platform).
+- **No genuinely personalized best-time-to-post.** Per-post data is daily, not broken
+  out by hour, so there's still no real signal to compute a genuine "best hour" from —
+  not shipped as a generic lookup-table guess dressed up as intelligence.
 - **No series-wide edit/cancel for recurring posts** — each occurrence in a series is
   managed individually.
 - **No social listening beyond owned accounts** — everything is scoped to the tenant's

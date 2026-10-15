@@ -146,6 +146,13 @@ async function refreshAccessToken(refreshToken) {
   return googleOAuth.refreshAccessToken(PLATFORM, refreshToken);
 }
 
+// No fetchPostAnalytics export, deliberately: businessprofileperformance
+// (the only metrics API this adapter has access to) is location-level
+// only — a Local Post object exposes no insights of its own anywhere in
+// the Business Profile APIs. social/pollers.js's post-analytics sweep
+// checks `typeof adapter.fetchPostAnalytics === 'function'` before
+// calling, so omitting it is this adapter's honest "not available"
+// signal, not a placeholder.
 async function fetchAnalytics(account) {
   const locationPart = account.externalAccountId.split('/').slice(-2).join('/'); // "locations/456"
   const end = new Date();

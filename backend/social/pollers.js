@@ -13,10 +13,22 @@
  *   - sweepAnalytics() — follower/reach/engagement snapshots, every 6h
  *     (its own slower cadence: these move slowly and the calls behind
  *     them are the most quota-sensitive, e.g. YouTube/Google Business)
+ *   - sweepPostAnalytics() — per-post engagement, every 6h (same cadence
+ *     as sweepAnalytics, no separate constant: no evidence per-post
+ *     engagement needs a tighter poll than account-level, and a second,
+ *     faster timer here would just be a second source of quota pressure
+ *     with nothing concrete justifying it yet)
  *
  * Upserts on the tables' existing unique constraints, so a re-poll of
  * already-seen items is a no-op (mentions/inbox) or an in-place refresh
- * (analytics_snapshots) rather than a duplicate row.
+ * (analytics_snapshots/post_analytics) rather than a duplicate row.
+ *
+ * post_analytics' metric vocabulary is deliberately small and shared
+ * across adapters (likes/comments/shares/views) — see each adapter's
+ * fetchPostAnalytics for exactly which of these it returns and why
+ * (reach/impressions-style metrics are withheld where the adapter
+ * couldn't confirm a currently-stable API field for them; see
+ * facebook.js/instagram.js's fetchPostAnalytics comments).
  */
 
 const { getSocialClient } = require('./db');
@@ -26,8 +38,17 @@ const ADAPTERS = require('./adapters');
 
 const POLL_INTERVAL_MS = 10 * 60 * 1000; // inbound APIs here are typically rate/quota-limited; no need to poll as tightly as the publish sweep
 const ANALYTICS_POLL_INTERVAL_MS = 6 * 60 * 60 * 1000; // followers/reach move slowly and these calls are the most quota-sensitive (YouTube, GBP) — a separate, much slower cadence than mentions/inbox
+// How far back to keep re-polling a published post's engagement. Bounds
+// the sweep's cost as scheduled_posts grows instead of re-checking every
+// post ever published; 30 days covers the window where a post's
+// engagement is still realistically moving. Also doubles as this
+// feature's backfill: the very first sweep after this migration/deploy
+// picks up every already-published post inside this window, not just
+// ones published from here on.
+const POST_ANALYTICS_LOOKBACK_DAYS = 30;
 let intervalHandle = null;
 let analyticsIntervalHandle = null;
+let postAnalyticsIntervalHandle = null;
 
 /**
  * A permission/auth error (missing scope, revoked token, dead session —
@@ -186,6 +207,82 @@ async function sweepAnalytics() {
   }
 }
 
+/**
+ * Picks the externalPostId this post was actually given on one target
+ * account, straight from platform_results (social/queue.js's
+ * recordOutcome shape: `{status: 'published', externalPostId, url}` on
+ * success, `{status: 'failed', error}` on failure). A missing entry
+ * (not published to this account yet), a failed entry, or a 'published'
+ * entry with no externalPostId (shouldn't happen, but adapters are
+ * external input) all return null the same way — "nothing to poll yet",
+ * not an error worth distinguishing here.
+ */
+function externalPostIdFor(platformResults, accountId) {
+  const entry = platformResults && platformResults[accountId];
+  if (!entry || entry.status !== 'published') return null;
+  return entry.externalPostId || null;
+}
+
+/**
+ * Same fetch-then-upsert shape as pollAccountAnalytics, but driven by
+ * scheduled_posts rather than social_accounts — a published post can
+ * target several accounts, and each (post, account) pair gets its own
+ * independent fetchPostAnalytics call and its own rows in post_analytics.
+ * unique(scheduled_post_id, social_account_id, metric, captured_date)
+ * means a same-day re-poll updates that day's value in place, same
+ * reasoning as pollAccountAnalytics's upsert.
+ */
+async function pollPostAnalytics(client, post) {
+  for (const accountId of post.target_account_ids || []) {
+    const externalPostId = externalPostIdFor(post.platform_results, accountId);
+    if (!externalPostId) continue; // this account never got a successful publish for this post
+
+    const usable = await getUsableAccount(post.tenant_id, accountId).catch(() => null);
+    if (!usable) continue; // account deleted/disconnected since this post published
+    const { account, adapter } = usable;
+    if (typeof adapter.fetchPostAnalytics !== 'function') continue; // platform doesn't expose per-post metrics — see that adapter's header for why
+
+    try {
+      const metrics = await adapter.fetchPostAnalytics(account, externalPostId);
+      if (metrics.length === 0) continue;
+      const rows = metrics.map(m => ({
+        tenant_id: post.tenant_id,
+        scheduled_post_id: post.id,
+        social_account_id: accountId,
+        platform: account.platform,
+        external_post_id: externalPostId,
+        metric: m.metric,
+        value: m.value,
+        captured_date: m.capturedDate
+      }));
+      const { error } = await client.from('post_analytics').upsert(rows, { onConflict: 'scheduled_post_id,social_account_id,metric,captured_date' });
+      if (error) throw error;
+    } catch (err) {
+      if (err.isPermanentAuthError) { await markAccountAuthError(client, account, err); continue; }
+      console.error(`[social/pollers] fetchPostAnalytics failed for post ${post.id} / ${account.platform} account ${accountId}:`, err.message);
+    }
+  }
+}
+
+async function sweepPostAnalytics() {
+  const client = getSocialClient();
+  if (!client) return;
+
+  const since = new Date(Date.now() - POST_ANALYTICS_LOOKBACK_DAYS * 24 * 60 * 60 * 1000).toISOString();
+  const { data: posts, error } = await client.from('scheduled_posts')
+    .select('id, tenant_id, target_account_ids, platform_results')
+    .eq('status', 'published')
+    .gte('scheduled_at', since);
+  if (error) {
+    console.error('[social/pollers] Could not list published scheduled_posts for post analytics:', error.message);
+    return;
+  }
+
+  for (const post of posts || []) {
+    await pollPostAnalytics(client, post).catch(err => console.error(`[social/pollers] Unexpected failure polling post analytics for post ${post.id}:`, err.message));
+  }
+}
+
 function start() {
   if (!intervalHandle) {
     intervalHandle = setInterval(() => { sweep().catch(err => console.error('[social/pollers] sweep failed:', err.message)); }, POLL_INTERVAL_MS);
@@ -197,6 +294,11 @@ function start() {
     sweepAnalytics().catch(err => console.error('[social/pollers] initial analytics sweep failed:', err.message));
     console.log('[social/pollers] Analytics sync started (6 hour interval).');
   }
+  if (!postAnalyticsIntervalHandle) {
+    postAnalyticsIntervalHandle = setInterval(() => { sweepPostAnalytics().catch(err => console.error('[social/pollers] post analytics sweep failed:', err.message)); }, ANALYTICS_POLL_INTERVAL_MS);
+    sweepPostAnalytics().catch(err => console.error('[social/pollers] initial post analytics sweep failed:', err.message));
+    console.log('[social/pollers] Post analytics sync started (6 hour interval).');
+  }
 }
 
 function stop() {
@@ -204,6 +306,8 @@ function stop() {
   intervalHandle = null;
   if (analyticsIntervalHandle) clearInterval(analyticsIntervalHandle);
   analyticsIntervalHandle = null;
+  if (postAnalyticsIntervalHandle) clearInterval(postAnalyticsIntervalHandle);
+  postAnalyticsIntervalHandle = null;
 }
 
-module.exports = { start, stop, sweep, sweepAnalytics };
+module.exports = { start, stop, sweep, sweepAnalytics, sweepPostAnalytics, externalPostIdFor };

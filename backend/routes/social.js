@@ -537,6 +537,43 @@ protectedRouter.get('/social/posts', asyncHandler(async (req, res) => {
   res.json({ posts: data });
 }));
 
+/**
+ * Per-post analytics (ingestion: social/pollers.js's sweepPostAnalytics,
+ * every 6h). post_analytics is tenant-scoped by its own tenant_id, but
+ * that alone can't prove this post belongs to this tenant — a caller
+ * could pass any post_analytics row's scheduled_post_id otherwise — so
+ * this confirms ownership of the post itself first, via scoped(), and
+ * 404s before ever touching post_analytics if that fails. `availability`
+ * tells the frontend, per target platform, whether per-post analytics
+ * exist at all for this post — not just "no data yet" vs "will never
+ * have data" — straight from whether that platform's adapter exports
+ * fetchPostAnalytics (see each adapter's header for why LinkedIn/Google
+ * Business/WhatsApp don't).
+ */
+protectedRouter.get('/social/posts/:id/analytics', asyncHandler(async (req, res) => {
+  const client = requireSocialClient(res);
+  if (!client) return;
+
+  const { data: post, error: postError } = await scoped(client, req.tenantId, 'scheduled_posts')
+    .select('id, target_platforms').eq('id', req.params.id).maybeSingle();
+  if (postError) return res.status(500).json({ error: postError.message });
+  if (!post) return res.status(404).json({ error: 'Post not found.' });
+
+  const { data: metrics, error } = await scoped(client, req.tenantId, 'post_analytics')
+    .select('social_account_id, platform, metric, value, captured_date')
+    .eq('scheduled_post_id', post.id)
+    .order('captured_date', { ascending: true });
+  if (error) return res.status(500).json({ error: error.message });
+
+  const availability = {};
+  for (const platform of post.target_platforms || []) {
+    const adapter = ADAPTERS[platform];
+    availability[platform] = !!(adapter && typeof adapter.fetchPostAnalytics === 'function');
+  }
+
+  res.json({ metrics: metrics || [], availability });
+}));
+
 protectedRouter.delete('/social/posts/:id', asyncHandler(async (req, res) => {
   const client = requireSocialClient(res);
   if (!client) return;

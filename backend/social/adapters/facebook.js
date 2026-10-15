@@ -320,6 +320,37 @@ async function fetchPosts(account, limit = 10) {
 }
 
 /**
+ * Per-post engagement for exactly one post, by externalPostId — what
+ * social/pollers.js's post-analytics sweep calls for each (post,
+ * account) pair, as opposed to fetchPosts' "most recent N" shape.
+ * Deliberately the same stable object fields as fetchPosts/normalizePost
+ * (likes/comments/shares summary counts), NOT a call to /insights at the
+ * post level: Meta deprecated post_impressions (Nov 15 2025, with
+ * post_media_view as the named alternative) and post_engaged_users'
+ * status is unresolved across Meta's own docs as of this build (listed
+ * as a valid field on one reference page, reported failing with an
+ * invalid-metric error on Meta's own developer forum) — shipping a call
+ * to a metric name that may 400 in production is worse than not having
+ * it, so reach/impressions for a specific post are not available from
+ * this adapter today. If Meta's metrics migration (Graph API v25.0's
+ * "Media Views"/"Media Viewers" concepts) settles on a stable post-level
+ * name, add it here.
+ */
+async function fetchPostAnalytics(account, externalPostId) {
+  const data = await metaOAuth.graphFetch(`/${externalPostId}`, {
+    fields: 'likes.summary(true).limit(0),comments.summary(true).limit(0),shares',
+    access_token: account.accessToken
+  });
+
+  const capturedDate = new Date().toISOString().slice(0, 10);
+  const out = [];
+  if (data.likes) out.push({ metric: 'likes', value: (data.likes.summary && data.likes.summary.total_count) || 0, capturedDate });
+  if (data.comments) out.push({ metric: 'comments', value: (data.comments.summary && data.comments.summary.total_count) || 0, capturedDate });
+  if (data.shares) out.push({ metric: 'shares', value: data.shares.count || 0, capturedDate });
+  return out;
+}
+
+/**
  * Enriches a permanent auth error (see _meta-oauth.js's graphError) with
  * *why* the permission is missing before it reaches pollers.js/routes —
  * "reconnect this account" vs "this needs App Review on Meta's dashboard"
@@ -350,6 +381,7 @@ module.exports = {
   fetchLeads,
   fetchPostCount: withAuthDiagnostic(fetchPostCount),
   fetchPosts: withAuthDiagnostic(fetchPosts),
+  fetchPostAnalytics: withAuthDiagnostic(fetchPostAnalytics),
   refreshAccessToken,
   metadata: {
     name: 'Facebook',

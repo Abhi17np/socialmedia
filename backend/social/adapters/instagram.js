@@ -284,6 +284,30 @@ async function fetchPosts(account, limit = 10) {
   }
 }
 
+/**
+ * Per-post engagement for exactly one media item, by externalPostId —
+ * same purpose and same stable-field choice as facebook.js's
+ * fetchPostAnalytics (see that file's comment on why this deliberately
+ * avoids the Insights endpoint). like_count/comments_count are the same
+ * fields fetchPosts/normalizeMedia already use; no shares figure exists
+ * for Instagram media via this API (see normalizeMedia above), and
+ * reach/impressions/views are explicitly listed by Meta as "Metric in
+ * development" on Instagram Media Insights as of this build, so neither
+ * is called here.
+ */
+async function fetchPostAnalytics(account, externalPostId) {
+  const data = await metaOAuth.graphFetch(`/${externalPostId}`, {
+    fields: 'like_count,comments_count',
+    access_token: account.accessToken
+  });
+
+  const capturedDate = new Date().toISOString().slice(0, 10);
+  const out = [];
+  if ('like_count' in data) out.push({ metric: 'likes', value: data.like_count || 0, capturedDate });
+  if ('comments_count' in data) out.push({ metric: 'comments', value: data.comments_count || 0, capturedDate });
+  return out;
+}
+
 // Same idea as facebook.js's withAuthDiagnostic — see that file's comment.
 function withAuthDiagnostic(fn) {
   return async function (account, ...args) {
@@ -309,6 +333,7 @@ module.exports = {
   fetchAnalytics: withAuthDiagnostic(fetchAnalytics),
   fetchPostCount: withAuthDiagnostic(fetchPostCount),
   fetchPosts: withAuthDiagnostic(fetchPosts),
+  fetchPostAnalytics: withAuthDiagnostic(fetchPostAnalytics),
   refreshAccessToken,
   metadata: {
     name: 'Instagram',

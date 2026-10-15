@@ -161,6 +161,28 @@ async function fetchAnalytics(account) {
   ];
 }
 
+/**
+ * Per-video stats for exactly one video, by externalPostId — real
+ * numbers straight from the video resource's own `statistics` part, the
+ * same no-extra-scope call fetchAnalytics already makes at the channel
+ * level, just scoped to one video id. likeCount can be absent if the
+ * uploader has public like counts disabled; Number(undefined || 0)
+ * below reports that as 0 rather than throwing.
+ */
+async function fetchPostAnalytics(account, externalPostId) {
+  const youtube = getYoutubeClient(account);
+  const { data } = await youtube.videos.list({ part: ['statistics'], id: [externalPostId] });
+  const stats = data.items && data.items[0] && data.items[0].statistics;
+  if (!stats) return [];
+
+  const capturedDate = new Date().toISOString().slice(0, 10);
+  return [
+    { metric: 'views', value: Number(stats.viewCount || 0), capturedDate },
+    { metric: 'likes', value: Number(stats.likeCount || 0), capturedDate },
+    { metric: 'comments', value: Number(stats.commentCount || 0), capturedDate }
+  ];
+}
+
 module.exports = {
   isConfigured,
   connect,
@@ -169,6 +191,7 @@ module.exports = {
   fetchInbox,
   sendReply,
   fetchAnalytics,
+  fetchPostAnalytics,
   refreshAccessToken,
   metadata: {
     name: 'YouTube',

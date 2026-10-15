@@ -3,7 +3,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import {
   RefreshCw, X, ChevronDown, ChevronRight, PenSquare, CalendarDays, List as ListIcon,
-  CalendarClock, Check, Repeat
+  CalendarClock, Check, Repeat, BarChart2
 } from 'lucide-react';
 import { SOCIAL_API_BASE, AVAILABLE_PLATFORMS } from './api';
 import { Page, PageBar, PageBody } from '../ui/page';
@@ -75,8 +75,79 @@ function PostErrors({ results }) {
   );
 }
 
-function PostCard({ post, onCancel, onApprove, onReject, canReview }) {
+/**
+ * Per-post analytics panel — lazy-loaded on expand, same posture as
+ * Analytics.jsx's existing lazy per-post detail (GET
+ * /social/accounts/:id/posts), but sourced from the new persisted
+ * pipeline (GET /social/posts/:id/analytics) instead of a live platform
+ * call, so it's a history, not just "right now". `availability` drives
+ * an honest message for a platform that genuinely has no per-post data
+ * (LinkedIn/Google Business/WhatsApp) rather than leaving it looking
+ * like a loading state that never resolves.
+ */
+function PostAnalytics({ post, authFetch }) {
+  const [data, setData] = useState(null);
+  const [loadError, setLoadError] = useState(null);
+
+  useEffect(() => {
+    let active = true;
+    setData(null);
+    setLoadError(null);
+    authFetch(`${SOCIAL_API_BASE}/posts/${post.id}/analytics`)
+      .then(async (res) => {
+        const body = await res.json();
+        if (!res.ok) throw new Error(body.error || 'Could not load analytics.');
+        if (active) setData(body);
+      })
+      .catch((err) => {
+        if (active) setLoadError(err.message);
+      });
+    return () => {
+      active = false;
+    };
+  }, [post.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  if (loadError) return <p className="text-[11px] text-danger mt-2">{loadError}</p>;
+  if (!data) return <Skeleton className="h-6 mt-2" />;
+
+  const byAccount = {};
+  (data.metrics || []).forEach((m) => {
+    const bucket = (byAccount[m.social_account_id] = byAccount[m.social_account_id] || { platform: m.platform, latest: {} });
+    bucket.latest[m.metric] = m.value; // rows arrive oldest-first, so the last write per metric is the latest value
+  });
+  const accounts = Object.values(byAccount);
+  const unavailable = (post.target_platforms || []).filter((p) => data.availability && data.availability[p] === false);
+
+  return (
+    <div className="mt-2 rounded-ui border border-hairline bg-sunken/40 px-2.5 py-2 flex flex-col gap-1">
+      {accounts.length === 0 ? (
+        <p className="text-[11px] text-subtle">
+          {unavailable.length === (post.target_platforms || []).length
+            ? "Per-post analytics aren't available for this post's platform(s) — see below."
+            : 'No analytics yet — checked every 6 hours after publishing.'}
+        </p>
+      ) : (
+        accounts.map((b, i) => (
+          <div key={i} className="flex items-center gap-2 text-[11px]">
+            <ChannelDot platform={b.platform} size={7} />
+            {Object.entries(b.latest).map(([metric, value]) => (
+              <span key={metric} className="text-muted">
+                {metric}: <span className="text-ink font-medium tabular-nums">{value}</span>
+              </span>
+            ))}
+          </div>
+        ))
+      )}
+      {unavailable.length > 0 && (
+        <p className="text-[11px] text-subtle">Not available for: {unavailable.map(channelLabel).join(', ')}.</p>
+      )}
+    </div>
+  );
+}
+
+function PostCard({ post, onCancel, onApprove, onReject, canReview, authFetch }) {
   const status = STATUS[post.status] || STATUS.pending;
+  const [showAnalytics, setShowAnalytics] = useState(false);
   return (
     <div className="px-4 py-3 border-b border-hairline last:border-0 flex items-start justify-between gap-4 hover:bg-canvas/60 transition-colors">
       <div className="flex-1 min-w-0">
@@ -107,9 +178,15 @@ function PostCard({ post, onCancel, onApprove, onReject, canReview }) {
         {post.status === 'rejected' && post.review_note && (
           <p className="text-[11px] text-danger mt-1">Rejected: {post.review_note}</p>
         )}
+        {showAnalytics && <PostAnalytics post={post} authFetch={authFetch} />}
       </div>
       <div className="flex flex-col items-end gap-2 shrink-0">
         <Chip tone={status.tone}>{status.label}</Chip>
+        {post.status === 'published' && (
+          <Button size="sm" variant="ghost" icon={BarChart2} onClick={() => setShowAnalytics((v) => !v)}>
+            {showAnalytics ? 'Hide analytics' : 'Analytics'}
+          </Button>
+        )}
         {post.status === 'pending' && (
           <Button size="sm" variant="ghost" icon={X} onClick={() => onCancel(post)}>
             Cancel
@@ -463,7 +540,7 @@ function Posts({ authFetch, role, setCurrentView }) {
                 </button>
                 {!isCollapsed &&
                   datePosts.map((post) => (
-                    <PostCard key={post.id} post={post} onCancel={setConfirmCancel} onApprove={approve} onReject={reject} canReview={canReview} />
+                    <PostCard key={post.id} post={post} onCancel={setConfirmCancel} onApprove={approve} onReject={reject} canReview={canReview} authFetch={authFetch} />
                   ))}
               </Panel>
             );

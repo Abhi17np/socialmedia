@@ -141,19 +141,109 @@ test:integration`: `social-approval.js` now 12/12. `npm run test:all`:
 exit 0. Frontend `eslint .` clean; `next build` compiles (same
 pre-existing, unrelated `/account` Suspense issue).
 
-## 5. What's still deliberately deferred (not silently dropped)
+## 5. Round 3 — a real per-post analytics pipeline
 
-- **Real, personalized best-time-to-post.** `analytics_snapshots` is
-  account-level daily data (followers/reach/engagement), not per-post
-  engagement broken out by hour — there's no real signal to compute a
-  genuine "best hour" from yet. Building it honestly means first adding
-  per-post analytics collection across 5 adapters (a real, separate
-  undertaking), not shipping a generic industry-average lookup table
-  dressed up as personalized intelligence.
-- **Per-post analytics.** Same root cause as above — `fetchAnalytics` in
-  every adapter is page/account-level only today.
+**What was built**: `post_analytics` (migration 036) — ingestion,
+storage, and normalization for per-post engagement, closing the gap
+Round 1/2 both named here. `social/pollers.js`'s new `sweepPostAnalytics()`
+(same 6h cadence as the existing account-level sweep, no new timer
+constant) walks every `published` post from the last
+`POST_ANALYTICS_LOOKBACK_DAYS` (30) — which also doubles as this
+feature's backfill, since the first sweep after this migration picks up
+every already-published post in that window, not just new ones — reads
+each target account's real `externalPostId` out of
+`platform_results` (`social/pollers.js`'s `externalPostIdFor()`, unit
+tested), and calls a new `fetchPostAnalytics(account, externalPostId)`
+per adapter.
+
+**Real, verified against current API docs, not assumed**: Facebook and
+Instagram's adapters deliberately use the same stable object fields
+`fetchPosts`/`normalizePost`/`normalizeMedia` already used
+(`likes`/`comments`/`shares` summary counts), **not** a call to either
+platform's post-level Insights endpoint — Meta deprecated
+`post_impressions` (Nov 15 2025) and Instagram's `impressions`/`views`/
+`total_interactions` are listed on Meta's own current docs as "Metric in
+development," with `post_engaged_users`'s status unresolved even across
+Meta's own pages. Shipping a call to a metric name that may 400 in
+production would fail rule 2's "no placeholders" bar in the opposite
+direction — looking built while silently not working — so reach/
+impressions for a specific post are honestly not collected yet. YouTube
+gets real `views`/`likes`/`comments` via `videos.list?part=statistics`,
+no new scope needed. **LinkedIn and Google Business deliberately do not
+get a `fetchPostAnalytics` export** — confirmed via LinkedIn's own Social
+Actions API docs that reading a personal post's social actions needs
+`r_member_social`, granted to select developers only (not the self-serve
+tier this app's LinkedIn connect already uses); Google Business's only
+metrics API (`businessprofileperformance`) is location-level, with no
+per-post insights anywhere in the Business Profile APIs. The sweep's
+existing `typeof adapter.fetchPostAnalytics === 'function'` capability
+check is the honest "not available" signal for both — the same idiom
+`fetchAnalytics`/`fetchMentions`/`fetchInbox` already use, not a new flag
+system.
+
+**New endpoint**: `GET /social/posts/:id/analytics` — tenant-scoped (a
+different tenant's post is a real 404, verified against a live
+Postgres+PostgREST stack, not just a forged-JWT unit check), returns the
+metric history plus a per-platform `availability` map so the frontend
+can show "not available for X" honestly instead of a stuck loading
+state. Surfaced in `Posts.jsx` as a per-post expandable panel on
+published posts.
+
+**Entitlements**: deliberately NOT metered or plan-gated in this round —
+per-post analytics is visible to every tenant regardless of plan right
+now, the same posture `analytics_snapshots` (account-level) already has.
+Whether to gate it is a packaging decision, not made unilaterally here.
+
+**Files added**: `backend/migrations/036_post_analytics.sql`;
+`backend/test/postAnalytics.test.js` (5 unit tests for
+`externalPostIdFor()`); `backend/scripts/integration-tests/social-post-analytics.js`
+(5 assertions against a live local Postgres+PostgREST stack: stored-row
+retrieval, mixed per-platform availability, same-day upsert-in-place,
+real cross-tenant 404, nonexistent-post 404).
+
+**Files changed**: `backend/social/adapters/{facebook,instagram,youtube}.js`
+(`fetchPostAnalytics`), `backend/social/adapters/{linkedin,google-business}.js`
+(documented, deliberate non-export), `backend/social/pollers.js`
+(`sweepPostAnalytics`, `pollPostAnalytics`, `externalPostIdFor`),
+`backend/routes/social.js` (`GET /social/posts/:id/analytics`),
+`frontend/src/social/Posts.jsx` (per-post analytics panel),
+`backend/package.json` / `backend/scripts/integration-tests/README.md`
+(wired the new integration test into the chain).
+
+**Tests run**: `npm test`: **135/135** (130 prior + 5 new), backend
+`eslint .` clean on every changed file. Integration: stood up a real
+local Postgres 16 + PostgREST + the rest-proxy this round specifically
+to get genuine evidence instead of claiming this without it (closes a
+sliver of the "no CI coverage of the integration suite" risk the
+architecture audit flagged) — `social-post-analytics.js` **5/5**,
+`social-approval.js` re-run as a regression check on the touched
+`routes/social.js` **12/12**, both against the live stack. Frontend
+`eslint .` clean; `next build` compiles (same pre-existing, unrelated
+`/account` Suspense issue every prior round already hit).
+
+**Blockers / deployment requirements**: none new — no new env vars, no
+new external credentials, no new provider dependency (every adapter
+change reuses scopes/products this app already has). The local
+Postgres+PostgREST+Redis stand-up used for testing is this session's
+own scratch infrastructure, not committed and not required in
+production (Supabase fills that role there, same as every prior round).
+
+## 6. What's still deliberately deferred (not silently dropped)
+
+- **Real, personalized best-time-to-post**, specifically. Per-post data
+  now exists (likes/comments/shares/views — see Round 3 above), but
+  there still isn't an hour-of-day breakdown for any metric on any
+  platform's API as currently exposed — the per-post rows are daily
+  snapshots, not intraday. A genuine "best hour" still needs that finer
+  grain, which no adapter's API currently offers at the post level.
+- **Per-post reach/impressions specifically**, and **any per-post metric
+  at all for LinkedIn and Google Business** — see Round 3's adapter
+  notes above for the exact, current, per-platform reason (a metric
+  that's mid-deprecation/"in development," or a permission tier this app
+  doesn't hold, or an API that's structurally location-level only — not
+  "haven't gotten to it yet").
 - **Series-wide edit/cancel** for a recurring post — each occurrence is
-  managed individually for now (see above).
+  managed individually for now (see Round 2 above).
 - **Social listening beyond owned accounts** (keyword/hashtag/competitor
   monitoring). Everything today is scoped to the tenant's own connected
   accounts' mentions/comments/reviews.

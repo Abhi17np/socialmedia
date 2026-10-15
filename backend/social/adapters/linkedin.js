@@ -205,6 +205,16 @@ async function fetchAnalytics() {
   return [];
 }
 
+// No fetchPostAnalytics export, deliberately: reading a personal
+// profile post's own like/comment counts back needs r_member_social,
+// which LinkedIn grants to select developers only (not a self-serve
+// product the way w_member_social/"Share on LinkedIn" is) — confirmed
+// against LinkedIn's own Social Actions API docs. social/pollers.js's
+// post-analytics sweep checks `typeof adapter.fetchPostAnalytics ===
+// 'function'` before calling, so omitting it entirely is this adapter's
+// honest "not available" signal, same as fetchAnalytics returning []
+// above — not a placeholder, a documented platform limit.
+
 /**
  * LinkedIn only issues a refresh_token to apps approved for
  * refresh-token-eligible products; otherwise the 60-day access token has
