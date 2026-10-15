@@ -8,7 +8,8 @@ import {
   Inbox as InboxIcon,
   LineChart,
   Megaphone,
-  FlaskConical
+  FlaskConical,
+  Swords
 } from 'lucide-react';
 import { atLeast } from '../roleRank';
 
@@ -32,6 +33,7 @@ const ITEMS = [
   { href: '/inbox', icon: InboxIcon, label: 'Inbox', minRole: 'viewer', badge: 'inbox' },
   { href: '/analytics', icon: LineChart, label: 'Analytics', minRole: 'viewer' },
   { href: '/experiments', icon: FlaskConical, label: 'Experiments', minRole: 'viewer' },
+  { href: '/competitors', icon: Swords, label: 'Competitors', minRole: 'viewer' },
   { href: '/whatsapp', icon: Megaphone, label: 'WhatsApp Broadcast', minRole: 'viewer' }
 ];
 

@@ -12,10 +12,11 @@ const { scoped } = require('../lib/query');
 const { assertWithinLimit, recordUsage } = require('../lib/entitlements');
 const { validate } = require('../middleware/validate');
 const { requireRole } = require('../middleware/tenant');
-const { draftPostSchema, hashtagSuggestSchema, repurposeSchema } = require('../lib/schemas');
-const { draftPost, draftReply, suggestHashtags, classifyMessage, repurposeContent } = require('../lib/ai');
+const { draftPostSchema, hashtagSuggestSchema, repurposeSchema, competitorGapsSchema } = require('../lib/schemas');
+const { draftPost, draftReply, suggestHashtags, classifyMessage, repurposeContent, analyzeCompetitorGaps, getAnthropicClient } = require('../lib/ai');
 const { getBrandProfile, buildBrandContext, checkBrandViolations } = require('../lib/brandMemory');
 const { findDuplicateWarning, mediaRequirementWarnings } = require('../lib/repurposing');
+const { getUsableAccount } = require('../social/accounts');
 
 const router = express.Router();
 
@@ -172,6 +173,71 @@ router.post('/inbox/:id/analyze', async (req, res) => {
 
     await recordUsage(client, req.tenantId, 'aiGenerationsPerMonth');
     res.json({ sentiment: updated.ai_sentiment, urgent: updated.ai_urgent });
+  } catch (err) {
+    res.status(err.statusCode || 500).json({ error: err.message });
+  }
+});
+
+/**
+ * Competitor Opportunity Radar's content-gap analysis (lib/ai.js's
+ * analyzeCompetitorGaps). member+ matches /compose/draft's own bar —
+ * this is a drafting aid, not an action on its own. Fetches the
+ * competitor's recent posts LIVE via the adapter's fetchCompetitor()
+ * (not from competitor_snapshots, which only stores rolled-up metrics,
+ * not caption text) and the tenant's own recent captions from
+ * scheduled_posts, then returns each gap's evidence resolved back to
+ * the actual competitor post it cites — see lib/ai.js's own header for
+ * why the model's citation indices are re-validated before this point.
+ * Checks AI Assist is actually configured BEFORE spending a live
+ * fetchCompetitor() call against the viewer account's own API quota —
+ * failing closed early here, not after that call, is the whole point
+ * of "fail closed," not just its end state.
+ */
+router.post('/compose/competitor-gaps', requireRole('member'), validate(competitorGapsSchema), async (req, res) => {
+  const client = requireSocialClient(res);
+  if (!client) return;
+  if (!getAnthropicClient()) return res.status(503).json({ error: 'AI Assist is not configured (ANTHROPIC_API_KEY in backend/.env).' });
+
+  try {
+    await assertWithinLimit(client, req.tenantId, 'aiGenerationsPerMonth');
+    const { trackedCompetitorId } = req.body;
+
+    const { data: competitor, error: compErr } = await scoped(client, req.tenantId, 'tracked_competitors').select('*').eq('id', trackedCompetitorId).maybeSingle();
+    if (compErr) return res.status(500).json({ error: compErr.message });
+    if (!competitor) return res.status(404).json({ error: 'Tracked competitor not found.' });
+
+    const usable = await getUsableAccount(req.tenantId, competitor.viewer_account_id);
+    if (!usable || typeof usable.adapter.fetchCompetitor !== 'function') {
+      return res.status(503).json({ error: 'The connected account used to view this competitor is no longer available.' });
+    }
+    const live = await usable.adapter.fetchCompetitor(usable.account, competitor.handle);
+    const competitorPosts = live.posts.filter((p) => p.caption);
+    if (competitorPosts.length === 0) {
+      return res.status(422).json({ error: `@${competitor.handle} has no recent captioned posts to compare against.` });
+    }
+
+    const since = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+    const { data: ownPosts } = await scoped(client, req.tenantId, 'scheduled_posts').select('content')
+      .eq('status', 'published').gte('scheduled_at', since).contains('target_account_ids', [competitor.viewer_account_id]).limit(20);
+
+    const profile = await getBrandProfile(client, req.tenantId);
+    const { gaps } = await analyzeCompetitorGaps({
+      ownCaptions: (ownPosts || []).map((p) => p.content).filter(Boolean),
+      competitorCaptions: competitorPosts.map((p) => p.caption),
+      competitorLabel: competitor.label || `@${competitor.handle}`,
+      brandContext: buildBrandContext(profile)
+    });
+
+    // Resolve each gap's 1-based evidence indices back to the real post
+    // objects (caption + permalink) so the UI shows an actual, clickable
+    // source instead of a bare number — the whole point of citing at all.
+    const resolvedGaps = gaps.map((g) => ({
+      ...g,
+      evidence: g.evidence.map((i) => ({ caption: competitorPosts[i - 1].caption, permalinkUrl: competitorPosts[i - 1].permalinkUrl }))
+    }));
+
+    await recordUsage(client, req.tenantId, 'aiGenerationsPerMonth');
+    res.json({ gaps: resolvedGaps });
   } catch (err) {
     res.status(err.statusCode || 500).json({ error: err.message });
   }

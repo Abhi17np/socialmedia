@@ -183,6 +183,46 @@ async function fetchPostAnalytics(account, externalPostId) {
   ];
 }
 
+/**
+ * Competitor Opportunity Radar: looks up ANOTHER public YouTube
+ * channel's statistics and recent videos — fully public YouTube Data
+ * API v3 endpoints (channels.list/search.list/videos.list), callable
+ * for any channel's public data through THIS connected channel's own
+ * OAuth token; no extra scope needed since these are public GET
+ * endpoints, not restricted to the token owner's own channel.
+ */
+async function fetchCompetitor(account, handle) {
+  const youtube = getYoutubeClient(account);
+  const cleanHandle = handle.startsWith('@') ? handle : `@${handle}`;
+  const { data: channelData } = await youtube.channels.list({ part: ['statistics'], forHandle: cleanHandle });
+  const channel = channelData.items && channelData.items[0];
+  if (!channel) throw new Error(`Could not find a YouTube channel for handle "${handle}".`);
+
+  const { data: searchData } = await youtube.search.list({
+    part: ['id'], channelId: channel.id, order: 'date', type: ['video'], maxResults: 12
+  });
+  const videoIds = (searchData.items || []).map((item) => item.id.videoId).filter(Boolean);
+
+  let videos = [];
+  if (videoIds.length > 0) {
+    const { data: videosData } = await youtube.videos.list({ part: ['snippet', 'statistics'], id: videoIds });
+    videos = (videosData.items || []).map((v) => ({
+      externalPostId: v.id,
+      caption: v.snippet?.title || null,
+      likes: Number(v.statistics?.likeCount || 0),
+      comments: Number(v.statistics?.commentCount || 0),
+      permalinkUrl: `https://youtube.com/watch?v=${v.id}`,
+      createdTime: v.snippet?.publishedAt
+    }));
+  }
+
+  return {
+    followersCount: Number(channel.statistics?.subscriberCount || 0),
+    mediaCount: Number(channel.statistics?.videoCount || 0),
+    posts: videos
+  };
+}
+
 module.exports = {
   isConfigured,
   connect,
@@ -192,6 +232,7 @@ module.exports = {
   sendReply,
   fetchAnalytics,
   fetchPostAnalytics,
+  fetchCompetitor,
   refreshAccessToken,
   metadata: {
     name: 'YouTube',

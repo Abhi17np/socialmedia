@@ -82,6 +82,7 @@ node scripts/integration-tests/social-brand-memory.js
 node scripts/integration-tests/social-experiments.js
 node scripts/integration-tests/social-attribution.js
 node scripts/integration-tests/social-conversion-journeys.js
+node scripts/integration-tests/social-competitors.js
 node scripts/integration-tests/whatsapp-routes.js
 node scripts/integration-tests/sales-routes.js
 node scripts/integration-tests/sales-stage1.js

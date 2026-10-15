@@ -350,6 +350,22 @@ async function fetchPostAnalytics(account, externalPostId) {
   return out;
 }
 
+// No fetchCompetitor export, deliberately: reading a Page this app
+// doesn't manage needs Meta's "Page Public Content Access" feature,
+// which requires Business Verification and a separate App Review
+// submission this app's Meta App does not currently have approved —
+// confirmed against Meta's own feature-reference docs, not assumed.
+// Unlike pages_read_engagement (Advanced Access, gated per-call via
+// withAuthDiagnostic above), PPCA is an all-or-nothing app-level
+// feature: without it, Graph API in live mode can't see ANY public
+// Page's content at all, so there's no partial/fallback call worth
+// attempting here the way fetchPosts' basic-fields retry does.
+// social/pollers.js's post-analytics-style capability check
+// (`typeof adapter.fetchCompetitor === 'function'`) is the honest
+// "not available" signal — see instagram.js/youtube.js for the two
+// platforms where the equivalent public-lookup API genuinely is
+// available without this extra gate.
+
 /**
  * Enriches a permanent auth error (see _meta-oauth.js's graphError) with
  * *why* the permission is missing before it reaches pollers.js/routes —

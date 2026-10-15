@@ -308,6 +308,49 @@ async function fetchPostAnalytics(account, externalPostId) {
   return out;
 }
 
+/**
+ * Competitor Opportunity Radar: looks up ANOTHER public Instagram
+ * Business/Creator account's public metadata and recent posts via
+ * Meta's official Business Discovery API
+ * (business_discovery.username(...)) — through THIS connected
+ * account's own token, not the competitor's; Meta explicitly built
+ * this endpoint for exactly this "look at a public account you don't
+ * own" use case. Needs no new scope — pages_read_engagement/
+ * instagram_basic/instagram_manage_insights are already requested by
+ * every Instagram connection (see this file's SCOPES).
+ *
+ * Only followers_count/media_count and each returned post's
+ * like_count/comments_count/caption/timestamp are requested — fields
+ * Meta's own Business Discovery docs and examples confirm; no
+ * Insights-endpoint metric (reach/impressions/views), consistent with
+ * fetchPostAnalytics' own caution about Meta's metrics migration (see
+ * that function's comment). Only works for Business/Creator target
+ * accounts — a personal account 400s, surfaced as a clear error, not
+ * silently empty.
+ */
+async function fetchCompetitor(account, handle) {
+  const data = await metaOAuth.graphFetch(`/${account.externalAccountId}`, {
+    fields: `business_discovery.username(${handle}){followers_count,media_count,media.limit(12){caption,like_count,comments_count,timestamp,permalink}}`,
+    access_token: account.accessToken
+  });
+
+  const discovery = data.business_discovery;
+  if (!discovery) throw new Error(`Could not look up @${handle} — it may not be a public Instagram Business or Creator account.`);
+
+  return {
+    followersCount: Number(discovery.followers_count || 0),
+    mediaCount: Number(discovery.media_count || 0),
+    posts: (discovery.media?.data || []).map((m) => ({
+      externalPostId: m.id,
+      caption: m.caption || null,
+      likes: 'like_count' in m ? m.like_count || 0 : null,
+      comments: 'comments_count' in m ? m.comments_count || 0 : null,
+      permalinkUrl: m.permalink || null,
+      createdTime: m.timestamp
+    }))
+  };
+}
+
 // Same idea as facebook.js's withAuthDiagnostic — see that file's comment.
 function withAuthDiagnostic(fn) {
   return async function (account, ...args) {
@@ -334,6 +377,7 @@ module.exports = {
   fetchPostCount: withAuthDiagnostic(fetchPostCount),
   fetchPosts: withAuthDiagnostic(fetchPosts),
   fetchPostAnalytics: withAuthDiagnostic(fetchPostAnalytics),
+  fetchCompetitor: withAuthDiagnostic(fetchCompetitor),
   refreshAccessToken,
   metadata: {
     name: 'Instagram',

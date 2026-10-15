@@ -111,6 +111,17 @@ const updateTrackedLinkSchema = z.object({
   label: z.string().trim().max(200).optional()
 });
 
+const createTrackedCompetitorSchema = z.object({
+  platform: z.enum(['instagram', 'youtube']), // the only two platforms with a real fetchCompetitor() — see those adapters' headers
+  handle: z.string().trim().min(1).max(100),
+  label: z.string().trim().max(200).optional(),
+  viewerAccountId: z.string().uuid()
+});
+
+const competitorGapsSchema = z.object({
+  trackedCompetitorId: z.string().uuid()
+});
+
 const createExperimentSchema = z.object({
   name: z.string().trim().min(1).max(200),
   variable: z.enum(['hook', 'caption', 'cta', 'format']),
@@ -706,6 +717,7 @@ module.exports = {
   savedReplySchema, draftPostSchema, whatsappEmbeddedSignupSchema, inboxReplySchema, updateInteractionSchema,
   repurposeSchema, brandMemorySchema, createExperimentSchema, CONFIDENCE_LEVELS,
   createTrackedLinkSchema, updateTrackedLinkSchema, conversionJourneySchema,
+  createTrackedCompetitorSchema, competitorGapsSchema,
   INTERACTION_STATUSES, INTERACTION_PRIORITIES, changePasswordSchema, forgotPasswordSchema, resetPasswordSchema,
   updateHubsSchema, templateSchema, segmentSchema, segmentMembersSchema, whatsappCampaignSchema,
   companySchema, contactSchema, updateContactSchema, dealSchema, updateDealSchema, moveDealStageSchema, salesActivitySchema,

@@ -153,6 +153,12 @@ async function refreshAccessToken(refreshToken) {
 // checks `typeof adapter.fetchPostAnalytics === 'function'` before
 // calling, so omitting it is this adapter's honest "not available"
 // signal, not a placeholder.
+//
+// No fetchCompetitor export either: there's no equivalent of
+// Instagram's Business Discovery or YouTube's public channel lookup for
+// a Business Profile this app doesn't manage — a competitor's public
+// listing/reviews live in Google's Places API, a different product and
+// credential this app doesn't integrate with today.
 async function fetchAnalytics(account) {
   const locationPart = account.externalAccountId.split('/').slice(-2).join('/'); // "locations/456"
   const end = new Date();

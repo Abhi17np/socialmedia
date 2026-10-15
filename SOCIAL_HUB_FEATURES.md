@@ -166,6 +166,39 @@ analysis against competitors and what shipped in which round, see
   Marketing Hub enabled can build a more complex version of the same journey there,
   using the identical trigger.
 
+## Competitor Opportunity Radar
+
+- **Track a competitor's public Instagram or YouTube account** — the only two
+  platforms with an official, permitted way to read another account's public
+  data without scraping: Instagram via Meta's **Business Discovery** API
+  (`business_discovery.username(...)`), YouTube via its fully public
+  `channels.list`/`search.list`/`videos.list` endpoints. Both read through one
+  of the tenant's **own** connected accounts' existing OAuth token — zero new
+  scopes, zero reconnection, since the scopes this app already requests for
+  every Instagram/YouTube connection already cover it.
+- A **daily sweep** (`backend/social/competitorSweep.js`) captures followers,
+  media count, posts-in-the-last-30-days, and average engagement rate
+  (`(likes+comments)/post/followers` — the same audience-normalized "rate, not
+  raw count" principle the Content Experiment Engine's statistics use) —
+  deliberately slower than the 6-hourly own-account analytics cadence, since
+  every lookup spends the tenant's own account's API quota to read someone
+  else's data.
+- **Side-by-side comparison against the tenant's own account**, computed from
+  data this app already collects for its own accounts (per-post
+  `post_analytics`, follower `analytics_snapshots`) — not a second live API
+  call — using the exact same engagement-rate formula so the two numbers are
+  directly comparable.
+- **AI content-gap analysis** (pull-based, metered against the same
+  `aiGenerationsPerMonth` cap as every other AI Assist feature): compares the
+  tenant's own recent captions against the competitor's real, live-fetched
+  recent captions and surfaces themes the competitor covers that the tenant
+  hasn't — every suggestion must cite the specific competitor post(s) it's
+  drawn from, and the model's citations are **re-validated server-side**
+  against the real post list before reaching the UI, so a hallucinated
+  citation can never surface as evidence.
+- **Facebook, LinkedIn, and Google Business are deliberately excluded** — see
+  Known Limitations below for the specific, real reason per platform.
+
 ## Billing & Usage
 
 - **Razorpay subscriptions** + real usage metering (`increment_usage` Postgres RPC),
@@ -222,9 +255,19 @@ analysis against competitors and what shipped in which round, see
   two posts on the **same** connected account — a named scope cut (multi-variant needs a
   multiple-comparisons correction this app doesn't implement; cross-account comparison
   needs a deeper audience-normalization model), not a silently missing capability.
-- **No social listening beyond owned accounts** — everything is scoped to the tenant's
-  own connected accounts' mentions/comments/reviews, not keyword/hashtag/competitor
-  monitoring.
+- **No social listening beyond owned accounts and tracked competitors** —
+  mentions/comments/reviews are still scoped to the tenant's own connected
+  accounts; there's no keyword/hashtag monitoring across the open web.
+- **Competitor Opportunity Radar has no Facebook, LinkedIn, or Google Business
+  support** — each for a different, real reason, not an oversight: Facebook's
+  equivalent (**Page Public Content Access**) requires Meta Business
+  Verification plus a separate App Review this app doesn't have, and unlike
+  `pages_read_engagement` there's no partial/fallback call worth attempting
+  live-mode; LinkedIn has no public lookup API for a personal profile (which
+  is all this adapter ever connects); a competitor's public Google Business
+  listing lives in a separate Places API/credential this app doesn't
+  integrate. See `backend/social/adapters/facebook.js`,`linkedin.js`, and
+  `google-business.js`'s own header comments for each.
 - **No drag-and-drop kanban-style content calendar** — the calendar view is read/
   schedule only, not a visual approval board.
 - **Twitter/X and TikTok are unavailable** — blocked by platform API policy, not

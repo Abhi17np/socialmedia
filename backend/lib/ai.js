@@ -200,4 +200,66 @@ async function repurposeContent({ sourceContent, targetPlatforms, brandContext }
   }
 }
 
-module.exports = { getAnthropicClient, draftPost, draftReply, suggestHashtags, classifyMessage, repurposeContent };
+/**
+ * Competitor Opportunity Radar's content-gap analysis — the one
+ * genuinely qualitative piece of that feature (the rest is computed
+ * directly from real numbers, see lib/competitorRadar.js). Reads a
+ * sample of the tenant's own recent post captions and a competitor's
+ * recent post captions (real text, fetched via the adapters'
+ * fetchCompetitor()) and asks for themes the competitor covers that
+ * the tenant's own sample doesn't — each suggestion required to cite
+ * which actual competitor post(s) it's drawn from, so a human can
+ * verify it against real evidence rather than take an unsourced claim
+ * on faith (rule 3: ground in tenant data, show supporting evidence,
+ * state uncertainty). This never runs automatically — a tenant
+ * explicitly asks for it (POST /ai/compose/competitor-gaps), same
+ * pull-based, metered, human-reviewed posture as every other AI
+ * feature in this app.
+ */
+async function analyzeCompetitorGaps({ ownCaptions, competitorCaptions, competitorLabel, brandContext }) {
+  const anthropic = getAnthropicClient();
+  if (!anthropic) throw unavailableError();
+
+  const ownBlock = ownCaptions.length > 0 ? ownCaptions.map((c, i) => `${i + 1}. ${c}`).join('\n') : '(no recent posts to compare against)';
+  const competitorBlock = competitorCaptions.map((c, i) => `${i + 1}. ${c}`).join('\n');
+
+  const response = await anthropic.messages.create({
+    model: MODEL,
+    max_tokens: 1536,
+    output_config: { effort: 'low' },
+    system: [
+      `You compare a business's own recent social posts against ${competitorLabel}'s recent public posts to find content themes the competitor covers that the business hasn't touched recently.`,
+      'Respond with ONLY a JSON array, no markdown fences, no explanation, each item shaped exactly like: {"theme":"...","evidence":[1,3],"suggestion":"..."}.',
+      '"evidence" MUST be the 1-based index number(s) of the specific competitor post(s) below that support this theme — never invent a theme with no matching numbered post.',
+      'Only report a theme if it genuinely does not appear in the business\'s own recent posts list; do not report something both sides already cover.',
+      'Up to 5 themes. If nothing qualifies, respond with an empty JSON array [].' + (brandContext || '')
+    ].join(' '),
+    messages: [{ role: 'user', content: `Our own recent posts:\n${ownBlock}\n\n${competitorLabel}'s recent posts:\n${competitorBlock}` }]
+  });
+  if (response.stop_reason === 'refusal') throw refusedError(response.stop_details);
+
+  try {
+    const parsed = JSON.parse(textOf(response).replace(/^```json\s*|\s*```$/g, ''));
+    if (!Array.isArray(parsed)) throw new Error('not an array');
+    // Re-validate evidence indices against the real list server-side —
+    // never trust the model's own citation to actually be in range,
+    // since a hallucinated index would otherwise point at nothing (or
+    // worse, silently point at the wrong post) when the UI resolves it.
+    return {
+      gaps: parsed
+        .filter((g) => g && typeof g.theme === 'string' && Array.isArray(g.evidence))
+        .map((g) => ({
+          theme: g.theme,
+          suggestion: typeof g.suggestion === 'string' ? g.suggestion : '',
+          evidence: g.evidence.filter((i) => Number.isInteger(i) && i >= 1 && i <= competitorCaptions.length)
+        }))
+        .filter((g) => g.evidence.length > 0)
+    };
+  } catch {
+    const err = new Error('AI Assist could not analyze these posts for content gaps — try again with different accounts.');
+    err.statusCode = 422;
+    throw err;
+  }
+}
+
+module.exports = { getAnthropicClient, draftPost, draftReply, suggestHashtags, classifyMessage, repurposeContent, analyzeCompetitorGaps };

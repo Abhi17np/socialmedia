@@ -605,7 +605,116 @@ unrelated `/account` Suspense issue every prior round also hit).
 
 **Blockers / deployment requirements**: none new.
 
-## 10. What's still deliberately deferred (not silently dropped)
+## 10. Round 8 — Competitor Opportunity Radar
+
+**Reclassified, not a true differentiator**: Phase 1's original research
+assumed this was "very high differentiation"; a second pass found 7 of
+8 researched competitors (Hootsuite, Metricool, Agorapulse, Sprout,
+Later, Zoho, HubSpot) already ship some form of competitor benchmarking
+— this is table-stakes/catch-up, built anyway at the user's explicit
+request, with the same rigor as every differentiated slice.
+
+**What was built**: `tracked_competitors`/`competitor_snapshots` tables
+(migration 040); a daily sweep (`backend/social/competitorSweep.js`,
+deliberately its own file and its own slower cadence — see its header)
+that calls a new `fetchCompetitor(account, handle)` export on the
+Instagram and YouTube adapters and stores followers/media count/
+posts-in-a-30-day-window/average engagement rate per day; a CRUD +
+comparison route (`backend/routes/competitors.js`); and a pull-based AI
+content-gap endpoint (`POST /ai/compose/competitor-gaps`,
+`lib/ai.js`'s `analyzeCompetitorGaps`).
+
+**Only Instagram and YouTube have a real, honest way to do this** —
+confirmed by research against each provider's own docs before writing
+any adapter code, not assumed:
+- **Instagram**: Meta's official **Business Discovery** feature
+  (`business_discovery.username(...)`) is built for exactly this "look
+  at a public account you don't own" case, through the tenant's OWN
+  connected account's existing token. Needs `pages_read_engagement`/
+  `instagram_basic`/`instagram_manage_insights` — all already requested
+  by every Instagram connection this app creates (see
+  `instagram.js`'s `SCOPES`). Zero new OAuth scope, zero reconnection.
+- **YouTube**: `channels.list(forHandle=...)`/`search.list`/
+  `videos.list` are fully public GET endpoints, not restricted to the
+  token owner's own channel — callable through an existing connected
+  channel's OAuth token with no new scope either.
+- **Facebook was deliberately excluded.** Its equivalent, **Page Public
+  Content Access**, requires Meta Business Verification *plus* a
+  separate App Review this app doesn't have — unlike
+  `pages_read_engagement`'s Standard/Advanced Access split, there's no
+  partial capability to fall back to; a live-mode call would 100% fail
+  for virtually every real tenant. Honestly omitting `fetchCompetitor`
+  from `facebook.js` (documented in that file's own header) was judged
+  better than shipping a call certain to fail.
+- **LinkedIn and Google Business have no equivalent at all** — LinkedIn
+  has no public lookup API for a personal profile (all this adapter
+  ever connects); a competitor's public Google Business listing lives
+  in a separate Places API/credential this app doesn't integrate. Both
+  documented the same way, in each adapter's own header.
+
+**The comparison reuses data this app already collects for its own
+accounts**, rather than spending a second live call: the detail route
+computes the tenant's own average engagement rate from its already-
+stored `post_analytics`/`analytics_snapshots` rows (Round 3's pipeline),
+using the exact same `(likes+comments)/post/followers` formula
+`lib/competitorRadar.js` uses for the competitor side, so the two
+numbers are directly comparable and the "rate, not raw count"
+normalization (the same principle the Content Experiment Engine's
+statistics use) holds on both sides of the comparison.
+
+**AI content-gap analysis is grounded, not trusted blindly**: the model
+reads the tenant's own recent captions and the competitor's real,
+live-fetched recent captions and must cite which specific numbered
+competitor post(s) support each suggested theme. Those citation indices
+are re-validated server-side against the real post count before
+anything reaches the UI — any index outside the real range is silently
+dropped rather than ever reaching a human as "evidence." This never
+runs automatically; a tenant explicitly requests it, metered against
+the same `aiGenerationsPerMonth` cap as every other AI Assist feature,
+and fails closed (503) with no `ANTHROPIC_API_KEY` — checked up front,
+before spending the live `fetchCompetitor()` call against the viewer
+account's own API quota, not after.
+
+**New endpoints**: `POST`/`GET /social/competitors`,
+`GET /social/competitors/:id`, `DELETE /social/competitors/:id`,
+`POST /ai/compose/competitor-gaps`.
+
+**Files added**: `backend/migrations/040_competitor_radar.sql`;
+`backend/lib/competitorRadar.js` (pure `averageEngagementRate()`/
+`postsInWindow()`, DB/network-free); `backend/social/competitorSweep.js`;
+`backend/routes/competitors.js`; `backend/test/competitorRadar.test.js`
+(7 unit tests); `backend/scripts/integration-tests/social-competitors.js`
+(12 assertions against a live Postgres+PostgREST stack).
+
+**Files changed**: `backend/social/adapters/instagram.js` and
+`youtube.js` (new `fetchCompetitor()` export each); `facebook.js`,
+`linkedin.js`, `google-business.js` (documentation-only header
+additions explaining the exclusion, no code); `backend/lib/ai.js`
+(`analyzeCompetitorGaps`); `backend/lib/schemas.js`
+(`createTrackedCompetitorSchema`, `competitorGapsSchema`);
+`backend/routes/ai.js` (the new endpoint); `backend/server.js` (mounts
+the routes, starts/stops the sweep).
+
+**Tests run**: `npm test`: **188/188** (7 new `competitorRadar.test.js`
+cases, zero regressions). Backend `eslint .` clean on every
+changed/added file. Integration (live local Postgres+PostgREST): new
+`social-competitors.js` **12/12** — platform validation (schema-level
+enum plus the route's own "does this adapter have fetchCompetitor"
+check), viewer-account ownership and platform-matching, duplicate-
+handle conflict (409), role gating (member+ to track, admin+ to
+untrack), tenant isolation (404, not a leak), a REAL end-to-end run of
+`competitorSweep.sweep()` against a stubbed adapter call proving the
+actual DB upsert and `lib/competitorRadar.js` math from real seeded
+data (not hand-fed numbers), the detail route's own-vs-competitor
+comparison computed from real seeded `post_analytics`/
+`analytics_snapshots`, fetch-then-404-then-delete, and the AI
+endpoint's fail-closed 503. Every prior integration test re-run as a
+regression check: all still fully passing (see the full
+`npm run test:integration` log for this round).
+
+**Blockers / deployment requirements**: none new.
+
+## 11. What's still deliberately deferred (not silently dropped)
 
 - **Real, personalized best-time-to-post**, specifically. Per-post data
   now exists (likes/comments/shares/views — see Round 3 above), but
@@ -626,9 +735,14 @@ unrelated `/account` Suspense issue every prior round also hit).
   mentions/comments can't resolve to a contact yet (no stable author id
   from those adapter calls). No branching/conditions either — see
   Round 7 above for the deliberate scope cut and its escape hatch.
-- **Social listening beyond owned accounts** (keyword/hashtag/competitor
-  monitoring). Everything today is scoped to the tenant's own connected
-  accounts' mentions/comments/reviews.
+- **Social listening beyond owned accounts and tracked competitors**
+  (open-web keyword/hashtag monitoring). Competitor benchmarking itself
+  is now built for Instagram/YouTube (Round 8 above); everything else is
+  still scoped to the tenant's own connected accounts' mentions/
+  comments/reviews.
+- **Competitor Opportunity Radar has no Facebook, LinkedIn, or Google
+  Business support** — three different real reasons, not one gap; see
+  Round 8 above.
 - **A drag-and-drop visual content calendar editor** beyond the existing
   month-view calendar (which is read/schedule, not a kanban-style
   approval board).

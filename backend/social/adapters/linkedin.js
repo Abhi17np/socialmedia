@@ -214,6 +214,12 @@ async function fetchAnalytics() {
 // 'function'` before calling, so omitting it entirely is this adapter's
 // honest "not available" signal, same as fetchAnalytics returning []
 // above — not a placeholder, a documented platform limit.
+//
+// No fetchCompetitor export either, same root cause: LinkedIn has no
+// public API for reading another member's or page's posts/engagement
+// without their own cooperation, and this adapter only ever connects
+// personal profiles (see this file's header) — there's no public
+// "Business Discovery"-style endpoint for a personal profile at all.
 
 /**
  * LinkedIn only issues a refresh_token to apps approved for
