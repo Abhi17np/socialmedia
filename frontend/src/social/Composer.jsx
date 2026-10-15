@@ -267,6 +267,23 @@ function Composer({ authFetch }) {
   const [aiError, setAiError] = useState(null);
   const [suggestingTags, setSuggestingTags] = useState(false);
   const [tagError, setTagError] = useState(null);
+  // Brand Memory (migration 037) — a warning, never a block: every AI
+  // draft here is still reviewed by a human before Publish/Schedule, so
+  // this just surfaces what backend/lib/brandMemory.js's post-generation
+  // check found, the same way it's returned alongside every draft.
+  const [brandViolations, setBrandViolations] = useState([]);
+
+  // AI Content Repurposing Studio — a separate panel, not folded into
+  // the AI compose mode above: this takes an existing piece of approved
+  // content as its source (not a brief), and produces one variant per
+  // selected platform at once. Picking a variant only fills the same
+  // `content` textarea manual/AI mode already uses — still reviewed and
+  // scheduled through the normal flow below, never created directly.
+  const [repurposeOpen, setRepurposeOpen] = useState(false);
+  const [repurposeSource, setRepurposeSource] = useState('');
+  const [repurposing, setRepurposing] = useState(false);
+  const [repurposeError, setRepurposeError] = useState(null);
+  const [repurposeResults, setRepurposeResults] = useState(null); // { results, mediaWarnings }
 
   useEffect(() => {
     authFetch(`${SOCIAL_API_BASE}/accounts`)
@@ -308,6 +325,7 @@ function Composer({ authFetch }) {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Could not generate a draft.');
       setContent(data.draft);
+      setBrandViolations(data.brandViolations || []);
     } catch (err) {
       setAiError(err.message);
     } finally {
@@ -332,11 +350,43 @@ function Composer({ authFetch }) {
       if (!res.ok) throw new Error(data.error || 'Could not suggest hashtags.');
       const tags = (data.hashtags || []).join(' ');
       setContent((prev) => (tags ? `${prev.trim()}\n\n${tags}` : prev));
+      setBrandViolations(data.brandViolations || []);
     } catch (err) {
       setTagError(err.message);
     } finally {
       setSuggestingTags(false);
     }
+  };
+
+  const generateRepurposedVariants = async () => {
+    if (!repurposeSource.trim() || selectedPlatforms.length === 0) return;
+    setRepurposing(true);
+    setRepurposeError(null);
+    try {
+      const res = await authFetch(`${API_BASE}/ai/compose/repurpose`, {
+        method: 'POST',
+        body: JSON.stringify({
+          sourceContent: repurposeSource.trim(),
+          targetPlatforms: selectedPlatforms,
+          hasMedia: mediaUrls.length > 0
+        })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Could not repurpose this content.');
+      setRepurposeResults(data);
+    } catch (err) {
+      setRepurposeError(err.message);
+    } finally {
+      setRepurposing(false);
+    }
+  };
+
+  const applyRepurposedVariant = (platform) => {
+    const variant = repurposeResults?.results?.[platform];
+    if (!variant?.content) return;
+    setContent(variant.content);
+    setBrandViolations(variant.brandViolations || []);
+    setRepurposeOpen(false);
   };
 
   // Keep the active preview tab valid as selections change — defaults to
@@ -553,7 +603,89 @@ function Composer({ authFetch }) {
                     <Sparkles size={12} /> AI assist
                   </button>
                 </div>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="ghost"
+                  icon={Repeat2}
+                  onClick={() => setRepurposeOpen((v) => !v)}
+                  className="ml-1"
+                >
+                  Repurpose content
+                </Button>
               </div>
+
+              {repurposeOpen && (
+                <div className="mx-4 mt-3 p-3 rounded-ui bg-brand-subtle/60 border border-hairline flex flex-col gap-2">
+                  <Textarea
+                    rows={3}
+                    placeholder="Paste an existing approved post, article excerpt, or announcement to turn into platform-specific variants…"
+                    value={repurposeSource}
+                    onChange={(e) => setRepurposeSource(e.target.value)}
+                  />
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <Button
+                      type="button"
+                      variant="primary"
+                      size="sm"
+                      icon={Sparkles}
+                      loading={repurposing}
+                      onClick={generateRepurposedVariants}
+                      disabled={!repurposeSource.trim() || selectedPlatforms.length === 0}
+                    >
+                      {repurposing ? 'Generating…' : `Generate ${selectedPlatforms.length || ''} variant${selectedPlatforms.length === 1 ? '' : 's'}`}
+                    </Button>
+                    {selectedPlatforms.length === 0 && (
+                      <span className="text-[11px] text-muted">Select a channel first — one variant is generated per selected channel.</span>
+                    )}
+                  </div>
+                  {repurposeError && <p className="text-[11px] text-danger">{repurposeError}</p>}
+
+                  {repurposeResults && (
+                    <div className="flex flex-col gap-2 mt-1">
+                      {repurposeResults.mediaWarnings?.length > 0 && (
+                        <Banner tone="warning">
+                          {repurposeResults.mediaWarnings.map((w) => w.message).join(' ')}
+                        </Banner>
+                      )}
+                      {Object.entries(repurposeResults.results || {}).map(([platform, variant]) => (
+                        <div key={platform} className="rounded-ui border border-hairline bg-card p-2.5 flex flex-col gap-1.5">
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="text-[11px] font-semibold text-ink">{channelLabel(platform)}</span>
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="ghost"
+                              disabled={!variant.content}
+                              onClick={() => applyRepurposedVariant(platform)}
+                            >
+                              Use this variant
+                            </Button>
+                          </div>
+                          {variant.content ? (
+                            <p className="text-xs text-ink leading-relaxed whitespace-pre-wrap">{variant.content}</p>
+                          ) : (
+                            <p className="text-[11px] text-danger">No variant was generated for this platform.</p>
+                          )}
+                          {variant.brandViolations?.length > 0 && (
+                            <p className="text-[11px] text-warning">
+                              Brand check: uses {variant.brandViolations.map((v) => `"${v.term}"`).join(', ')} — review before using.
+                            </p>
+                          )}
+                          {variant.duplicateWarning && (
+                            <p className="text-[11px] text-warning">
+                              Looks {Math.round(variant.duplicateWarning.similarity * 100)}% similar to a post already in your recent history — consider varying it further.
+                            </p>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  <p className="text-[11px] text-subtle">
+                    Picking a variant fills the editor below — you still review, edit and publish it yourself.
+                  </p>
+                </div>
+              )}
 
               {composeMode === 'ai' && (
                 <div className="mx-4 mt-3 p-3 rounded-ui bg-brand-subtle/60 border border-hairline flex flex-col gap-2">
@@ -600,7 +732,14 @@ function Composer({ authFetch }) {
                   rows={9}
                   placeholder="What do you want to say?"
                   value={content}
-                  onChange={(e) => setContent(e.target.value)}
+                  onChange={(e) => {
+                    setContent(e.target.value);
+                    // A brand-violation warning was computed for a specific
+                    // generated draft — once the human edits it by hand,
+                    // that warning no longer necessarily applies, so clear
+                    // it rather than leave a stale flag on edited text.
+                    if (brandViolations.length > 0) setBrandViolations([]);
+                  }}
                   className="text-[13px]"
                 />
 
@@ -617,6 +756,13 @@ function Composer({ authFetch }) {
                   </Button>
                   {tagError && <span className="text-[11px] text-danger">{tagError}</span>}
                 </div>
+
+                {brandViolations.length > 0 && (
+                  <p className="mt-2 text-[11px] text-warning">
+                    Brand check: this uses {brandViolations.map((v) => `"${v.term}"`).join(', ')} — your brand memory flags this
+                    {brandViolations.length === 1 ? ' as a banned term or prohibited claim' : ' as banned terms or prohibited claims'}. Review before publishing.
+                  </p>
+                )}
 
                 {/* per-channel counters */}
                 {selectedPlatforms.filter((p) => CHAR_LIMITS[p]).length > 0 && (

@@ -80,6 +80,26 @@ const hashtagSuggestSchema = z.object({
   platforms: z.array(z.string()).min(1)
 });
 
+const repurposeSchema = z.object({
+  sourceContent: z.string().trim().min(1).max(10000),
+  targetPlatforms: z.array(z.string()).min(1).max(10),
+  hasMedia: z.boolean().optional().default(false)
+});
+
+// A free-text array capped at 50 short entries — generous enough for
+// real brand guidelines, bounded enough that a prompt-injection-style
+// wall of text can't balloon every future AI call's system prompt.
+const brandTermList = () => z.array(z.string().trim().min(1).max(200)).max(50).optional().default([]);
+
+const brandMemorySchema = z.object({
+  tone: z.string().trim().max(300).optional(),
+  audience: z.string().trim().max(300).optional(),
+  preferredTerms: brandTermList(),
+  bannedTerms: brandTermList(),
+  prohibitedClaims: brandTermList(),
+  approvedMessaging: brandTermList()
+});
+
 const whatsappEmbeddedSignupSchema = z.object({
   code: z.string().trim().min(1).max(2000),
   wabaId: z.string().trim().min(1).max(100),
@@ -637,6 +657,7 @@ const aiInsightsSchema = z.object({
 module.exports = {
   signupSchema, loginSchema, createPostSchema, checkoutSchema, addMemberSchema, updateMemberSchema, hashtagSuggestSchema,
   savedReplySchema, draftPostSchema, whatsappEmbeddedSignupSchema, inboxReplySchema, updateInteractionSchema,
+  repurposeSchema, brandMemorySchema,
   INTERACTION_STATUSES, INTERACTION_PRIORITIES, changePasswordSchema, forgotPasswordSchema, resetPasswordSchema,
   updateHubsSchema, templateSchema, segmentSchema, segmentMembersSchema, whatsappCampaignSchema,
   companySchema, contactSchema, updateContactSchema, dealSchema, updateDealSchema, moveDealStageSchema, salesActivitySchema,

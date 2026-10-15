@@ -39,7 +39,7 @@ function textOf(response) {
 // keeps both latency and per-draft cost down without hurting quality on
 // a task this templated. See the plan limits in lib/plans.js for the
 // per-tenant monthly ceiling this draws against.
-async function draftPost({ brief, platforms, tone }) {
+async function draftPost({ brief, platforms, tone, brandContext }) {
   const anthropic = getAnthropicClient();
   if (!anthropic) throw unavailableError();
 
@@ -47,7 +47,7 @@ async function draftPost({ brief, platforms, tone }) {
     model: MODEL,
     max_tokens: 2048,
     output_config: { effort: 'low' },
-    system: `You draft social media posts for a business's official account. Write only the post text itself — no preamble, no explanation, no surrounding quotation marks, no hashtag spam unless the brief asks for hashtags. ${tone ? `Tone: ${tone}.` : ''} This post will be published as-is to: ${platforms.join(', ')}.`,
+    system: `You draft social media posts for a business's official account. Write only the post text itself — no preamble, no explanation, no surrounding quotation marks, no hashtag spam unless the brief asks for hashtags. ${tone ? `Tone: ${tone}.` : ''} This post will be published as-is to: ${platforms.join(', ')}.${brandContext || ''}`,
     messages: [{ role: 'user', content: brief }]
   });
 
@@ -59,7 +59,7 @@ async function draftPost({ brief, platforms, tone }) {
 // contact and the team's own canned responses — rather than a generic
 // chatbot reply. The human still reviews it in the reply box before
 // POST /social/inbox/:id/reply actually sends anything.
-async function draftReply({ contactName, platform, incomingMessage, history, savedReplies }) {
+async function draftReply({ contactName, platform, incomingMessage, history, savedReplies, brandContext }) {
   const anthropic = getAnthropicClient();
   if (!anthropic) throw unavailableError();
 
@@ -75,7 +75,7 @@ async function draftReply({ contactName, platform, incomingMessage, history, sav
     savedReplyBlock
       ? `Match this team's voice. Reuse one of these canned responses verbatim when it genuinely fits; otherwise write a short original reply in the same voice:\n${savedReplyBlock}`
       : "Write a short, professional reply in the business's voice.",
-    `Channel: ${platform}. A human reviews this before sending — draft it exactly as it should go out.`
+    `Channel: ${platform}. A human reviews this before sending — draft it exactly as it should go out.${brandContext || ''}`
   ].join('\n\n');
 
   const userContent = [
@@ -99,7 +99,7 @@ async function draftReply({ contactName, platform, incomingMessage, history, sav
 // hand-written); this is a second, cheap, separately-triggered call, not
 // folded into draftPost, so a tenant can regenerate just the hashtags
 // without losing a caption they already liked.
-async function suggestHashtags({ content, platforms }) {
+async function suggestHashtags({ content, platforms, brandContext }) {
   const anthropic = getAnthropicClient();
   if (!anthropic) throw unavailableError();
 
@@ -110,7 +110,7 @@ async function suggestHashtags({ content, platforms }) {
     system: [
       'You suggest hashtags for a social media post. Respond with ONLY a JSON array of hashtag strings (each starting with #, no spaces), no markdown fences, no explanation.',
       'Suggest 5-8 hashtags for Instagram/TikTok-style platforms, or 2-3 for LinkedIn-style ones, mixing a couple of broad/popular tags with a few specific/niche ones relevant to the actual content.',
-      `This will be posted to: ${(platforms || []).join(', ') || 'social media'}.`
+      `This will be posted to: ${(platforms || []).join(', ') || 'social media'}.${brandContext || ''}`
     ].join(' '),
     messages: [{ role: 'user', content }]
   });
@@ -161,4 +161,43 @@ async function classifyMessage({ text, platform }) {
   }
 }
 
-module.exports = { getAnthropicClient, draftPost, draftReply, suggestHashtags, classifyMessage };
+// AI Content Repurposing Studio: one approved source turned into
+// platform-tailored variants in a single call, each carrying the same
+// core message — explicitly instructed not to invent new claims/facts,
+// since this is a rewrite of approved content, not fresh drafting.
+// Duplicate-content and media-requirement checks happen in
+// lib/repurposing.js (pure, no network) after this returns; brand
+// violation checks happen the same way every other AI output here does
+// (lib/brandMemory.js's checkBrandViolations). The caller (routes/ai.js)
+// still routes every resulting variant through the normal Composer/
+// approval path — nothing here schedules or publishes anything.
+async function repurposeContent({ sourceContent, targetPlatforms, brandContext }) {
+  const anthropic = getAnthropicClient();
+  if (!anthropic) throw unavailableError();
+
+  const response = await anthropic.messages.create({
+    model: MODEL,
+    max_tokens: 2048,
+    output_config: { effort: 'low' },
+    system: [
+      "You repurpose one piece of source content into platform-tailored variants for a business's official social accounts.",
+      'Respond with ONLY a JSON object mapping each requested platform to its own variant text, no markdown fences, no explanation, shaped exactly like: {"facebook":"...","instagram":"..."}.',
+      "Each variant must carry the same core message as the source — do not invent new claims or facts not present in it — but rewrite length/tone/structure for that platform's real norms (shorter and hashtag-light for LinkedIn, more casual and hashtag-friendly for Instagram, etc).",
+      `Target platforms: ${targetPlatforms.join(', ')}.${brandContext || ''}`
+    ].join(' '),
+    messages: [{ role: 'user', content: sourceContent }]
+  });
+  if (response.stop_reason === 'refusal') throw refusedError(response.stop_details);
+
+  try {
+    const variants = JSON.parse(textOf(response).replace(/^```json\s*|\s*```$/g, ''));
+    if (typeof variants !== 'object' || variants === null || Array.isArray(variants)) throw new Error('not an object');
+    return { variants };
+  } catch {
+    const err = new Error('AI Assist could not repurpose this content — try rephrasing it.');
+    err.statusCode = 422;
+    throw err;
+  }
+}
+
+module.exports = { getAnthropicClient, draftPost, draftReply, suggestHashtags, classifyMessage, repurposeContent };

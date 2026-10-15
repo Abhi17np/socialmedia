@@ -7,8 +7,15 @@ import { SOCIAL_API_BASE } from './api';
 import { Page, PageBar, PageBody } from '../ui/page';
 import {
   Button, IconButton, Panel, PanelHeader, Table, Th, Td, Input, Select, Field,
-  Banner, Modal, ConfirmDialog, EmptyState, Skeleton, Avatar
+  Banner, Modal, ConfirmDialog, EmptyState, Skeleton, Avatar, Textarea
 } from '../ui';
+
+// Comma-separated plain-text lists, not a tag-input widget — this is an
+// editorial settings form an admin fills out occasionally, not a
+// high-frequency interaction that would justify the extra UI
+// complexity. Each list caps at 50 entries server-side (lib/schemas.js).
+const toList = (text) => text.split(',').map((s) => s.trim()).filter(Boolean);
+const fromList = (list) => (list || []).join(', ');
 
 const ROLES = ['viewer', 'member', 'admin', 'owner'];
 
@@ -41,6 +48,58 @@ function Team({ authFetch, role: myRole }) {
       .catch(() => {});
   };
   useEffect(loadApprovalSetting, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Brand Memory (migration 037) — applied to every AI Assist draft/
+  // hashtag/repurpose call, see backend/lib/brandMemory.js. Read access
+  // is unrestricted server-side, but editing is admin+ only here, same
+  // bar as the approval setting above.
+  const [brandForm, setBrandForm] = useState(null);
+  const [savingBrand, setSavingBrand] = useState(false);
+  const [brandSaved, setBrandSaved] = useState(false);
+
+  const loadBrandMemory = () => {
+    if (myRole !== 'admin' && myRole !== 'owner') return;
+    authFetch(`${SOCIAL_API_BASE}/brand-memory`)
+      .then((res) => res.json())
+      .then((data) => {
+        const p = data.profile || {};
+        setBrandForm({
+          tone: p.tone || '',
+          audience: p.audience || '',
+          preferredTerms: fromList(p.preferred_terms),
+          bannedTerms: fromList(p.banned_terms),
+          prohibitedClaims: fromList(p.prohibited_claims),
+          approvedMessaging: fromList(p.approved_messaging)
+        });
+      })
+      .catch(() => {});
+  };
+  useEffect(loadBrandMemory, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const saveBrandMemory = async () => {
+    setSavingBrand(true);
+    setBrandSaved(false);
+    try {
+      const res = await authFetch(`${SOCIAL_API_BASE}/brand-memory`, {
+        method: 'PATCH',
+        body: JSON.stringify({
+          tone: brandForm.tone.trim() || undefined,
+          audience: brandForm.audience.trim() || undefined,
+          preferredTerms: toList(brandForm.preferredTerms),
+          bannedTerms: toList(brandForm.bannedTerms),
+          prohibitedClaims: toList(brandForm.prohibitedClaims),
+          approvedMessaging: toList(brandForm.approvedMessaging)
+        })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Could not save brand memory.');
+      setBrandSaved(true);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setSavingBrand(false);
+    }
+  };
 
   const toggleApproval = async () => {
     setSavingApproval(true);
@@ -148,6 +207,60 @@ function Team({ authFetch, role: myRole }) {
               <Button size="sm" variant={requireApproval ? 'primary' : 'secondary'} loading={savingApproval} onClick={toggleApproval}>
                 {requireApproval ? 'On' : 'Off'}
               </Button>
+            </div>
+          </Panel>
+        )}
+
+        {brandForm !== null && (
+          <Panel className="p-3.5">
+            <div className="mb-2">
+              <div className="text-xs font-semibold text-ink">Brand Memory</div>
+              <p className="text-[11px] text-muted mt-0.5">
+                Applied to every AI Assist draft, hashtag suggestion, and repurposed variant. Leave anything blank to skip it —
+                nothing here is required.
+              </p>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <Field label="Tone" hint="e.g. warm, concise, no corporate jargon">
+                <Input value={brandForm.tone} onChange={(e) => setBrandForm({ ...brandForm, tone: e.target.value })} />
+              </Field>
+              <Field label="Audience" hint="Who the account is talking to">
+                <Input value={brandForm.audience} onChange={(e) => setBrandForm({ ...brandForm, audience: e.target.value })} />
+              </Field>
+              <Field label="Preferred terms" hint="Comma-separated — used where relevant">
+                <Textarea
+                  rows={2}
+                  value={brandForm.preferredTerms}
+                  onChange={(e) => setBrandForm({ ...brandForm, preferredTerms: e.target.value })}
+                />
+              </Field>
+              <Field label="Banned terms" hint="Comma-separated — never used">
+                <Textarea
+                  rows={2}
+                  value={brandForm.bannedTerms}
+                  onChange={(e) => setBrandForm({ ...brandForm, bannedTerms: e.target.value })}
+                />
+              </Field>
+              <Field label="Prohibited claims" hint="Comma-separated — never claimed">
+                <Textarea
+                  rows={2}
+                  value={brandForm.prohibitedClaims}
+                  onChange={(e) => setBrandForm({ ...brandForm, prohibitedClaims: e.target.value })}
+                />
+              </Field>
+              <Field label="Approved messaging" hint="Comma-separated key messages to draw on">
+                <Textarea
+                  rows={2}
+                  value={brandForm.approvedMessaging}
+                  onChange={(e) => setBrandForm({ ...brandForm, approvedMessaging: e.target.value })}
+                />
+              </Field>
+            </div>
+            <div className="mt-3 flex items-center gap-2">
+              <Button size="sm" variant="primary" loading={savingBrand} onClick={saveBrandMemory}>
+                Save brand memory
+              </Button>
+              {brandSaved && <span className="text-[11px] text-success">Saved.</span>}
             </div>
           </Panel>
         )}

@@ -23,7 +23,8 @@ const { scoped } = require('../lib/query');
 const { assertWithinLimit, recordUsage } = require('../lib/entitlements');
 const { validate } = require('../middleware/validate');
 const { requireRole } = require('../middleware/tenant');
-const { createPostSchema, savedReplySchema, whatsappEmbeddedSignupSchema, inboxReplySchema, updateInteractionSchema } = require('../lib/schemas');
+const { createPostSchema, savedReplySchema, whatsappEmbeddedSignupSchema, inboxReplySchema, updateInteractionSchema, brandMemorySchema } = require('../lib/schemas');
+const { getBrandProfile } = require('../lib/brandMemory');
 const socialQueue = require('../social/queue');
 const { asyncHandler } = require('../lib/asyncHandler');
 const { recordAudit } = require('../lib/audit');
@@ -524,6 +525,43 @@ protectedRouter.patch('/social/approval-settings', requireRole('admin'), asyncHa
   if (error) return res.status(500).json({ error: error.message });
   await recordAudit(client, { tenantId: req.tenantId, actorUserId: req.userId, action: 'social.approval_settings.updated', metadata: { requireApproval } });
   res.json({ requireApproval });
+}));
+
+/**
+ * Brand Memory (migration 037) — read access to any authenticated
+ * tenant user (so Composer/Team.jsx can show it's active without an
+ * extra role check), write restricted to admin+ since it's an
+ * org-level editorial decision, same bar as /social/approval-settings.
+ * getBrandProfile() always returns a usable object (lib/brandMemory.js),
+ * so there's no "not found" case here even for a tenant that's never
+ * configured one.
+ */
+protectedRouter.get('/social/brand-memory', asyncHandler(async (req, res) => {
+  const client = requireSocialClient(res);
+  if (!client) return;
+  const profile = await getBrandProfile(client, req.tenantId);
+  res.json({ profile });
+}));
+
+protectedRouter.patch('/social/brand-memory', requireRole('admin'), validate(brandMemorySchema), asyncHandler(async (req, res) => {
+  const client = requireSocialClient(res);
+  if (!client) return;
+  const { tone, audience, preferredTerms, bannedTerms, prohibitedClaims, approvedMessaging } = req.body;
+  const payload = {
+    tenant_id: req.tenantId,
+    tone: tone || null,
+    audience: audience || null,
+    preferred_terms: preferredTerms,
+    banned_terms: bannedTerms,
+    prohibited_claims: prohibitedClaims,
+    approved_messaging: approvedMessaging,
+    updated_by: req.userId,
+    updated_at: new Date().toISOString()
+  };
+  const { data, error } = await client.from('brand_profiles').upsert(payload, { onConflict: 'tenant_id' }).select().single();
+  if (error) return res.status(500).json({ error: error.message });
+  await recordAudit(client, { tenantId: req.tenantId, actorUserId: req.userId, action: 'social.brand_memory.updated', metadata: { tone, audience } });
+  res.json({ profile: data });
 }));
 
 protectedRouter.get('/social/posts', asyncHandler(async (req, res) => {

@@ -70,6 +70,18 @@ analysis against competitors and what shipped in which round, see
 - **Suggest hashtags** (`suggestHashtags`) as a separate, independently-triggered call —
   regenerating hashtags never costs the caption you already liked. Platform-aware (more
   tags for Instagram-style platforms, fewer for LinkedIn-style ones).
+- **Content Repurposing Studio** (`repurposeContent`) — turn one piece of existing
+  content into platform-tailored variants for every selected channel in one call, each
+  checked for brand-guideline violations and near-duplicate content against the
+  tenant's recent posts, plus an honest media-requirement warning (e.g. YouTube needs a
+  video attached). Every variant is still loaded into Composer for review before it can
+  be scheduled — nothing is created directly.
+- **Brand Memory** — a per-tenant, admin-editable profile (tone, audience, preferred/
+  banned terms, prohibited claims, approved messaging) applied to every draft, hashtag
+  suggestion, and repurposed variant, with a post-generation check that flags (never
+  silently blocks) any banned term or prohibited claim that slipped through. Optional:
+  a tenant that never configures one gets byte-for-byte the same prompts as before this
+  feature existed.
 - Every AI feature is **metered** (`aiGenerationsPerMonth`), gated at member role or
   above, and **fails closed** (a clear error, not a crash) if no Anthropic API key is
   configured — a human always reviews before anything sends.

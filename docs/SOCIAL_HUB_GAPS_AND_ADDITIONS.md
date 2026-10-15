@@ -228,7 +228,90 @@ Postgres+PostgREST+Redis stand-up used for testing is this session's
 own scratch infrastructure, not committed and not required in
 production (Supabase fills that role there, same as every prior round).
 
-## 6. What's still deliberately deferred (not silently dropped)
+## 6. Round 4 — Brand Memory, brand-aware generation, and a Content Repurposing Studio
+
+**What was built**: `brand_profiles` (migration 037) — one row per
+tenant (this app has no multi-brand-per-tenant concept, see 002's own
+header), covering tone, audience, preferred/banned terms, prohibited
+claims, and approved messaging. `lib/brandMemory.js`'s
+`buildBrandContext()` turns it into a prompt-injectable block appended
+to every AI system prompt; `checkBrandViolations()` runs AFTER
+generation (belt-and-suspenders — an LLM instruction is a strong nudge,
+not a guarantee) and is deliberately literal/substring matching, not
+semantic — documented as a real limitation (it won't catch a paraphrase
+of a prohibited claim), not papered over. Wired into all three existing
+AI endpoints (`/ai/compose/draft`, `/ai/compose/hashtags`,
+`/ai/inbox/:id/draft-reply`), each now returning a `brandViolations`
+array alongside its draft — a warning a human reads in Composer/Inbox,
+never a block, since every draft here is already reviewed before it can
+send. Admin-editable in `Team.jsx`; fully optional — an unconfigured
+tenant's prompts are byte-for-byte what they were before this feature
+existed.
+
+**AI Content Repurposing Studio** — `repurposeContent()` turns one
+piece of source content into platform-tailored variants for every
+selected channel in a single AI call (metered as 1 generation
+regardless of platform count, same unit `draftPost` already uses).
+Each variant gets the same brand-violation check as every other AI
+output, plus two new, honestly-scoped checks (`lib/repurposing.js`,
+pure/DB-free/unit-tested): a token-overlap (Jaccard) near-duplicate
+check against the tenant's last 90 days of posts — explicitly lexical,
+not semantic, so it reliably catches a near-verbatim repost but not a
+paraphrase of the same idea — and a media-requirement warning for
+YouTube specifically, the one per-platform constraint this app can
+actually verify (`social/adapters/youtube.js`'s `publish()` already
+throws on this). Deliberately not a larger invented list of
+dimension/duration/format checks this app has no way to verify. Every
+resulting variant is a draft loaded into Composer for review — it
+never creates a `scheduled_posts` row directly, so it inherits the
+normal approval/plan-limit/consent gates through the exact same
+Composer → `POST /social/posts` path every other post takes.
+
+**New endpoints**: `GET`/`PATCH /social/brand-memory` (read: any
+authenticated tenant user; write: admin+, audit-logged, same bar as
+`/social/approval-settings`); `POST /ai/compose/repurpose` (member+,
+same bar as `/compose/draft`).
+
+**Entitlements**: zero new metering infrastructure — repurposing reuses
+the existing `aiGenerationsPerMonth` counter; brand-memory reads/writes
+aren't AI calls and aren't metered at all, same as every other settings
+endpoint in this app.
+
+**Files added**: `backend/migrations/037_brand_memory.sql`;
+`backend/lib/brandMemory.js`, `backend/lib/repurposing.js`;
+`backend/test/brandMemory.test.js` (9 unit tests),
+`backend/test/repurposing.test.js` (10 unit tests);
+`backend/scripts/integration-tests/social-brand-memory.js` (7
+assertions against a live Postgres+PostgREST stack).
+
+**Files changed**: `backend/lib/ai.js` (`brandContext` threaded through
+`draftPost`/`draftReply`/`suggestHashtags`; new `repurposeContent`),
+`backend/routes/ai.js` (brand context + violations wired into all three
+existing endpoints; new `/compose/repurpose`), `backend/routes/social.js`
+(`GET`/`PATCH /social/brand-memory`), `backend/lib/schemas.js`
+(`repurposeSchema`, `brandMemorySchema`); `frontend/src/social/Team.jsx`
+(Brand Memory settings panel), `frontend/src/social/Composer.jsx`
+(brand-violation warnings on draft/hashtag results; a Repurposing
+Studio panel with per-platform variant cards and an honest "use this
+variant" review step).
+
+**Tests run**: `npm test`: **154/154** (135 prior + 19 new). Backend
+`eslint .` clean on every changed file. Integration (live local
+Postgres+PostgREST, same stack stood up in Round 3): new
+`social-brand-memory.js` **7/7** (defaults for an unconfigured tenant,
+admin-only write, real persistence through a second GET, a real
+audit_log row, tenant isolation, and a regression check that wiring
+brand memory into the AI endpoints didn't change their fail-closed 503
+behavior). `social-approval.js` and `social-post-analytics.js` re-run
+as regression checks on the touched `routes/social.js`: both still
+**12/12** and **5/5**. Frontend `eslint .` clean; `next build` compiles
+(same pre-existing, unrelated `/account` Suspense issue every prior
+round also hit).
+
+**Blockers / deployment requirements**: none new — no new env vars, no
+new external credentials, no new provider dependency.
+
+## 7. What's still deliberately deferred (not silently dropped)
 
 - **Real, personalized best-time-to-post**, specifically. Per-post data
   now exists (likes/comments/shares/views — see Round 3 above), but

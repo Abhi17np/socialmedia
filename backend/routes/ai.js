@@ -12,8 +12,10 @@ const { scoped } = require('../lib/query');
 const { assertWithinLimit, recordUsage } = require('../lib/entitlements');
 const { validate } = require('../middleware/validate');
 const { requireRole } = require('../middleware/tenant');
-const { draftPostSchema, hashtagSuggestSchema } = require('../lib/schemas');
-const { draftPost, draftReply, suggestHashtags, classifyMessage } = require('../lib/ai');
+const { draftPostSchema, hashtagSuggestSchema, repurposeSchema } = require('../lib/schemas');
+const { draftPost, draftReply, suggestHashtags, classifyMessage, repurposeContent } = require('../lib/ai');
+const { getBrandProfile, buildBrandContext, checkBrandViolations } = require('../lib/brandMemory');
+const { findDuplicateWarning, mediaRequirementWarnings } = require('../lib/repurposing');
 
 const router = express.Router();
 
@@ -36,9 +38,10 @@ router.post('/compose/draft', requireRole('member'), validate(draftPostSchema), 
   try {
     await assertWithinLimit(client, req.tenantId, 'aiGenerationsPerMonth');
     const { brief, platforms, tone } = req.body;
-    const { draft } = await draftPost({ brief, platforms, tone });
+    const profile = await getBrandProfile(client, req.tenantId);
+    const { draft } = await draftPost({ brief, platforms, tone, brandContext: buildBrandContext(profile) });
     await recordUsage(client, req.tenantId, 'aiGenerationsPerMonth');
-    res.json({ draft });
+    res.json({ draft, brandViolations: checkBrandViolations(draft, profile) });
   } catch (err) {
     res.status(err.statusCode || 500).json({ error: err.message });
   }
@@ -69,17 +72,19 @@ router.post('/inbox/:id/draft-reply', async (req, res) => {
     }
 
     const { data: savedReplies } = await scoped(client, req.tenantId, 'saved_replies').select('title, body');
+    const profile = await getBrandProfile(client, req.tenantId);
 
     const { draft } = await draftReply({
       contactName,
       platform: message.platform,
       incomingMessage: message.message,
       history,
-      savedReplies: savedReplies || []
+      savedReplies: savedReplies || [],
+      brandContext: buildBrandContext(profile)
     });
 
     await recordUsage(client, req.tenantId, 'aiGenerationsPerMonth');
-    res.json({ draft });
+    res.json({ draft, brandViolations: checkBrandViolations(draft, profile) });
   } catch (err) {
     res.status(err.statusCode || 500).json({ error: err.message });
   }
@@ -94,9 +99,55 @@ router.post('/compose/hashtags', requireRole('member'), validate(hashtagSuggestS
   try {
     await assertWithinLimit(client, req.tenantId, 'aiGenerationsPerMonth');
     const { content, platforms } = req.body;
-    const { hashtags } = await suggestHashtags({ content, platforms });
+    const profile = await getBrandProfile(client, req.tenantId);
+    const { hashtags } = await suggestHashtags({ content, platforms, brandContext: buildBrandContext(profile) });
     await recordUsage(client, req.tenantId, 'aiGenerationsPerMonth');
-    res.json({ hashtags });
+    res.json({ hashtags, brandViolations: checkBrandViolations(hashtags.join(' '), profile) });
+  } catch (err) {
+    res.status(err.statusCode || 500).json({ error: err.message });
+  }
+});
+
+/**
+ * AI Content Repurposing Studio: one piece of approved source content
+ * turned into platform-tailored variants in one AI call (1 generation
+ * against aiGenerationsPerMonth, same metering unit as /compose/draft
+ * regardless of how many target platforms are requested). Every
+ * variant is a draft a human still has to load into Composer, review,
+ * and schedule/approve through the normal path — nothing here creates
+ * a scheduled_posts row itself. member+ matches /compose/draft's bar.
+ */
+router.post('/compose/repurpose', requireRole('member'), validate(repurposeSchema), async (req, res) => {
+  const client = requireSocialClient(res);
+  if (!client) return;
+
+  try {
+    await assertWithinLimit(client, req.tenantId, 'aiGenerationsPerMonth');
+    const { sourceContent, targetPlatforms, hasMedia } = req.body;
+
+    const profile = await getBrandProfile(client, req.tenantId);
+    const { variants } = await repurposeContent({ sourceContent, targetPlatforms, brandContext: buildBrandContext(profile) });
+
+    // Recent posts to check each variant against for a near-duplicate
+    // repost — 90 days is generous enough to catch "I repurposed this
+    // same source two months ago" without comparing against a tenant's
+    // entire history on every call.
+    const since = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000).toISOString();
+    const { data: recentPosts } = await scoped(client, req.tenantId, 'scheduled_posts')
+      .select('id, content, created_at').gte('created_at', since).order('created_at', { ascending: false });
+
+    const results = {};
+    for (const platform of targetPlatforms) {
+      const text = typeof variants[platform] === 'string' ? variants[platform] : null;
+      results[platform] = {
+        content: text,
+        brandViolations: text ? checkBrandViolations(text, profile) : [],
+        duplicateWarning: text ? findDuplicateWarning(text, recentPosts || []) : null
+      };
+    }
+
+    await recordUsage(client, req.tenantId, 'aiGenerationsPerMonth');
+    res.json({ results, mediaWarnings: mediaRequirementWarnings(targetPlatforms, !!hasMedia) });
   } catch (err) {
     res.status(err.statusCode || 500).json({ error: err.message });
   }
