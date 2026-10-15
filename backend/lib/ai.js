@@ -95,4 +95,70 @@ async function draftReply({ contactName, platform, incomingMessage, history, sav
   return { draft: textOf(response) };
 }
 
-module.exports = { getAnthropicClient, draftPost, draftReply };
+// Hashtags only — Composer already has the post text (its own draft or
+// hand-written); this is a second, cheap, separately-triggered call, not
+// folded into draftPost, so a tenant can regenerate just the hashtags
+// without losing a caption they already liked.
+async function suggestHashtags({ content, platforms }) {
+  const anthropic = getAnthropicClient();
+  if (!anthropic) throw unavailableError();
+
+  const response = await anthropic.messages.create({
+    model: MODEL,
+    max_tokens: 256,
+    output_config: { effort: 'low' },
+    system: [
+      'You suggest hashtags for a social media post. Respond with ONLY a JSON array of hashtag strings (each starting with #, no spaces), no markdown fences, no explanation.',
+      'Suggest 5-8 hashtags for Instagram/TikTok-style platforms, or 2-3 for LinkedIn-style ones, mixing a couple of broad/popular tags with a few specific/niche ones relevant to the actual content.',
+      `This will be posted to: ${(platforms || []).join(', ') || 'social media'}.`
+    ].join(' '),
+    messages: [{ role: 'user', content }]
+  });
+  if (response.stop_reason === 'refusal') throw refusedError(response.stop_details);
+
+  try {
+    const hashtags = JSON.parse(textOf(response).replace(/^```json\s*|\s*```$/g, ''));
+    if (!Array.isArray(hashtags)) throw new Error('not an array');
+    return { hashtags: hashtags.filter((h) => typeof h === 'string').slice(0, 10) };
+  } catch {
+    const err = new Error('AI Assist could not produce hashtag suggestions for this content — try rephrasing it.');
+    err.statusCode = 422;
+    throw err;
+  }
+}
+
+// On-demand inbox triage (Inbox's "Analyze" action, same pull-based
+// posture as draftReply — never runs automatically on message arrival).
+// Classifies ONLY sentiment/urgency, both of which a human still reads
+// and can override; nothing here routes, replies, or closes a
+// conversation on its own.
+async function classifyMessage({ text, platform }) {
+  const anthropic = getAnthropicClient();
+  if (!anthropic) throw unavailableError();
+
+  const response = await anthropic.messages.create({
+    model: MODEL,
+    max_tokens: 64,
+    output_config: { effort: 'low' },
+    system: [
+      'You triage one inbound customer message from a business\'s social media inbox.',
+      'Respond with ONLY a JSON object, no markdown fences, no explanation, shaped exactly like: {"sentiment":"positive"|"neutral"|"negative","urgent":true|false}.',
+      '"urgent" means it needs a reply soon — an angry customer, a complaint, a time-sensitive question, a churn risk. A simple question or a compliment is not urgent.',
+      `Channel: ${platform || 'social media'}.`
+    ].join(' '),
+    messages: [{ role: 'user', content: text }]
+  });
+  if (response.stop_reason === 'refusal') throw refusedError(response.stop_details);
+
+  try {
+    const parsed = JSON.parse(textOf(response).replace(/^```json\s*|\s*```$/g, ''));
+    const sentiment = ['positive', 'neutral', 'negative'].includes(parsed.sentiment) ? parsed.sentiment : 'neutral';
+    return { sentiment, urgent: !!parsed.urgent };
+  } catch {
+    const err = new Error('AI Assist could not classify this message.');
+    err.statusCode = 422;
+    throw err;
+  }
+}
+
+module.exports = { getAnthropicClient, draftPost, draftReply, suggestHashtags, classifyMessage };

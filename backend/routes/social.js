@@ -400,7 +400,7 @@ protectedRouter.post('/social/media/upload', requireRole('member'), (req, res) =
   });
 });
 
-protectedRouter.post('/social/posts', requireRole('member'), validate(createPostSchema), async (req, res) => {
+protectedRouter.post('/social/posts', requireRole('member'), validate(createPostSchema), asyncHandler(async (req, res) => {
   const client = requireSocialClient(res);
   if (!client) return;
   const { content, mediaUrls, targetPlatforms, targetAccountIds, scheduledAt, idempotencyKey } = req.body;
@@ -411,6 +411,14 @@ protectedRouter.post('/social/posts', requireRole('member'), validate(createPost
     return res.status(err.statusCode || 500).json({ error: err.message, code: err.code });
   }
 
+  // Approval workflow (opt-in per tenant, migration 034): a non-admin's
+  // post is held for review rather than queued immediately. An
+  // admin/owner's own post skips review — someone with the authority to
+  // approve anyone else's post doesn't need their own rubber-stamped.
+  const { data: tenant } = await client.from('tenants').select('social_require_approval').eq('id', req.tenantId).maybeSingle();
+  const needsReview = !!tenant?.social_require_approval && !['admin', 'owner'].includes(req.role);
+  const initialStatus = needsReview ? 'pending_review' : 'pending';
+
   const { data, error } = await client.from('scheduled_posts').insert({
     tenant_id: req.tenantId,
     content,
@@ -419,7 +427,8 @@ protectedRouter.post('/social/posts', requireRole('member'), validate(createPost
     target_account_ids: targetAccountIds,
     scheduled_at: scheduledAt,
     idempotency_key: idempotencyKey || null,
-    status: 'pending'
+    status: initialStatus,
+    created_by: req.userId
   }).select().single();
 
   // A retried request with the same idempotencyKey hits
@@ -440,14 +449,74 @@ protectedRouter.post('/social/posts', requireRole('member'), validate(createPost
   await recordUsage(client, req.tenantId, 'postsPerMonth').catch(err =>
     console.error(`[social] Could not record usage for post ${data.id}:`, err.message));
 
-  try {
-    await socialQueue.enqueuePost(data);
-  } catch (err) {
-    console.error(`[social] Could not enqueue post ${data.id} immediately (will be picked up by the reconciliation sweep):`, err.message);
+  if (!needsReview) {
+    try {
+      await socialQueue.enqueuePost(data);
+    } catch (err) {
+      console.error(`[social] Could not enqueue post ${data.id} immediately (will be picked up by the reconciliation sweep):`, err.message);
+    }
   }
 
   res.status(201).json({ post: data });
-});
+}));
+
+// Admin-only: approving/rejecting someone else's post. Never on a post
+// that already left the review gate (approving an already-'published'
+// post, for instance, makes no sense and would silently re-queue it).
+protectedRouter.patch('/social/posts/:id/approve', requireRole('admin'), asyncHandler(async (req, res) => {
+  const client = requireSocialClient(res);
+  if (!client) return;
+  const { data: post } = await scoped(client, req.tenantId, 'scheduled_posts').select('*').eq('id', req.params.id).maybeSingle();
+  if (!post) return res.status(404).json({ error: 'Post not found.' });
+  if (post.status !== 'pending_review') return res.status(400).json({ error: `Cannot approve a post with status "${post.status}".` });
+
+  const { data: updated, error } = await scoped(client, req.tenantId, 'scheduled_posts')
+    .update({ status: 'pending', reviewed_by: req.userId, reviewed_at: new Date().toISOString() })
+    .eq('id', req.params.id).select().single();
+  if (error) return res.status(500).json({ error: error.message });
+
+  try {
+    await socialQueue.enqueuePost(updated);
+  } catch (err) {
+    console.error(`[social] Could not enqueue approved post ${updated.id} immediately (will be picked up by the reconciliation sweep):`, err.message);
+  }
+  await recordAudit(client, { tenantId: req.tenantId, actorUserId: req.userId, action: 'social.post.approved', targetType: 'scheduled_post', targetId: post.id });
+  res.json({ post: updated });
+}));
+
+protectedRouter.patch('/social/posts/:id/reject', requireRole('admin'), asyncHandler(async (req, res) => {
+  const client = requireSocialClient(res);
+  if (!client) return;
+  const { data: post } = await scoped(client, req.tenantId, 'scheduled_posts').select('*').eq('id', req.params.id).maybeSingle();
+  if (!post) return res.status(404).json({ error: 'Post not found.' });
+  if (post.status !== 'pending_review') return res.status(400).json({ error: `Cannot reject a post with status "${post.status}".` });
+
+  const note = typeof req.body?.note === 'string' ? req.body.note.slice(0, 2000) : null;
+  const { data: updated, error } = await scoped(client, req.tenantId, 'scheduled_posts')
+    .update({ status: 'rejected', reviewed_by: req.userId, reviewed_at: new Date().toISOString(), review_note: note })
+    .eq('id', req.params.id).select().single();
+  if (error) return res.status(500).json({ error: error.message });
+
+  await recordAudit(client, { tenantId: req.tenantId, actorUserId: req.userId, action: 'social.post.rejected', targetType: 'scheduled_post', targetId: post.id, metadata: { note } });
+  res.json({ post: updated });
+}));
+
+protectedRouter.get('/social/approval-settings', requireRole('admin'), asyncHandler(async (req, res) => {
+  const client = requireSocialClient(res);
+  if (!client) return;
+  const { data } = await client.from('tenants').select('social_require_approval').eq('id', req.tenantId).maybeSingle();
+  res.json({ requireApproval: !!data?.social_require_approval });
+}));
+
+protectedRouter.patch('/social/approval-settings', requireRole('admin'), asyncHandler(async (req, res) => {
+  const client = requireSocialClient(res);
+  if (!client) return;
+  const requireApproval = !!req.body?.requireApproval;
+  const { error } = await client.from('tenants').update({ social_require_approval: requireApproval }).eq('id', req.tenantId);
+  if (error) return res.status(500).json({ error: error.message });
+  await recordAudit(client, { tenantId: req.tenantId, actorUserId: req.userId, action: 'social.approval_settings.updated', metadata: { requireApproval } });
+  res.json({ requireApproval });
+}));
 
 protectedRouter.get('/social/posts', asyncHandler(async (req, res) => {
   const client = requireSocialClient(res);
@@ -466,7 +535,7 @@ protectedRouter.delete('/social/posts/:id', asyncHandler(async (req, res) => {
 
   const { data: existing, error: fetchError } = await scoped(client, req.tenantId, 'scheduled_posts').select('*').eq('id', req.params.id).single();
   if (fetchError || !existing) return res.status(404).json({ error: 'Post not found.' });
-  if (existing.status !== 'pending') return res.status(400).json({ error: `Cannot cancel a post with status "${existing.status}".` });
+  if (!['pending', 'pending_review', 'rejected'].includes(existing.status)) return res.status(400).json({ error: `Cannot cancel a post with status "${existing.status}".` });
 
   await socialQueue.cancelPost(existing).catch(err => console.error(`[social] Could not cancel queued jobs for post ${existing.id}:`, err.message));
 

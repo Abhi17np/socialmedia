@@ -12,8 +12,8 @@ const { scoped } = require('../lib/query');
 const { assertWithinLimit, recordUsage } = require('../lib/entitlements');
 const { validate } = require('../middleware/validate');
 const { requireRole } = require('../middleware/tenant');
-const { draftPostSchema } = require('../lib/schemas');
-const { draftPost, draftReply } = require('../lib/ai');
+const { draftPostSchema, hashtagSuggestSchema } = require('../lib/schemas');
+const { draftPost, draftReply, suggestHashtags, classifyMessage } = require('../lib/ai');
 
 const router = express.Router();
 
@@ -80,6 +80,47 @@ router.post('/inbox/:id/draft-reply', async (req, res) => {
 
     await recordUsage(client, req.tenantId, 'aiGenerationsPerMonth');
     res.json({ draft });
+  } catch (err) {
+    res.status(err.statusCode || 500).json({ error: err.message });
+  }
+});
+
+// Same bar as /compose/draft — a second, separately-triggered call so a
+// tenant can regenerate hashtags without losing a caption they liked.
+router.post('/compose/hashtags', requireRole('member'), validate(hashtagSuggestSchema), async (req, res) => {
+  const client = requireSocialClient(res);
+  if (!client) return;
+
+  try {
+    await assertWithinLimit(client, req.tenantId, 'aiGenerationsPerMonth');
+    const { content, platforms } = req.body;
+    const { hashtags } = await suggestHashtags({ content, platforms });
+    await recordUsage(client, req.tenantId, 'aiGenerationsPerMonth');
+    res.json({ hashtags });
+  } catch (err) {
+    res.status(err.statusCode || 500).json({ error: err.message });
+  }
+});
+
+// On-demand inbox triage — viewer+ matches the inbox's own read access;
+// this never sends or routes anything, just labels the message for a
+// human to prioritize off of.
+router.post('/inbox/:id/analyze', async (req, res) => {
+  const client = requireSocialClient(res);
+  if (!client) return;
+
+  try {
+    await assertWithinLimit(client, req.tenantId, 'aiGenerationsPerMonth');
+    const { data: message, error: msgErr } = await scoped(client, req.tenantId, 'inbox_messages').select('*').eq('id', req.params.id).single();
+    if (msgErr || !message) return res.status(404).json({ error: 'Message not found.' });
+
+    const { sentiment, urgent } = await classifyMessage({ text: message.message, platform: message.platform });
+    const { data: updated, error } = await scoped(client, req.tenantId, 'inbox_messages')
+      .update({ ai_sentiment: sentiment, ai_urgent: urgent }).eq('id', req.params.id).select().single();
+    if (error) return res.status(500).json({ error: error.message });
+
+    await recordUsage(client, req.tenantId, 'aiGenerationsPerMonth');
+    res.json({ sentiment: updated.ai_sentiment, urgent: updated.ai_urgent });
   } catch (err) {
     res.status(err.statusCode || 500).json({ error: err.message });
   }

@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { RefreshCw, UserPlus, Trash2, Users } from 'lucide-react';
 import { API_BASE } from '../apiBase';
+import { SOCIAL_API_BASE } from './api';
 import { Page, PageBar, PageBody } from '../ui/page';
 import {
   Button, IconButton, Panel, PanelHeader, Table, Th, Td, Input, Select, Field,
@@ -29,6 +30,34 @@ function Team({ authFetch, role: myRole }) {
   const [adding, setAdding] = useState(false);
   const [inviteOpen, setInviteOpen] = useState(false);
   const [confirmRemove, setConfirmRemove] = useState(null);
+  const [requireApproval, setRequireApproval] = useState(null);
+  const [savingApproval, setSavingApproval] = useState(false);
+
+  const loadApprovalSetting = () => {
+    if (myRole !== 'admin' && myRole !== 'owner') return;
+    authFetch(`${SOCIAL_API_BASE}/approval-settings`)
+      .then((res) => res.json())
+      .then((data) => setRequireApproval(!!data.requireApproval))
+      .catch(() => {});
+  };
+  useEffect(loadApprovalSetting, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const toggleApproval = async () => {
+    setSavingApproval(true);
+    try {
+      const res = await authFetch(`${SOCIAL_API_BASE}/approval-settings`, {
+        method: 'PATCH',
+        body: JSON.stringify({ requireApproval: !requireApproval })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Could not update this setting.');
+      setRequireApproval(data.requireApproval);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setSavingApproval(false);
+    }
+  };
 
   const load = () => {
     authFetch(`${API_BASE}/team/members`)
@@ -106,6 +135,22 @@ function Team({ authFetch, role: myRole }) {
 
       <PageBody width="narrow">
         {error && <Banner tone="danger">{error}</Banner>}
+
+        {requireApproval !== null && (
+          <Panel className="p-3.5">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <div className="text-xs font-semibold text-ink">Require approval before posting</div>
+                <p className="text-[11px] text-muted mt-0.5">
+                  When on, a post scheduled by a member (not an admin/owner) waits in "Needs review" until an admin approves it.
+                </p>
+              </div>
+              <Button size="sm" variant={requireApproval ? 'primary' : 'secondary'} loading={savingApproval} onClick={toggleApproval}>
+                {requireApproval ? 'On' : 'Off'}
+              </Button>
+            </div>
+          </Panel>
+        )}
 
         <Panel className="overflow-hidden">
           <PanelHeader title="Everyone with access" meta="and what they can do" />

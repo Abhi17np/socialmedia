@@ -3,7 +3,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import {
   RefreshCw, X, ChevronDown, ChevronRight, PenSquare, CalendarDays, List as ListIcon,
-  CalendarClock
+  CalendarClock, Check
 } from 'lucide-react';
 import { SOCIAL_API_BASE, AVAILABLE_PLATFORMS } from './api';
 import { Page, PageBar, PageBody } from '../ui/page';
@@ -12,6 +12,7 @@ import {
   ConfirmDialog, cx
 } from '../ui';
 import { ChannelFilterTabs, ChannelDot, channelLabel } from '../ui/channel';
+import { atLeast } from '../roleRank';
 
 /*
  * Scheduled and published posts. The data model distinguishes
@@ -27,10 +28,13 @@ const STATUS = {
   pending: { tone: 'neutral', label: 'Pending' },
   publishing: { tone: 'warning', label: 'Publishing' },
   published: { tone: 'success', label: 'Published' },
-  failed: { tone: 'danger', label: 'Failed' }
+  failed: { tone: 'danger', label: 'Failed' },
+  pending_review: { tone: 'warning', label: 'Needs review' },
+  rejected: { tone: 'danger', label: 'Rejected' }
 };
 
 const SUB_TABS = [
+  { key: 'review', label: 'Needs review', statuses: ['pending_review', 'rejected'] },
   { key: 'scheduled', label: 'Scheduled', statuses: ['pending', 'publishing'] },
   { key: 'published', label: 'Published', statuses: ['published', 'failed'] }
 ];
@@ -71,7 +75,7 @@ function PostErrors({ results }) {
   );
 }
 
-function PostCard({ post, onCancel }) {
+function PostCard({ post, onCancel, onApprove, onReject, canReview }) {
   const status = STATUS[post.status] || STATUS.pending;
   return (
     <div className="px-4 py-3 border-b border-hairline last:border-0 flex items-start justify-between gap-4 hover:bg-canvas/60 transition-colors">
@@ -95,6 +99,9 @@ function PostCard({ post, onCancel }) {
           {post.content || <span className="text-subtle">(no text content)</span>}
         </p>
         <PostErrors results={post.platform_results} />
+        {post.status === 'rejected' && post.review_note && (
+          <p className="text-[11px] text-danger mt-1">Rejected: {post.review_note}</p>
+        )}
       </div>
       <div className="flex flex-col items-end gap-2 shrink-0">
         <Chip tone={status.tone}>{status.label}</Chip>
@@ -102,6 +109,18 @@ function PostCard({ post, onCancel }) {
           <Button size="sm" variant="ghost" icon={X} onClick={() => onCancel(post)}>
             Cancel
           </Button>
+        )}
+        {post.status === 'pending_review' && canReview && (
+          <div className="flex items-center gap-1.5">
+            <Button size="sm" variant="ghost" icon={Check} onClick={() => onApprove(post)}>Approve</Button>
+            <Button size="sm" variant="ghost" icon={X} onClick={() => onReject(post)}>Reject</Button>
+          </div>
+        )}
+        {post.status === 'pending_review' && !canReview && (
+          <Button size="sm" variant="ghost" icon={X} onClick={() => onCancel(post)}>Withdraw</Button>
+        )}
+        {post.status === 'rejected' && (
+          <Button size="sm" variant="ghost" icon={X} onClick={() => onCancel(post)}>Discard</Button>
         )}
       </div>
     </div>
@@ -211,7 +230,8 @@ function MonthCalendar({ posts, month, onMonthChange }) {
 
 /* ================================================================= Posts */
 
-function Posts({ authFetch, setCurrentView }) {
+function Posts({ authFetch, role, setCurrentView }) {
+  const canReview = atLeast(role, 'admin');
   const [posts, setPosts] = useState(null);
   const [error, setError] = useState(null);
   const [subTab, setSubTab] = useState('scheduled');
@@ -255,6 +275,27 @@ function Posts({ authFetch, setCurrentView }) {
       setError(err.message);
     } finally {
       setConfirmCancel(null);
+    }
+  };
+
+  const approve = async (post) => {
+    try {
+      const res = await authFetch(`${SOCIAL_API_BASE}/posts/${post.id}/approve`, { method: 'PATCH' });
+      if (!res.ok) throw new Error((await res.json()).error || 'Could not approve post.');
+      load();
+    } catch (err) {
+      setError(err.message);
+    }
+  };
+
+  const reject = async (post) => {
+    const note = window.prompt('Reason for rejecting this post (optional):') || undefined;
+    try {
+      const res = await authFetch(`${SOCIAL_API_BASE}/posts/${post.id}/reject`, { method: 'PATCH', body: JSON.stringify({ note }) });
+      if (!res.ok) throw new Error((await res.json()).error || 'Could not reject post.');
+      load();
+    } catch (err) {
+      setError(err.message);
     }
   };
 
@@ -417,7 +458,7 @@ function Posts({ authFetch, setCurrentView }) {
                 </button>
                 {!isCollapsed &&
                   datePosts.map((post) => (
-                    <PostCard key={post.id} post={post} onCancel={setConfirmCancel} />
+                    <PostCard key={post.id} post={post} onCancel={setConfirmCancel} onApprove={approve} onReject={reject} canReview={canReview} />
                   ))}
               </Panel>
             );

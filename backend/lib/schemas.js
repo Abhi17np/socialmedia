@@ -69,6 +69,11 @@ const draftPostSchema = z.object({
   tone: z.string().trim().max(100).optional()
 });
 
+const hashtagSuggestSchema = z.object({
+  content: z.string().trim().min(1).max(10000),
+  platforms: z.array(z.string()).min(1)
+});
+
 const whatsappEmbeddedSignupSchema = z.object({
   code: z.string().trim().min(1).max(2000),
   wabaId: z.string().trim().min(1).max(100),
@@ -624,7 +629,7 @@ const aiInsightsSchema = z.object({
 });
 
 module.exports = {
-  signupSchema, loginSchema, createPostSchema, checkoutSchema, addMemberSchema, updateMemberSchema,
+  signupSchema, loginSchema, createPostSchema, checkoutSchema, addMemberSchema, updateMemberSchema, hashtagSuggestSchema,
   savedReplySchema, draftPostSchema, whatsappEmbeddedSignupSchema, inboxReplySchema, updateInteractionSchema,
   INTERACTION_STATUSES, INTERACTION_PRIORITIES, changePasswordSchema, forgotPasswordSchema, resetPasswordSchema,
   updateHubsSchema, templateSchema, segmentSchema, segmentMembersSchema, whatsappCampaignSchema,

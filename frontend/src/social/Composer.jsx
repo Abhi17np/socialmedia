@@ -4,7 +4,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import {
   Send, AlertTriangle, UploadCloud, Film, X, Link2, Check, Globe,
   ThumbsUp, MessageCircle, Repeat2, Share2, Heart, Bookmark,
-  PlayCircle, Image as ImageIcon, Sparkles, Clock
+  PlayCircle, Image as ImageIcon, Sparkles, Clock, Hash
 } from 'lucide-react';
 import { SOCIAL_API_BASE } from './api';
 import { API_BASE } from '../apiBase';
@@ -262,6 +262,8 @@ function Composer({ authFetch }) {
   const [tone, setTone] = useState('');
   const [generating, setGenerating] = useState(false);
   const [aiError, setAiError] = useState(null);
+  const [suggestingTags, setSuggestingTags] = useState(false);
+  const [tagError, setTagError] = useState(null);
 
   useEffect(() => {
     authFetch(`${SOCIAL_API_BASE}/accounts`)
@@ -307,6 +309,30 @@ function Composer({ authFetch }) {
       setAiError(err.message);
     } finally {
       setGenerating(false);
+    }
+  };
+
+  // A second, separately-triggered AI call (backend/lib/ai.js's
+  // suggestHashtags) — works off whatever's already in the editor,
+  // manual or AI-drafted, so regenerating hashtags never costs you a
+  // caption you already liked.
+  const suggestHashtags = async () => {
+    if (!content.trim() || selectedPlatforms.length === 0) return;
+    setSuggestingTags(true);
+    setTagError(null);
+    try {
+      const res = await authFetch(`${API_BASE}/ai/compose/hashtags`, {
+        method: 'POST',
+        body: JSON.stringify({ content: content.trim(), platforms: selectedPlatforms })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Could not suggest hashtags.');
+      const tags = (data.hashtags || []).join(' ');
+      setContent((prev) => (tags ? `${prev.trim()}\n\n${tags}` : prev));
+    } catch (err) {
+      setTagError(err.message);
+    } finally {
+      setSuggestingTags(false);
     }
   };
 
@@ -569,6 +595,20 @@ function Composer({ authFetch }) {
                   onChange={(e) => setContent(e.target.value)}
                   className="text-[13px]"
                 />
+
+                <div className="mt-2 flex items-center gap-2 flex-wrap">
+                  <Button
+                    type="button"
+                    size="sm"
+                    icon={Hash}
+                    loading={suggestingTags}
+                    onClick={suggestHashtags}
+                    disabled={!content.trim() || selectedPlatforms.length === 0}
+                  >
+                    {suggestingTags ? 'Suggesting…' : 'Suggest hashtags'}
+                  </Button>
+                  {tagError && <span className="text-[11px] text-danger">{tagError}</span>}
+                </div>
 
                 {/* per-channel counters */}
                 {selectedPlatforms.filter((p) => CHAR_LIMITS[p]).length > 0 && (

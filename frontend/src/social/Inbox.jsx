@@ -4,7 +4,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import {
   RefreshCw, AtSign, MessageSquare, ExternalLink, MessageSquareText, Sparkles,
   Inbox as InboxIcon, UserMinus, UserCheck, CheckCircle2, Hourglass, Paperclip,
-  Smile, History, ChevronLeft, Filter, Star, Send
+  Smile, History, ChevronLeft, Filter, Star, Send, Gauge
 } from 'lucide-react';
 import { SOCIAL_API_BASE, AVAILABLE_PLATFORMS } from './api';
 import { API_BASE } from '../apiBase';
@@ -50,6 +50,7 @@ const PRIORITY_OPTIONS = [
 
 const PRIORITY_DOT = { high: '#dc2626', medium: '#d97706', low: '#9a9aa8' };
 const STATUS_TONE = { open: 'success', under_review: 'warning', closed: 'neutral' };
+const SENTIMENT_TONE = { positive: 'success', neutral: 'neutral', negative: 'danger' };
 
 const VIEWS = [
   { key: 'all', label: 'All', icon: InboxIcon, match: () => true },
@@ -184,6 +185,8 @@ function Inbox({ authFetch, role, me }) {
   const [sendingReply, setSendingReply] = useState(false);
   const [suggesting, setSuggesting] = useState(false);
   const [suggestError, setSuggestError] = useState(null);
+  const [analyzing, setAnalyzing] = useState(false);
+  const [analysis, setAnalysis] = useState({}); // { [itemId]: { sentiment, urgent } } — on-demand only, never computed automatically
   const [composerTab, setComposerTab] = useState('reply');
 
   const load = async () => {
@@ -323,6 +326,24 @@ function Inbox({ authFetch, role, me }) {
       setSuggestError(err.message);
     } finally {
       setSuggesting(false);
+    }
+  };
+
+  // On-demand triage (backend/lib/ai.js's classifyMessage) — same
+  // pull-based posture as AI suggest; a human reads the sentiment/urgent
+  // badge to prioritize, nothing routes or replies on its own.
+  const analyzeMessage = async (item) => {
+    setAnalyzing(true);
+    setSuggestError(null);
+    try {
+      const res = await authFetch(`${API_BASE}/ai/inbox/${item.id}/analyze`, { method: 'POST' });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Could not analyze this message.');
+      setAnalysis((prev) => ({ ...prev, [item.id]: { sentiment: data.sentiment, urgent: data.urgent } }));
+    } catch (err) {
+      setSuggestError(err.message);
+    } finally {
+      setAnalyzing(false);
     }
   };
 
@@ -613,6 +634,12 @@ function Inbox({ authFetch, role, me }) {
                       <Chip tone={STATUS_TONE[selected.interactionStatus]}>
                         {STATUS_OPTIONS.find((s) => s.value === selected.interactionStatus)?.label}
                       </Chip>
+                      {analysis[selected.id] && (
+                        <>
+                          <Chip tone={SENTIMENT_TONE[analysis[selected.id].sentiment]}>{analysis[selected.id].sentiment}</Chip>
+                          {analysis[selected.id].urgent && <Chip tone="danger">urgent</Chip>}
+                        </>
+                      )}
                     </div>
                     <div className="text-[11px] text-muted flex items-center gap-1.5">
                       <span className="flex items-center" style={{ color: channelColor(selected.platform) }}>
@@ -783,6 +810,14 @@ function Inbox({ authFetch, role, me }) {
                             ))}
                           </PillSelect>
                         )}
+                        <Button
+                          size="sm"
+                          icon={Gauge}
+                          loading={analyzing}
+                          onClick={() => analyzeMessage(selected)}
+                        >
+                          {analyzing ? 'Analyzing…' : 'Analyze'}
+                        </Button>
                         <Button
                           size="sm"
                           icon={Sparkles}
