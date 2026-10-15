@@ -27,6 +27,7 @@ const marketingAiRoutes = require('./routes/marketingAi');
 const trackingRoutes = require('./routes/tracking');
 const trackedLinksRoutes = require('./routes/trackedLinks');
 const experimentsRoutes = require('./routes/experiments');
+const conversionJourneysRoutes = require('./routes/conversionJourneys');
 const socialScheduler = require('./social/scheduler');
 const socialPollers = require('./social/pollers');
 const broadcastQueue = require('./social/broadcastQueue');
@@ -136,6 +137,7 @@ tenantRouter.use(leadFormsRoutes.router);
 tenantRouter.use(trackingRoutes.router);
 tenantRouter.use(trackedLinksRoutes.router);
 tenantRouter.use(experimentsRoutes);
+tenantRouter.use(conversionJourneysRoutes);
 tenantRouter.use(attributionRoutes);
 tenantRouter.use(marketingAiRoutes);
 // Scoped to '/ai' specifically (not a blanket tenantRouter.use()) so

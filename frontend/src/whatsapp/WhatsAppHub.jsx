@@ -13,6 +13,7 @@ import {
   Banner, Modal, ConfirmDialog, EmptyState, Skeleton, Chip, FilterPill, StatStrip, Stat, Drawer, PillSelect
 } from '../ui';
 import SegmentRuleBuilder, { emptySegmentRoot } from '../marketing/SegmentRuleBuilder';
+import ConversionJourneysTab from './ConversionJourneysTab';
 
 const WA_API_BASE = `${API_BASE}/whatsapp`;
 const SOCIAL_API_BASE = `${API_BASE}/social`;
@@ -21,7 +22,8 @@ const MKT_API_BASE = `${API_BASE}/marketing`;
 const TABS = [
   { key: 'templates', label: 'Templates', icon: FileText },
   { key: 'segments', label: 'Audience', icon: Users },
-  { key: 'campaigns', label: 'Campaigns', icon: Megaphone }
+  { key: 'campaigns', label: 'Campaigns', icon: Megaphone },
+  { key: 'journeys', label: 'Conversion journeys', icon: Radio }
 ];
 
 const APPROVAL_TONE = { draft: 'neutral', pending: 'warning', approved: 'success', rejected: 'danger' };
@@ -105,6 +107,15 @@ function WhatsAppHub({ authFetch, role }) {
             canManage={canManage}
             canSend={canSend}
             setError={setError}
+          />
+        )}
+        {tab === 'journeys' && (
+          <ConversionJourneysTab
+            authFetch={authFetch}
+            templates={templates || []}
+            accounts={whatsappAccounts}
+            canManage={canManage}
+            canActivate={canSend}
           />
         )}
       </PageBody>

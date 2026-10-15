@@ -155,6 +155,16 @@ analysis against competitors and what shipped in which round, see
   approved it (hard `409`, not a warning); Development Mode is capped at Meta's own
   5-test-number limit until the WABA clears business verification — both are Meta-side
   facts this code surfaces honestly rather than working around.
+- **Social-to-WhatsApp Conversion Journeys**: when a contact messages you on any
+  connected social channel, automatically wait a configurable amount of time, then send
+  a WhatsApp template follow-up — fully reusing Marketing Hub's existing journey engine
+  (delay/action execution, retry-safe sweep) and WhatsApp send pipeline under the hood,
+  through a focused, ungated authoring surface (no graph editor, no Marketing Hub
+  needed). Consent (global opt-out, suppression list) and template-approval status are
+  enforced by the exact same code path every other WhatsApp send already goes through —
+  nothing new to bypass or get wrong. A tenant who wants branching and already has
+  Marketing Hub enabled can build a more complex version of the same journey there,
+  using the identical trigger.
 
 ## Billing & Usage
 
@@ -196,6 +206,12 @@ analysis against competitors and what shipped in which round, see
   not shipped as a generic lookup-table guess dressed up as intelligence.
 - **No series-wide edit/cancel for recurring posts** — each occurrence in a series is
   managed individually.
+- **Conversion journeys only trigger on inbound DMs, not comments/mentions** — the
+  same reason comments/mentions can't resolve to a contact at all today (no stable
+  author id from those adapter calls yet). A conversion journey is also deliberately a
+  fixed trigger → delay → send-WhatsApp shape, not a branching graph — a named scope
+  cut, not a missing capability (see Revenue... section above for the escape hatch via
+  Marketing Hub's full builder).
 - **Social revenue attribution only sees a visit that went through a Tracked Link.** A
   person who sees a post, remembers the brand, and visits directly later (no click
   through the link) isn't attributable to that post — the same honest limitation every

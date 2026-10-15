@@ -82,6 +82,24 @@ const hashtagSuggestSchema = z.object({
 
 const CONFIDENCE_LEVELS = [0.90, 0.95, 0.99];
 
+// The focused Social-to-WhatsApp journey authoring surface
+// (routes/conversionJourneys.js) — deliberately NOT the full graph
+// builder journeySchema already validates; this is a fixed trigger ->
+// delay -> send_whatsapp shape with no conditions/splits, a named
+// scope cut in favor of an ungated, zero-friction surface. A tenant who
+// wants branching and already has Marketing Hub enabled can still
+// build one with the full journeySchema/journeyGraphSchema using the
+// same 'social_message_received' trigger type.
+const conversionJourneySchema = z.object({
+  name: z.string().trim().min(1).max(200),
+  platform: z.string().trim().max(50).optional(), // filters which platform's inbound message fires this; omit to match any
+  delayAmount: z.number().int().min(1).max(10000).optional().default(5),
+  delayUnit: z.enum(['minutes', 'hours', 'days']).optional().default('minutes'),
+  templateId: z.string().uuid(),
+  socialAccountId: z.string().uuid(),
+  variableValues: z.array(z.string().max(500)).optional().default([])
+});
+
 const createTrackedLinkSchema = z.object({
   destinationUrl: z.string().trim().url().max(2000),
   platform: z.string().trim().max(50).optional(),
@@ -623,7 +641,11 @@ const journeyGraphSchema = z.object({
   edges: z.array(journeyEdgeSchema).max(200)
 });
 
-const JOURNEY_TRIGGER_TYPES = ['contact_created', 'contact_tag_added', 'deal_stage_changed', 'deal_won', 'deal_lost', 'email_opened', 'email_clicked', 'form_submitted', 'became_mql'];
+// social_message_received (Social Hub's own addition): fired from
+// social/pollers.js whenever a genuinely new inbound social DM/message
+// resolves to a real contact — see that file's own comment on why only
+// inbox messages (not mentions/comments) can fire this today.
+const JOURNEY_TRIGGER_TYPES = ['contact_created', 'contact_tag_added', 'deal_stage_changed', 'deal_won', 'deal_lost', 'email_opened', 'email_clicked', 'form_submitted', 'became_mql', 'social_message_received'];
 
 const journeySchema = z.object({
   name: z.string().trim().min(1).max(200),
@@ -683,7 +705,7 @@ module.exports = {
   signupSchema, loginSchema, createPostSchema, checkoutSchema, addMemberSchema, updateMemberSchema, hashtagSuggestSchema,
   savedReplySchema, draftPostSchema, whatsappEmbeddedSignupSchema, inboxReplySchema, updateInteractionSchema,
   repurposeSchema, brandMemorySchema, createExperimentSchema, CONFIDENCE_LEVELS,
-  createTrackedLinkSchema, updateTrackedLinkSchema,
+  createTrackedLinkSchema, updateTrackedLinkSchema, conversionJourneySchema,
   INTERACTION_STATUSES, INTERACTION_PRIORITIES, changePasswordSchema, forgotPasswordSchema, resetPasswordSchema,
   updateHubsSchema, templateSchema, segmentSchema, segmentMembersSchema, whatsappCampaignSchema,
   companySchema, contactSchema, updateContactSchema, dealSchema, updateDealSchema, moveDealStageSchema, salesActivitySchema,

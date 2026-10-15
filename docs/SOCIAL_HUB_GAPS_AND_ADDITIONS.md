@@ -507,7 +507,105 @@ round also hit).
 
 **Blockers / deployment requirements**: none new.
 
-## 9. What's still deliberately deferred (not silently dropped)
+## 9. Round 7 — Social-to-WhatsApp Conversion Journeys, reusing the journey engine completely
+
+**What was built**: a new `social_message_received` journey trigger
+type and a focused, ungated authoring surface
+(`routes/conversionJourneys.js`) over the SAME journey engine
+Marketing Hub's full graph builder already runs on
+(`lib/journeyEngine.js`, `lib/journeyGraph.js`, `lib/journeyActions.js`).
+`social/pollers.js`'s existing inbound-message sweep now fires this
+trigger for every genuinely NEW inbound social DM that resolves to a
+real contact — `.select()` added to its existing upsert is what makes
+"genuinely new" knowable (PostgREST's `ignoreDuplicates` upsert returns
+only the rows it actually inserted), so this never re-fires on the same
+historical message every 10-minute poll. No DB migration was needed at
+all: `workflow_definitions.trigger_type` (migration 028) is a plain
+text column with no check constraint, so a new trigger type is purely
+an application-layer addition.
+
+**Zero duplication of the hard parts**: `lib/journeyActions.js`'s
+`sendWhatsapp()` — consent gate (`filterConsentedContacts`), template-
+approval enforcement, campaign/recipient creation, `broadcastQueue`
+enqueue — runs completely unchanged for a journey created through this
+surface. `lib/journeyTemplates.js`'s existing `chain()` helper (now
+also exported) builds the fixed trigger → delay → send_whatsapp graph;
+`lib/journeyGraph.js`'s `validateGraph()` checks it before it's ever
+saved or activated. The only genuinely new code is the trigger-firing
+hook in `pollers.js` and this file's CRUD — everything that actually
+*runs* a journey was already built and already tested (Phase 4).
+
+**Deliberately NOT the full graph editor** — every journey created
+here is a fixed trigger → delay → send_whatsapp shape, no conditions
+or splits. A named scope cut: a tenant who wants branching and already
+has Marketing Hub enabled can still build one with the full
+`journeySchema`, using this exact same trigger type — nothing about
+`social_message_received` is exclusive to this ungated surface at the
+data layer, only at the authoring layer. Every query here additionally
+filters `trigger_type = 'social_message_received'`, so this surface
+can only ever see/touch journeys of its own kind, never an unrelated
+Marketing Hub journey, even though both live in `workflow_definitions`.
+
+**Mounted ungated, the same posture as Round 6's attribution
+endpoint and WhatsApp broadcast itself** — verified directly: a tenant
+with Marketing Hub NOT enabled can create, activate, and run a full
+conversion journey end to end (confirmed in the integration test,
+including a real `whatsapp_campaigns`/`whatsapp_campaign_recipients`
+row and the consent gate correctly blocking an opted-out contact).
+
+**New endpoints**: `POST`/`GET /social/conversion-journeys`,
+`GET /social/conversion-journeys/:id`,
+`PATCH /social/conversion-journeys/:id/{activate,pause}`,
+`DELETE /social/conversion-journeys/:id`,
+`GET /social/conversion-journeys/:id/enrollments`.
+
+**Files added**: `backend/routes/conversionJourneys.js`;
+`backend/scripts/integration-tests/social-conversion-journeys.js` (8
+assertions against a live Postgres+PostgREST stack: role gating,
+WhatsApp-account-type validation, an inactive journey correctly
+enrolling no one, activation really enrolling and pausing at the
+delay, resuming past the delay really creating a real WhatsApp
+campaign/recipient row, an opted-out contact correctly skipped with no
+send, tenant isolation, and the full CRUD working ungated);
+`frontend/src/whatsapp/ConversionJourneysTab.jsx`.
+
+**Files changed**: `backend/lib/schemas.js` (`social_message_received`
+added to `JOURNEY_TRIGGER_TYPES`, new `conversionJourneySchema`),
+`backend/lib/journeyTemplates.js` (exports `chain()` for reuse, zero
+behavior change), `backend/social/pollers.js` (fires the new trigger
+for genuinely-new resolved inbound messages), `backend/server.js`
+(mounts the new routes); `frontend/src/whatsapp/WhatsAppHub.jsx` (a
+new "Conversion journeys" tab).
+
+**A real pre-existing environment-setup gap found while testing, not
+caused by this round**: `marketing-journeys.js`'s and
+`marketing-consent.js`'s own integration tests assume a
+`platform_admins` row already exists; it didn't in this environment,
+and the failure mode was a confusing "Cannot read properties of null,"
+not a clear message. Confirmed this is pre-existing (not a regression
+from this round's changes) by seeding the one missing row and
+re-running `marketing-journeys.js` clean, 22/22, with no code changes
+— documented in `scripts/integration-tests/README.md`'s setup section
+so the next person doesn't hit the same confusing failure.
+
+**Tests run**: `npm test`: **181/181** (no new pure logic this round —
+the trigger-firing hook and the CRUD are both DB/HTTP-dependent, same
+posture as every other route file in this codebase). Backend
+`eslint .` clean on every changed file. Integration (live local
+Postgres+PostgREST): new `social-conversion-journeys.js` **8/8**.
+`social-approval.js`, `social-post-analytics.js`,
+`social-brand-memory.js`, `social-experiments.js`, and
+`social-attribution.js` re-run as regression checks: all still fully
+passing. `marketing-journeys.js` (the existing, pre-existing Phase 4
+suite, touched indirectly via the shared `journeyTemplates.js`/
+`pollers.js` files) re-run after fixing the environment gap above:
+**22/22**, confirming zero regression to the existing journey engine.
+Frontend `eslint .` clean; `next build` compiles (same pre-existing,
+unrelated `/account` Suspense issue every prior round also hit).
+
+**Blockers / deployment requirements**: none new.
+
+## 10. What's still deliberately deferred (not silently dropped)
 
 - **Real, personalized best-time-to-post**, specifically. Per-post data
   now exists (likes/comments/shares/views — see Round 3 above), but
@@ -523,6 +621,11 @@ round also hit).
   "haven't gotten to it yet").
 - **Series-wide edit/cancel** for a recurring post — each occurrence is
   managed individually for now (see Round 2 above).
+- **Conversion journeys only trigger on inbound DMs, not comments/
+  mentions** — same root cause as per-post analytics' platform limits:
+  mentions/comments can't resolve to a contact yet (no stable author id
+  from those adapter calls). No branching/conditions either — see
+  Round 7 above for the deliberate scope cut and its escape hatch.
 - **Social listening beyond owned accounts** (keyword/hashtag/competitor
   monitoring). Everything today is scoped to the tenant's own connected
   accounts' mentions/comments/reviews.

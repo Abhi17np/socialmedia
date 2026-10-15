@@ -23,6 +23,14 @@
  * already-seen items is a no-op (mentions/inbox) or an in-place refresh
  * (analytics_snapshots/post_analytics) rather than a duplicate row.
  *
+ * A genuinely new inbound message that resolves to a real contact also
+ * fires the 'social_message_received' journey trigger (Social-to-
+ * WhatsApp Conversion Journeys, routes/conversionJourneys.js) — reusing
+ * lib/journeyEngine.js's existing fireWorkflowTrigger()/enrollContact(),
+ * not a second notification path. Mentions/comments can't fire this
+ * yet, same reason they can't resolve to a contact at all today (see
+ * the fetchMentions block's own comment above).
+ *
  * post_analytics' metric vocabulary is deliberately small and shared
  * across adapters (likes/comments/shares/views) — see each adapter's
  * fetchPostAnalytics for exactly which of these it returns and why
@@ -34,6 +42,7 @@
 const { getSocialClient } = require('./db');
 const { getUsableAccount } = require('./accounts');
 const { resolveContact } = require('../lib/contacts');
+const { fireWorkflowTrigger } = require('../lib/journeyEngine');
 const ADAPTERS = require('./adapters');
 
 const POLL_INTERVAL_MS = 10 * 60 * 1000; // inbound APIs here are typically rate/quota-limited; no need to poll as tightly as the publish sweep
@@ -132,8 +141,21 @@ async function pollAccount(client, row) {
             received_at: m.receivedAt || new Date().toISOString()
           });
         }
-        const { error } = await client.from('inbox_messages').upsert(rows, { onConflict: 'platform,external_message_id', ignoreDuplicates: true });
+        // .select() here is what makes the next step possible: with
+        // ignoreDuplicates, PostgREST's upsert
+        // returns only the rows that were actually newly inserted, not
+        // ones skipped as an already-seen duplicate — exactly the
+        // distinction needed to fire the social_message_received
+        // journey trigger once per real new message, never once per
+        // 10-min poll for the same historical ones.
+        const { data: inserted, error } = await client.from('inbox_messages').upsert(rows, { onConflict: 'platform,external_message_id', ignoreDuplicates: true }).select('contact_id, platform, message');
         if (error) throw error;
+        for (const row of inserted || []) {
+          if (row.contact_id) {
+            fireWorkflowTrigger(client, account.tenant_id, 'social_message_received', { contactId: row.contact_id, platform: row.platform, text: row.message })
+              .catch((err) => console.error(`[social/pollers] fireWorkflowTrigger(social_message_received) failed for contact ${row.contact_id}:`, err.message));
+          }
+        }
       }
     } catch (err) {
       if (err.isPermanentAuthError) return markAccountAuthError(client, account, err);

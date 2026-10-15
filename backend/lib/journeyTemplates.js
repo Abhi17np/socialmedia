@@ -90,4 +90,7 @@ const JOURNEY_TEMPLATES = {
   }
 };
 
-module.exports = { JOURNEY_TEMPLATES };
+// chain() is also reused by routes/conversionJourneys.js to build its
+// own simple trigger -> delay -> send_whatsapp graphs — same linear-
+// graph primitive, not a second copy of the edge-building logic.
+module.exports = { JOURNEY_TEMPLATES, chain };

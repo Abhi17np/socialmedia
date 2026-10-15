@@ -27,6 +27,15 @@ matters.
    createdb socialhub_test
    for f in migrations/*.sql; do psql -d socialhub_test -v ON_ERROR_STOP=1 -f "$f"; done
    ```
+   `marketing-journeys.js` and `marketing-consent.js` additionally assume
+   a `platform_admins` row already exists (they sign a platform-admin
+   JWT from it to flip on Marketing/Sales Hub for their test tenants) —
+   without one, they fail with a confusing "Cannot read properties of
+   null" rather than a clear message. One-time fix, confirmed while
+   building Social-to-WhatsApp Conversion Journeys:
+   ```
+   psql -d socialhub_test -c "insert into platform_admins (id, email, password_hash) values (gen_random_uuid(), 'test-admin@example.com', 'x');"
+   ```
 2. A local PostgREST instance (not Supabase itself — these scripts talk
    PostgREST's REST API directly, which is exactly what Supabase runs
    under the hood) pointed at that database, with a `service_role`-like
@@ -72,6 +81,7 @@ node scripts/integration-tests/social-post-analytics.js
 node scripts/integration-tests/social-brand-memory.js
 node scripts/integration-tests/social-experiments.js
 node scripts/integration-tests/social-attribution.js
+node scripts/integration-tests/social-conversion-journeys.js
 node scripts/integration-tests/whatsapp-routes.js
 node scripts/integration-tests/sales-routes.js
 node scripts/integration-tests/sales-stage1.js
