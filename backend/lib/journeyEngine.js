@@ -43,6 +43,21 @@ async function evaluateGoal(client, tenantId, goalConfig, contact) {
   return evaluateCondition(goalConfig, contact);
 }
 
+const LAST_MESSAGE_TABLES = {
+  email: { table: 'email_campaign_recipients', deriveStatus: (r) => (r.clicked_at ? 'clicked' : r.opened_at ? 'opened' : r.status) },
+  whatsapp: { table: 'whatsapp_campaign_recipients', deriveStatus: (r) => r.status },
+  sms: { table: 'sms_campaign_recipients', deriveStatus: (r) => r.status }
+};
+
+/** Reads the REAL current delivery status of an enrollment's most recent send_* action, straight from the same recipient row every tracking pixel/webhook/worker already writes to — never a guess made at send time. Returns null if no send has happened yet in this journey, or the row can't be found. */
+async function resolveLastMessageStatus(client, tenantId, lastMessage) {
+  if (!lastMessage || !lastMessage.channel || !lastMessage.recipientId) return null;
+  const spec = LAST_MESSAGE_TABLES[lastMessage.channel];
+  if (!spec) return null;
+  const { data } = await scoped(client, tenantId, spec.table).select('*').eq('id', lastMessage.recipientId).maybeSingle();
+  return data ? spec.deriveStatus(data) : null;
+}
+
 async function finishEnrollment(client, tenantId, enrollmentId, contactId, status) {
   await client.from('workflow_enrollments').update({ status, completed_at: new Date().toISOString(), next_action_at: null }).eq('id', enrollmentId);
   // Scores 'journey_completed_any' lead-scoring rules (lib/leadScoring.js)
@@ -64,6 +79,7 @@ async function runEnrollmentTick(client, tenantId, enrollment) {
 
     let currentNodeId = enrollment.current_node_id;
     let dealId = enrollment.deal_id;
+    let lastMessage = enrollment.last_message_channel ? { channel: enrollment.last_message_channel, recipientId: enrollment.last_message_recipient_id } : null;
     let steps = 0;
 
     while (currentNodeId) {
@@ -85,8 +101,11 @@ async function runEnrollmentTick(client, tenantId, enrollment) {
       }
 
       if (node.type === 'condition') {
-        const result = evaluateCondition(node.config, contact);
-        await logEvent(client, tenantId, enrollment.id, node.id, 'condition', 'completed', { result });
+        const conditionContact = node.config?.field === 'last_message_status'
+          ? { ...contact, _lastMessageStatus: await resolveLastMessageStatus(client, tenantId, lastMessage) }
+          : contact;
+        const result = evaluateCondition(node.config, conditionContact);
+        await logEvent(client, tenantId, enrollment.id, node.id, 'condition', 'completed', { result, lastMessageStatus: conditionContact._lastMessageStatus });
         const edge = conditionEdge(graph, node.id, result);
         currentNodeId = edge ? edge.target : null;
         continue;
@@ -107,12 +126,19 @@ async function runEnrollmentTick(client, tenantId, enrollment) {
           try {
             const result = await executor(client, tenantId, node.config || {}, { contact, dealId });
             if (result && result.dealId) dealId = result.dealId; // create_deal feeds dealId forward for a later move_deal_stage node
+            if (result && result.channel && result.recipientId) lastMessage = { channel: result.channel, recipientId: result.recipientId };
             await logEvent(client, tenantId, enrollment.id, node.id, 'action', 'completed', result);
           } catch (err) {
             await logEvent(client, tenantId, enrollment.id, node.id, 'action', 'failed', { error: err.message });
           }
         }
-        if (dealId !== enrollment.deal_id) await client.from('workflow_enrollments').update({ deal_id: dealId }).eq('id', enrollment.id);
+        if (dealId !== enrollment.deal_id || (lastMessage && lastMessage.recipientId !== enrollment.last_message_recipient_id)) {
+          await client.from('workflow_enrollments').update({
+            deal_id: dealId,
+            last_message_channel: lastMessage?.channel ?? enrollment.last_message_channel,
+            last_message_recipient_id: lastMessage?.recipientId ?? enrollment.last_message_recipient_id
+          }).eq('id', enrollment.id);
+        }
         currentNodeId = nextNodeId(graph, node.id);
         continue;
       }

@@ -82,7 +82,14 @@ const CONDITION_FIELD_ACCESSORS = {
   lifecycle_stage: (c) => c.lifecycle_stage,
   tags: (c) => c.tags || [],
   has_email: (c) => !!c.email,
-  has_phone: (c) => !!c.phone
+  has_phone: (c) => !!c.phone,
+  // Populated by lib/journeyEngine.js just before evaluating a condition
+  // node, from the real recipient row of the enrollment's most recent
+  // send_email/send_whatsapp/send_sms action — never faked, and null
+  // (never matches 'eq') when no send has happened yet in this journey.
+  // This is the "delivery-status condition" Phase 7 named as the one
+  // real gap in its multichannel-fallback composition pattern.
+  last_message_status: (c) => c._lastMessageStatus ?? null
 };
 
 /** Evaluates a single { field, operator, value } condition against an already-loaded contact row — no DB query, unlike lib/segmentCompiler.js which builds one. Unknown field/operator fails safe (false), never throws mid-journey. */

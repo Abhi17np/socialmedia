@@ -53,11 +53,20 @@ export default function FormsSection({ authFetch, canManage, canAdmin }) {
   const [subTotal, setSubTotal] = useState(null);
   const [pendingDelete, setPendingDelete] = useState(null);
   const [copiedId, setCopiedId] = useState(null);
+  const [snippet, setSnippet] = useState(null);
+  const [trackingSummary, setTrackingSummary] = useState(null);
+  const [snippetCopied, setSnippetCopied] = useState(false);
 
   const load = () => {
     authFetch(`${MKT_API_BASE}/forms`).then((r) => r.json()).then((d) => setForms(d.forms || [])).catch((e) => setError(e.message));
+    authFetch(`${MKT_API_BASE}/tracking/snippet`).then((r) => r.json()).then((d) => setSnippet(d.snippet)).catch(() => {});
+    authFetch(`${MKT_API_BASE}/tracking/summary`).then((r) => r.json()).then(setTrackingSummary).catch(() => {});
   };
   useEffect(load, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const copySnippet = () => {
+    navigator.clipboard.writeText(snippet).then(() => { setSnippetCopied(true); setTimeout(() => setSnippetCopied(false), 1500); });
+  };
 
   const openCreate = () => { setForm(emptyForm()); setEditorOpen(true); };
   const openEdit = (f) => { setForm(formFromRecord(f)); setEditorOpen(true); };
@@ -151,6 +160,25 @@ export default function FormsSection({ authFetch, canManage, canAdmin }) {
   return (
     <>
       {error && <Banner tone="danger">{error}</Banner>}
+
+      {canAdmin && (
+        <Panel className="p-3.5">
+          <div className="flex items-center justify-between gap-2 mb-2">
+            <span className="text-xs font-semibold text-ink">Website tracking</span>
+            {trackingSummary && (
+              <span className="text-[11px] text-muted">
+                {trackingSummary.totalVisitors} visitors · {trackingSummary.identifiedVisitors} identified · {trackingSummary.pageviewsLast30d} page views (30d)
+              </span>
+            )}
+          </div>
+          <p className="text-xs text-muted mb-2">Paste this once into your site&apos;s <code>&lt;head&gt;</code> — every page view is tracked anonymously, then linked to a real contact the moment that visitor submits a form below.</p>
+          <div className="flex items-start gap-2">
+            <code className="flex-1 text-[11px] bg-canvas border border-hairline rounded-ui px-2.5 py-2 overflow-x-auto whitespace-pre-wrap break-all">{snippet || 'Loading…'}</code>
+            <Button size="sm" icon={snippetCopied ? Check : Copy} onClick={copySnippet} disabled={!snippet}>{snippetCopied ? 'Copied' : 'Copy'}</Button>
+          </div>
+        </Panel>
+      )}
+
       <Panel className="overflow-hidden">
         <PanelHeader
           title="Forms"

@@ -118,7 +118,7 @@ async function sendEmail(client, tenantId, config, { contact }) {
 
   const rendered = renderEmailForRecipient({ template, campaign: null, contact, recipientId: recipient.id, tenant });
   await emailQueue.enqueueCampaign({ id: campaign.id, tenant_id: tenantId }, [{ id: recipient.id, email: contact.email }], new Map([[recipient.id, rendered]]));
-  return { campaignId: campaign.id, recipientId: recipient.id };
+  return { campaignId: campaign.id, recipientId: recipient.id, channel: 'email' };
 }
 
 async function sendWhatsapp(client, tenantId, config, { contact }) {
@@ -142,14 +142,16 @@ async function sendWhatsapp(client, tenantId, config, { contact }) {
   if (recErr) throw recErr;
 
   await broadcastQueue.enqueueCampaign({ id: campaign.id, tenant_id: tenantId, social_account_id: config.socialAccountId, variable_values: config.variableValues || [] }, [recipient], template);
-  return { campaignId: campaign.id, recipientId: recipient.id };
+  return { campaignId: campaign.id, recipientId: recipient.id, channel: 'whatsapp' };
 }
 
 // The "multichannel fallback" half of Phase 7: NOT a separate primitive
-// — a tenant composes send_whatsapp -> delay -> condition(on
-// delivery/read) -> send_sms using the exact condition/delay nodes
-// Phase 4 already built, falling back to SMS only when WhatsApp didn't
-// land. See docs/MARKETING_HUB_IMPLEMENTATION.md's Phase 7 entry.
+// — a tenant composes send_whatsapp -> delay -> condition(field:
+// last_message_status, operator: neq, value: 'delivered') -> send_sms
+// using the exact condition/delay nodes Phase 4 already built, falling
+// back to SMS only when WhatsApp genuinely didn't land. The condition is
+// truly conditional as of Phase 10 — see lib/journeyEngine.js's
+// resolveLastMessageStatus().
 async function sendSms(client, tenantId, config, { contact }) {
   if (!config.body) throw new Error('send_sms requires a body.');
   if (!contact.phone) return { skipped: 'no_phone' };
@@ -171,11 +173,20 @@ async function sendSms(client, tenantId, config, { contact }) {
   if (recErr) throw recErr;
 
   await smsQueue.enqueueCampaign({ id: campaign.id, tenant_id: tenantId }, [{ id: recipient.id, phone: contact.phone }], new Map([[recipient.id, body]]));
-  return { campaignId: campaign.id, recipientId: recipient.id };
+  return { campaignId: campaign.id, recipientId: recipient.id, channel: 'sms' };
 }
+
+// Used only by the branching step editor (frontend/src/marketing/
+// JourneysSection.jsx's graphFromForm) to give an empty "if yes"/"if no"
+// branch a real terminal node — validateGraph() requires every condition
+// node to have exactly one yes and one no edge, so "do nothing on this
+// branch" still needs somewhere to point. Never selectable from the
+// action-type dropdown itself.
+async function noop() { return {}; }
 
 const ACTION_EXECUTORS = {
   add_tag: addTag,
+  noop,
   remove_tag: removeTag,
   create_task: createTask,
   assign_owner: assignOwner,

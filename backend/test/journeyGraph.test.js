@@ -82,6 +82,12 @@ test('evaluateCondition() fails safe (false) for an unknown field or operator, n
   assert.doesNotThrow(() => evaluateCondition(null, {}));
 });
 
+test('evaluateCondition() reads last_message_status from the value lib/journeyEngine.js injects, never from the real contact row', () => {
+  assert.equal(evaluateCondition({ field: 'last_message_status', operator: 'eq', value: 'delivered' }, { _lastMessageStatus: 'delivered' }), true);
+  assert.equal(evaluateCondition({ field: 'last_message_status', operator: 'neq', value: 'delivered' }, { _lastMessageStatus: 'failed' }), true);
+  assert.equal(evaluateCondition({ field: 'last_message_status', operator: 'eq', value: 'delivered' }, {}), false, 'no send has happened yet in this journey — null never matches a real status');
+});
+
 test('conditionEdge() picks the yes/no edge based on the evaluated result', () => {
   const g = {
     nodes: [{ id: 'c', type: 'condition' }], edges: [{ id: 'e1', source: 'c', target: 'yesTarget', branch: 'yes' }, { id: 'e2', source: 'c', target: 'noTarget', branch: 'no' }]

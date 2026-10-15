@@ -24,12 +24,14 @@ const journeysRoutes = require('./routes/journeys');
 const leadFormsRoutes = require('./routes/leadForms');
 const attributionRoutes = require('./routes/attribution');
 const marketingAiRoutes = require('./routes/marketingAi');
+const trackingRoutes = require('./routes/tracking');
 const socialScheduler = require('./social/scheduler');
 const socialPollers = require('./social/pollers');
 const broadcastQueue = require('./social/broadcastQueue');
 const emailQueue = require('./lib/email/emailQueue');
 const smsQueue = require('./lib/sms/smsQueue');
 const scheduledSendSweep = require('./lib/email/scheduledSendSweep');
+const abWinnerSweep = require('./lib/email/abWinnerSweep');
 const journeySweep = require('./lib/journeySweep');
 const sequenceScheduler = require('./lib/sequenceScheduler');
 
@@ -54,6 +56,13 @@ const app = express();
 // page may load) doesn't apply here, and a default-deny CSP would just
 // break CORS preflight responses for no benefit.
 app.use(helmet({ contentSecurityPolicy: false }));
+// The tracking pixel (routes/tracking.js) is called from the TENANT'S
+// OWN external website, not this app's frontend — a fundamentally
+// different origin than the allowlist below exists to restrict.
+// Registered first so it's exempt from that allowlist; anonymous,
+// write-only, no cookies/auth read, same threat model as a GA/Meta
+// pixel endpoint.
+app.use(`${API_PREFIX}/track`, cors());
 app.use(cors({ origin: allowedOrigins }));
 app.use(pinoHttp({ logger })); // attaches req.log + req.id to every request, public or protected
 
@@ -90,6 +99,7 @@ app.use(API_PREFIX, billingRoutes.publicRouter);
 app.use(API_PREFIX, marketingRoutes.publicRouter);
 app.use(API_PREFIX, marketingEmailRoutes.publicRouter);
 app.use(API_PREFIX, leadFormsRoutes.publicRouter);
+app.use(API_PREFIX, trackingRoutes.publicRouter);
 
 // requirePlatformAdmin is mounted at the more specific `${API_PREFIX}/platform`
 // path, and registered BEFORE the broader tenant mount below — Express
@@ -119,6 +129,7 @@ tenantRouter.use(marketingEmailRoutes.router);
 tenantRouter.use(marketingSmsRoutes);
 tenantRouter.use(journeysRoutes);
 tenantRouter.use(leadFormsRoutes.router);
+tenantRouter.use(trackingRoutes.router);
 tenantRouter.use(attributionRoutes);
 tenantRouter.use(marketingAiRoutes);
 // Scoped to '/ai' specifically (not a blanket tenantRouter.use()) so
@@ -163,6 +174,7 @@ if (require.main === module) {
     emailQueue.start();
     smsQueue.start();
     scheduledSendSweep.start();
+    abWinnerSweep.start();
     journeySweep.start();
     sequenceScheduler.start();
   });
@@ -196,6 +208,7 @@ if (require.main === module) {
       await emailQueue.stop();        // the marketing email worker/queue and its own Redis connection
       await smsQueue.stop();          // the marketing SMS worker/queue and its own Redis connection
       scheduledSendSweep.stop();      // the scheduled-email-campaign sweep interval
+      abWinnerSweep.stop();           // the A/B winner-decision sweep interval
       journeySweep.stop();            // the journey delay-resume sweep interval
       sequenceScheduler.stop();       // the Sales Hub sequence sweep interval
       const closed = new Promise((resolve, reject) => server.close(err => (err ? reject(err) : resolve())));

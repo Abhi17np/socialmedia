@@ -15,6 +15,17 @@ import { Button, Checkbox, Input, Textarea, Select, Field, Banner, Panel, Skelet
  * skip hidden fields but still fill in off-screen ones, so this uses
  * both: visually hidden AND empty-by-default, never pre-filled).
  */
+const VISITOR_ID_KEY = '_mkt_visitor_id';
+function getVisitorId() {
+  try {
+    let id = localStorage.getItem(VISITOR_ID_KEY);
+    if (!id) { id = crypto.randomUUID(); localStorage.setItem(VISITOR_ID_KEY, id); }
+    return id;
+  } catch {
+    return crypto.randomUUID(); // localStorage blocked (private mode) — still track this one beacon, just not persistently
+  }
+}
+
 export default function HostedLeadForm({ formId }) {
   const [state, setState] = useState({ loading: true, error: null, form: null });
   const [values, setValues] = useState({});
@@ -35,6 +46,18 @@ export default function HostedLeadForm({ formId }) {
     return () => { cancelled = true; };
   }, [formId]);
 
+  // A page-view-then-submit on this exact hosted form page is tracked
+  // and attributed even if the tenant never separately embeds the
+  // tracking snippet (routes/tracking.js) — same visitor id, same
+  // beacon, just fired here instead of from an external <script> tag.
+  useEffect(() => {
+    if (!state.form?.tenantId) return;
+    const visitorId = getVisitorId();
+    const body = JSON.stringify({ tenantId: state.form.tenantId, visitorId, url: window.location.href, referrer: document.referrer });
+    if (navigator.sendBeacon) navigator.sendBeacon(`${API_BASE}/track/pageview`, new Blob([body], { type: 'application/json' }));
+    else fetch(`${API_BASE}/track/pageview`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body, keepalive: true }).catch(() => {});
+  }, [state.form?.tenantId]);
+
   useEffect(() => {
     if (state.form && result?.redirectUrl) {
       window.location.href = result.redirectUrl;
@@ -53,6 +76,7 @@ export default function HostedLeadForm({ formId }) {
         body: JSON.stringify({
           data: values,
           hp: values._hp || '',
+          visitorId: getVisitorId(),
           utmSource: params.get('utm_source') || undefined,
           utmMedium: params.get('utm_medium') || undefined,
           utmCampaign: params.get('utm_campaign') || undefined,

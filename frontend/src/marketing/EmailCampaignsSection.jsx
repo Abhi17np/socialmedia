@@ -14,7 +14,7 @@ const WA_API_BASE = `${API_BASE}/whatsapp`;
 const STATUS_TONE = { draft: 'neutral', scheduled: 'info', sending: 'warning', completed: 'success', failed: 'danger', canceled: 'neutral' };
 
 function emptyForm() {
-  return { name: '', templateId: '', segmentId: '', subject: '', fromName: '', fromEmail: '', sendMode: 'immediate', scheduledAt: '', abEnabled: false, variantASubject: '', variantBSubject: '' };
+  return { name: '', templateId: '', segmentId: '', subject: '', fromName: '', fromEmail: '', sendMode: 'immediate', scheduledAt: '', abEnabled: false, variantASubject: '', variantBSubject: '', abAutoDecide: false, abDecisionHours: 24 };
 }
 
 export default function EmailCampaignsSection({ authFetch, canManage, canAdmin }) {
@@ -47,7 +47,10 @@ export default function EmailCampaignsSection({ authFetch, canManage, canAdmin }
         sendMode: form.sendMode, scheduledAt: form.sendMode === 'scheduled' ? form.scheduledAt : undefined
       };
       if (form.abEnabled && form.variantASubject.trim() && form.variantBSubject.trim()) {
-        body.abTest = { variants: [{ key: 'A', subject: form.variantASubject }, { key: 'B', subject: form.variantBSubject }], splitPercent: 50, winnerMetric: 'opens' };
+        body.abTest = {
+          variants: [{ key: 'A', subject: form.variantASubject }, { key: 'B', subject: form.variantBSubject }], splitPercent: 50, winnerMetric: 'opens',
+          decisionHours: form.abAutoDecide ? Number(form.abDecisionHours) || 24 : undefined
+        };
       }
       const res = await authFetch(`${MKT_API_BASE}/email/campaigns`, { method: 'POST', body: JSON.stringify(body) });
       const data = await res.json();
@@ -177,7 +180,17 @@ export default function EmailCampaignsSection({ authFetch, canManage, canAdmin }
               <div className="flex flex-col gap-2">
                 <Input placeholder="Variant A subject" value={form.variantASubject} onChange={(e) => setForm({ ...form, variantASubject: e.target.value })} />
                 <Input placeholder="Variant B subject" value={form.variantBSubject} onChange={(e) => setForm({ ...form, variantBSubject: e.target.value })} />
-                <p className="text-[11px] text-muted">Recipients split 50/50. Reporting breaks out opens/clicks per variant — winner selection is manual for now (pick the better-performing subject and send a follow-up campaign).</p>
+                <p className="text-[11px] text-muted">Recipients split 50/50. Reporting breaks out opens/clicks per variant.</p>
+                <label className="flex items-center gap-2 cursor-pointer select-none mt-1">
+                  <Checkbox checked={form.abAutoDecide} onChange={(e) => setForm({ ...form, abAutoDecide: e.target.checked })} />
+                  <span className="text-sm">Automatically pick the winner by open rate</span>
+                </label>
+                {form.abAutoDecide && (
+                  <div className="flex items-center gap-2">
+                    <Input type="number" min={1} max={168} className="h-8 w-20" value={form.abDecisionHours} onChange={(e) => setForm({ ...form, abDecisionHours: e.target.value })} />
+                    <span className="text-xs text-muted">hours after sending finishes</span>
+                  </div>
+                )}
               </div>
             )}
           </div>
@@ -197,11 +210,15 @@ export default function EmailCampaignsSection({ authFetch, canManage, canAdmin }
 
             {report.byVariant && (
               <div>
-                <div className="eyebrow mb-1.5">A/B variants</div>
+                <div className="eyebrow mb-1.5 flex items-center gap-1.5">
+                  A/B variants
+                  {report.abTest?.winnerKey && <Chip tone="success">Winner: {report.abTest.winnerKey}</Chip>}
+                  {!report.abTest?.winnerKey && report.abTest?.decisionHours && <Chip tone="neutral">Auto-decides {report.abTest.decisionHours}h after sending finishes</Chip>}
+                </div>
                 <div className="flex flex-col gap-1">
                   {Object.entries(report.byVariant).map(([key, v]) => (
                     <div key={key} className="flex items-center justify-between text-xs">
-                      <span className="font-medium">{key}</span>
+                      <span className="font-medium">{key}{report.abTest?.winnerKey === key ? ' 🏆' : ''}</span>
                       <span className="text-muted">{v.sent} sent · {v.opened} opened · {v.clicked} clicked</span>
                     </div>
                   ))}

@@ -380,7 +380,10 @@ router.get('/marketing/email/campaigns/:id/report', requireHub('marketing'), asy
       sent: campaign.sent_count, delivered: campaign.delivered_count, opened: campaign.opened_count, clicked: campaign.clicked_count,
       bounced: campaign.bounced_count, complained: campaign.complained_count, unsubscribed: campaign.unsubscribed_count
     },
-    byVariant
+    byVariant,
+    // winnerKey is null until lib/email/abWinnerSweep.js decides one
+    // (decisionHours after completed_at) — never set at send time.
+    abTest: campaign.ab_test || null
   });
 }));
 

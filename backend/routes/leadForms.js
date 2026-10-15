@@ -27,6 +27,7 @@ const { LeadFormError, validateFieldDefinitions, validateSubmission, resolveCont
 const router = express.Router();
 const publicRouter = express.Router();
 
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const rateLimited = { error: 'Too many requests — please try again in a few minutes.' };
 // A hosted form's thank-you/confirm flow needs no login — the uuid in
 // the URL is 122 bits of randomness, same access-control model as every
@@ -163,7 +164,12 @@ publicRouter.get('/public/forms/:id', formViewLimiter, asyncHandler(async (req, 
   const { data: tenant } = await client.from('tenants').select('hubs_enabled').eq('id', form.tenant_id).maybeSingle();
   if (!tenant || !tenant.hubs_enabled?.marketing) return res.status(404).json({ error: 'This form is not available.' });
 
-  res.json({ id: form.id, name: form.name, description: form.description, fields: form.fields, consentRequired: form.consent_required, consentText: form.consent_text });
+  // tenant_id here is public by design (see routes/tracking.js's header
+  // comment) — the hosted form page uses it to fire its own pageview
+  // beacon, same as the embeddable tracking snippet does on a tenant's
+  // own site, so a page-view-then-submit on this exact page is
+  // attributable even if the tenant never adds the snippet separately.
+  res.json({ id: form.id, tenantId: form.tenant_id, name: form.name, description: form.description, fields: form.fields, consentRequired: form.consent_required, consentText: form.consent_text });
 }));
 
 publicRouter.post('/public/forms/:id/submit', formSubmitLimiter, asyncHandler(async (req, res) => {
@@ -216,6 +222,16 @@ publicRouter.post('/public/forms/:id/submit', formSubmitLimiter, asyncHandler(as
   if (error) throw error;
 
   await client.from('lead_forms').update({ submit_count: form.submit_count + 1 }).eq('id', form.id);
+
+  // If the embedded tracking snippet (routes/tracking.js) is on this same
+  // page, it already created an anonymous site_visitors row for this
+  // browser — link it to the real contact this submission just resolved.
+  // Never blocks the submission response on a secondary enrichment.
+  const visitorId = req.body.visitorId;
+  if (visitorId && UUID_RE.test(visitorId)) {
+    client.from('site_visitors').update({ contact_id: contact.id }).eq('id', visitorId).eq('tenant_id', form.tenant_id)
+      .then(({ error: linkErr }) => { if (linkErr) console.error('[leadForms] could not link site visitor to contact:', linkErr.message); });
+  }
 
   if (created) {
     Object.assign(contact, await recomputeLeadScore(client, form.tenant_id, contact.id));

@@ -496,7 +496,11 @@ const emailTemplateSchema = z.object({
 const emailAbTestSchema = z.object({
   variants: z.array(z.object({ key: z.string().trim().min(1).max(20), subject: z.string().trim().min(1).max(300) })).min(2).max(4),
   splitPercent: z.number().min(1).max(99).optional().default(50),
-  winnerMetric: z.enum(['opens', 'clicks']).optional().default('opens')
+  winnerMetric: z.enum(['opens', 'clicks']).optional().default('opens'),
+  // Hours after the campaign finishes sending before lib/email/abWinnerSweep.js
+  // auto-picks a winner by winnerMetric and writes it to winnerKey. Omit to
+  // never auto-decide (reporting-only, same as before this field existed).
+  decisionHours: z.number().min(1).max(168).optional()
 }).optional();
 
 const emailCampaignSchema = z.object({
