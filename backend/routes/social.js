@@ -403,7 +403,7 @@ protectedRouter.post('/social/media/upload', requireRole('member'), (req, res) =
 protectedRouter.post('/social/posts', requireRole('member'), validate(createPostSchema), asyncHandler(async (req, res) => {
   const client = requireSocialClient(res);
   if (!client) return;
-  const { content, mediaUrls, targetPlatforms, targetAccountIds, scheduledAt, idempotencyKey } = req.body;
+  const { content, mediaUrls, targetPlatforms, targetAccountIds, scheduledAt, idempotencyKey, recurrence } = req.body;
 
   try {
     await assertWithinLimit(client, req.tenantId, 'postsPerMonth');
@@ -415,9 +415,8 @@ protectedRouter.post('/social/posts', requireRole('member'), validate(createPost
   // post is held for review rather than queued immediately. An
   // admin/owner's own post skips review — someone with the authority to
   // approve anyone else's post doesn't need their own rubber-stamped.
-  const { data: tenant } = await client.from('tenants').select('social_require_approval').eq('id', req.tenantId).maybeSingle();
-  const needsReview = !!tenant?.social_require_approval && !['admin', 'owner'].includes(req.role);
-  const initialStatus = needsReview ? 'pending_review' : 'pending';
+  const initialStatus = await socialQueue.determineInitialStatus(client, req.tenantId, req.role);
+  const needsReview = initialStatus === 'pending_review';
 
   const { data, error } = await client.from('scheduled_posts').insert({
     tenant_id: req.tenantId,
@@ -428,8 +427,17 @@ protectedRouter.post('/social/posts', requireRole('member'), validate(createPost
     scheduled_at: scheduledAt,
     idempotency_key: idempotencyKey || null,
     status: initialStatus,
-    created_by: req.userId
+    created_by: req.userId,
+    // Migration 035: recurrence_series_id is filled in once this insert
+    // returns its own id (a series' root occurrence IS the series id) —
+    // see the update right below.
+    recurrence: recurrence || null
   }).select().single();
+
+  if (!error && data && recurrence) {
+    await client.from('scheduled_posts').update({ recurrence_series_id: data.id }).eq('id', data.id);
+    data.recurrence_series_id = data.id;
+  }
 
   // A retried request with the same idempotencyKey hits
   // idx_scheduled_posts_tenant_idempotency (migrations/005) and is

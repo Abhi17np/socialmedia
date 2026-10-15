@@ -10,7 +10,7 @@ import { SOCIAL_API_BASE } from './api';
 import { API_BASE } from '../apiBase';
 import { PlatformIcon } from './PlatformIcon';
 import { Page, PageBar, PageBody } from '../ui/page';
-import { Button, Panel, PanelHeader, Input, Textarea, Field, Banner, EmptyState, cx } from '../ui';
+import { Button, Panel, PanelHeader, Input, Textarea, Select, Field, Banner, EmptyState, cx } from '../ui';
 import { channelColor, channelLabel, ChannelTile } from '../ui/channel';
 
 // Per-platform limits this composer actually warns about — kept to what
@@ -247,6 +247,9 @@ function Composer({ authFetch }) {
   const [selectedAccountIds, setSelectedAccountIds] = useState([]);
   const [mode, setMode] = useState('now'); // 'now' | 'schedule'
   const [scheduledAt, setScheduledAt] = useState('');
+  const [repeatOn, setRepeatOn] = useState(false);
+  const [repeatFreq, setRepeatFreq] = useState('weekly');
+  const [repeatUntil, setRepeatUntil] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [result, setResult] = useState(null);
   const [previewPlatform, setPreviewPlatform] = useState(null);
@@ -404,6 +407,10 @@ function Composer({ authFetch }) {
       setResult({ type: 'error', text: 'Pick a date and time to schedule for.' });
       return;
     }
+    if (mode === 'schedule' && repeatOn && !repeatUntil) {
+      setResult({ type: 'error', text: 'Pick an end date for the repeating series.' });
+      return;
+    }
     if (mediaUploading) {
       setResult({ type: 'error', text: 'Still uploading media — wait for it to finish before posting.' });
       return;
@@ -420,7 +427,8 @@ function Composer({ authFetch }) {
           mediaUrls,
           targetPlatforms: selectedPlatforms,
           targetAccountIds: selectedAccountIds,
-          scheduledAt: mode === 'now' ? new Date().toISOString() : new Date(scheduledAt).toISOString()
+          scheduledAt: mode === 'now' ? new Date().toISOString() : new Date(scheduledAt).toISOString(),
+          recurrence: mode === 'schedule' && repeatOn ? { freq: repeatFreq, until: new Date(repeatUntil).toISOString() } : undefined
         })
       });
       const data = await res.json();
@@ -782,6 +790,31 @@ function Composer({ authFetch }) {
                               In your browser’s timezone (
                               {Intl.DateTimeFormat().resolvedOptions().timeZone}).
                             </span>
+                            <label className="flex items-center gap-2 mt-2.5 cursor-pointer select-none">
+                              <input
+                                type="checkbox"
+                                checked={repeatOn}
+                                onChange={(e) => setRepeatOn(e.target.checked)}
+                                className="accent-[var(--color-brand)]"
+                              />
+                              <span className="text-xs text-ink">Repeat</span>
+                            </label>
+                            {repeatOn && (
+                              <span className="flex items-center gap-2 mt-2 flex-wrap">
+                                <Select value={repeatFreq} onChange={(e) => setRepeatFreq(e.target.value)} className="h-8">
+                                  <option value="daily">Daily</option>
+                                  <option value="weekly">Weekly</option>
+                                  <option value="monthly">Monthly</option>
+                                </Select>
+                                <span className="text-xs text-muted">until</span>
+                                <Input
+                                  type="date"
+                                  value={repeatUntil}
+                                  onChange={(e) => setRepeatUntil(e.target.value)}
+                                  className="w-auto"
+                                />
+                              </span>
+                            )}
                           </span>
                         )}
                       </span>

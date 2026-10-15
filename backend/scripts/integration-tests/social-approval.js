@@ -1,11 +1,13 @@
 /**
- * Social Hub: the post approval/review workflow (migration 034) and the
- * two new AI features (hashtag suggestion, inbox triage) added alongside
- * it. Covers the real state-machine gate — a member's post is held for
- * review, not enqueued, until an admin approves/rejects it — plus role
- * gating and the fail-closed 503 for the AI endpoints (no
- * ANTHROPIC_API_KEY in this environment, same posture as every other AI
- * feature in this app).
+ * Social Hub Phase 1: the post approval/review workflow (migration 034),
+ * recurring posts (migration 035), and the two new AI features (hashtag
+ * suggestion, inbox triage). Covers the real state-machine gate — a
+ * member's post is held for review, not enqueued, until an admin
+ * approves/rejects it — a recurring post spawning its real next
+ * occurrence through the same approval-gated creation path (not a
+ * parallel code path), role gating, and the fail-closed 503 for the AI
+ * endpoints (no ANTHROPIC_API_KEY in this environment, same posture as
+ * every other AI feature in this app).
  *
  * Run: node scripts/integration-tests/social-approval.js
  * (needs PostgREST + the rest-proxy + Redis running; does NOT need a
@@ -32,6 +34,7 @@ const BACKEND = path.join(__dirname, '..', '..');
 const app = require(path.join(BACKEND, 'server.js'));
 const { signToken } = require(path.join(BACKEND, 'lib/auth'));
 const { getSocialClient } = require(path.join(BACKEND, 'social/db'));
+const socialQueue = require(path.join(BACKEND, 'social/queue'));
 
 const TENANT_ID = randomUUID();
 const ADMIN_ID = randomUUID();
@@ -146,7 +149,46 @@ async function main() {
   assert.strictEqual(res.status, 503, JSON.stringify(res.body));
   console.log('✓ /ai/inbox/:id/analyze fails closed with a clear 503 without a real API key, and never fabricates a sentiment');
 
-  console.log('\nALL SOCIAL APPROVAL / AI-TRIAGE ASSERTIONS PASSED');
+  // --- Recurring posts (migration 035): a published occurrence spawns its real next one, through the same approval-gated path ---
+
+  // Turn approval back off for a clean, deterministic recurrence check.
+  await request(app).patch('/api/v1/social/approval-settings').set('Authorization', `Bearer ${adminToken}`).send({ requireApproval: false });
+
+  const until = new Date(Date.now() + 10 * 24 * 3600 * 1000).toISOString(); // 10 days out — comfortably covers one daily occurrence
+  res = await request(app).post('/api/v1/social/posts').set('Authorization', `Bearer ${adminToken}`).send({ ...samplePost(), recurrence: { freq: 'daily', until } });
+  assert.strictEqual(res.status, 201, JSON.stringify(res.body));
+  const seriesRoot = res.body.post;
+  assert.strictEqual(seriesRoot.recurrence_series_id, seriesRoot.id, 'the root occurrence is its own series id');
+  assert.strictEqual(seriesRoot.recurrence.freq, 'daily');
+
+  // Simulate this occurrence actually publishing successfully — the same
+  // call social/queue.js's BullMQ worker makes on a real 'completed'
+  // event, so this exercises the real spawn path without needing a real
+  // connected account to publish to.
+  await socialQueue.recordOutcome(seriesRoot.id, seriesRoot.target_account_ids[0], { status: 'published', externalId: 'sim-1' });
+
+  const { data: afterPublish } = await client.from('scheduled_posts').select('*').eq('id', seriesRoot.id).single();
+  assert.strictEqual(afterPublish.status, 'published');
+
+  const { data: spawned } = await client.from('scheduled_posts').select('*').eq('recurrence_series_id', seriesRoot.id).neq('id', seriesRoot.id);
+  assert.strictEqual(spawned.length, 1, 'exactly one next occurrence should be spawned, not zero and not more than one');
+  const nextOne = spawned[0];
+  assert.strictEqual(nextOne.status, 'pending', 'approval is off, so the spawned occurrence is immediately scheduled, not held');
+  assert.strictEqual(new Date(nextOne.scheduled_at) - new Date(seriesRoot.scheduled_at), 24 * 3600 * 1000, 'the next occurrence is exactly one day later');
+  assert.strictEqual(nextOne.content, seriesRoot.content);
+  console.log('✓ a published recurring post spawns its real next occurrence, one day later, through the normal pending/publish lifecycle');
+
+  // A failed occurrence must NOT advance the series — a tenant should
+  // see and fix a broken recurring post, not have it silently skip ahead.
+  const countBefore = (await client.from('scheduled_posts').select('id', { count: 'exact', head: true }).eq('recurrence_series_id', seriesRoot.id)).count;
+  await socialQueue.recordOutcome(nextOne.id, nextOne.target_account_ids[0], { status: 'failed', error: 'simulated failure' });
+  const { data: afterFail } = await client.from('scheduled_posts').select('status').eq('id', nextOne.id).single();
+  assert.strictEqual(afterFail.status, 'failed');
+  const countAfter = (await client.from('scheduled_posts').select('id', { count: 'exact', head: true }).eq('recurrence_series_id', seriesRoot.id)).count;
+  assert.strictEqual(countAfter, countBefore, 'a failed occurrence must not spawn a further one — the series stops so a human notices and fixes it');
+  console.log('✓ a failed occurrence does not advance the series — it stops rather than silently failing forever');
+
+  console.log('\nALL SOCIAL APPROVAL / AI-TRIAGE / RECURRENCE ASSERTIONS PASSED');
   process.exit(0);
 }
 

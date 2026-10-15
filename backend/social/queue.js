@@ -131,8 +131,53 @@ async function processJob(job) {
   return { platform: account.platform, ...result };
 }
 
+// Shared by routes/social.js (a brand-new post) and spawnNextOccurrence()
+// below (a recurring post's next instance) — re-evaluated fresh every
+// time rather than inherited from the series' first post, since a
+// tenant could turn approval on/off, or the creator's role could change,
+// partway through a long-running series.
+async function determineInitialStatus(client, tenantId, creatorRole) {
+  const { data: tenant } = await client.from('tenants').select('social_require_approval').eq('id', tenantId).maybeSingle();
+  const needsReview = !!tenant?.social_require_approval && !['admin', 'owner'].includes(creatorRole);
+  return needsReview ? 'pending_review' : 'pending';
+}
+
+function nextOccurrenceDate(scheduledAt, freq) {
+  const d = new Date(scheduledAt);
+  if (freq === 'daily') d.setDate(d.getDate() + 1);
+  else if (freq === 'weekly') d.setDate(d.getDate() + 7);
+  else if (freq === 'monthly') d.setMonth(d.getMonth() + 1);
+  return d;
+}
+
+/** Migration 035: a published recurring post spawns its own next occurrence through the exact same creation path (approval gate, plan-limit metering, queue) a one-off post goes through — never a parallel "recurring post" code path that could drift from it. */
+async function spawnNextOccurrence(client, post) {
+  if (!post.recurrence?.freq || !post.recurrence?.until) return;
+  const next = nextOccurrenceDate(post.scheduled_at, post.recurrence.freq);
+  if (next > new Date(post.recurrence.until)) return; // series has run its course
+
+  const { data: creator } = post.created_by ? await client.from('users').select('role').eq('id', post.created_by).maybeSingle() : { data: null };
+  const status = await determineInitialStatus(client, post.tenant_id, creator?.role || 'member');
+
+  const { data: spawned, error } = await client.from('scheduled_posts').insert({
+    tenant_id: post.tenant_id,
+    content: post.content,
+    media_urls: post.media_urls,
+    target_platforms: post.target_platforms,
+    target_account_ids: post.target_account_ids,
+    scheduled_at: next.toISOString(),
+    status,
+    created_by: post.created_by,
+    recurrence: post.recurrence,
+    recurrence_series_id: post.recurrence_series_id || post.id
+  }).select().single();
+  if (error) { console.error(`[social/queue] could not spawn next occurrence of series ${post.recurrence_series_id || post.id}:`, error.message); return; }
+
+  if (status === 'pending') await enqueuePost(spawned).catch(err => console.error(`[social/queue] could not enqueue spawned occurrence ${spawned.id}:`, err.message));
+}
+
 async function maybeFinalize(client, postId) {
-  const { data: post } = await client.from('scheduled_posts').select('tenant_id, target_account_ids, platform_results').eq('id', postId).single();
+  const { data: post } = await client.from('scheduled_posts').select('*').eq('id', postId).single();
   if (!post) return;
   const results = post.platform_results || {};
   const allIn = (post.target_account_ids || []).every(id => results[id] !== undefined);
@@ -145,8 +190,22 @@ async function maybeFinalize(client, postId) {
   // account, so a post to 3 platforms counts as 1 published post.
   if (!anyFailed) {
     const period = new Date().toISOString().slice(0, 8) + '01'; // first of the current month
-    await client.rpc('increment_usage', { p_tenant_id: post.tenant_id, p_period: period, p_column: 'posts_published', p_amount: 1 })
-      .catch(err => console.error(`[social/queue] increment_usage failed for post ${postId}:`, err.message));
+    // Pre-existing bug fixed here: supabase-js's query builder is
+    // PromiseLike (has .then, no .catch), so the previous
+    // `.catch(...)` chained directly onto client.rpc(...) silently
+    // never attached — a rejected/errored call here would throw
+    // uncaught instead of just logging, exactly what this whole
+    // function exists to avoid. A real await + try/catch, the same
+    // pattern every other .rpc() call site in this codebase uses.
+    try {
+      await client.rpc('increment_usage', { p_tenant_id: post.tenant_id, p_period: period, p_column: 'posts_published', p_amount: 1 });
+    } catch (err) {
+      console.error(`[social/queue] increment_usage failed for post ${postId}:`, err.message);
+    }
+    // A failed occurrence does NOT advance the series — a tenant should
+    // see and fix a broken recurring post, not have it silently skip
+    // ahead to the next date while quietly failing forever.
+    await spawnNextOccurrence(client, post).catch(err => console.error(`[social/queue] spawnNextOccurrence failed for post ${postId}:`, err.message));
   }
 }
 
@@ -228,4 +287,4 @@ async function stop() {
   if (connection) { connection.disconnect(); connection = null; }
 }
 
-module.exports = { start, stop, enqueuePost, cancelPost };
+module.exports = { start, stop, enqueuePost, cancelPost, determineInitialStatus, nextOccurrenceDate, recordOutcome };

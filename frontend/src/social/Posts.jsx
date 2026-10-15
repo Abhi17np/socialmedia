@@ -3,7 +3,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import {
   RefreshCw, X, ChevronDown, ChevronRight, PenSquare, CalendarDays, List as ListIcon,
-  CalendarClock, Check
+  CalendarClock, Check, Repeat
 } from 'lucide-react';
 import { SOCIAL_API_BASE, AVAILABLE_PLATFORMS } from './api';
 import { Page, PageBar, PageBody } from '../ui/page';
@@ -94,6 +94,11 @@ function PostCard({ post, onCancel, onApprove, onReject, canReview }) {
             {new Date(post.scheduled_at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}
           </span>
           {post.brand && <span className="text-[11px] text-subtle">· {post.brand}</span>}
+          {post.recurrence_series_id && (
+            <span className="inline-flex items-center gap-0.5 text-[11px] text-subtle" title={`Repeats ${post.recurrence?.freq || ''} until ${post.recurrence?.until ? new Date(post.recurrence.until).toLocaleDateString() : '?'}`}>
+              <Repeat size={11} />
+            </span>
+          )}
         </div>
         <p className="text-xs text-ink leading-relaxed line-clamp-2">
           {post.content || <span className="text-subtle">(no text content)</span>}

@@ -93,7 +93,55 @@ changed file; `next build` compiles (same pre-existing, unrelated
 only this round, consistent with the time-boxed tradeoff used throughout
 the Marketing Hub's later phases — not a full Playwright pass.
 
-## 4. What's deliberately deferred (not silently dropped)
+## 4. Round 2 — recurring posts, plus a real bug the new test caught
+
+**Recurring posts** (migration 035): a tenant sets `freq`
+(`daily`/`weekly`/`monthly`) + an end date once; `social/queue.js`'s
+`maybeFinalize()` spawns the real next occurrence itself, the moment the
+current one actually finishes publishing successfully — through the
+*exact same* creation path a one-off post takes (so a recurring post is
+still gated by the approval workflow, plan limits, and consent, never a
+parallel code path that could drift). Re-evaluates `determineInitialStatus`
+fresh at spawn time (not inherited from the series' first post), so a
+tenant turning approval on mid-series correctly starts holding later
+occurrences for review. A **failed** occurrence does **not** advance the
+series — it stops so a human notices and fixes it, rather than silently
+failing forever on autopilot. One real scope cut, named here rather than
+hidden: there's no series-wide edit/cancel yet — each occurrence is
+managed individually, same as any other post.
+
+**A real pre-existing bug this round's own integration test found and
+fixed**: `maybeFinalize()`'s usage-metering call chained `.catch(...)`
+directly onto `client.rpc(...)`, but supabase-js's query builder is only
+`.then`-able, not a real `Promise` — `.catch()` silently never attached.
+A post reaching 'published' would have thrown this uncaught instead of
+just logging it, in production, the first time `increment_usage` ever
+errored. Nothing in the pre-existing test suite exercised a post all the
+way to a real 'published' terminal state, so this had never been
+triggered. Fixed with a plain `try`/`await`/`catch`, the same pattern
+every other `.rpc()` call site in this codebase already uses.
+
+**Files added:** `backend/migrations/035_social_recurring_posts.sql`;
+`backend/test/socialRecurrence.test.js` (4 pure-logic unit tests for
+`nextOccurrenceDate()`, including the "Jan 31 + 1 month" edge case).
+
+**Files changed:** `backend/social/queue.js` (`determineInitialStatus`,
+`nextOccurrenceDate`, `spawnNextOccurrence`, the `.rpc().catch()` fix),
+`backend/lib/schemas.js` (`recurrenceSchema`), `backend/routes/social.js`
+(accepts `recurrence`, sets `recurrence_series_id`);
+`frontend/src/social/Composer.jsx` (a "Repeat" checkbox + freq/until
+controls when scheduling), `Posts.jsx` (a repeat-icon badge on a post
+that's part of a series). `social-approval.js`'s integration script
+grew two more assertions (12 total): a published occurrence spawning its
+real next one one day later, and a failed occurrence correctly not
+advancing the series.
+
+**Tests run:** `npm test`: **130/130** (126 prior + 4 new). `npm run
+test:integration`: `social-approval.js` now 12/12. `npm run test:all`:
+exit 0. Frontend `eslint .` clean; `next build` compiles (same
+pre-existing, unrelated `/account` Suspense issue).
+
+## 5. What's still deliberately deferred (not silently dropped)
 
 - **Real, personalized best-time-to-post.** `analytics_snapshots` is
   account-level daily data (followers/reach/engagement), not per-post
@@ -104,8 +152,8 @@ the Marketing Hub's later phases — not a full Playwright pass.
   dressed up as personalized intelligence.
 - **Per-post analytics.** Same root cause as above — `fetchAnalytics` in
   every adapter is page/account-level only today.
-- **Bulk/recurring post scheduling.** `POST /social/posts` is single-post
-  only; no CSV import, no "repeat weekly" primitive.
+- **Series-wide edit/cancel** for a recurring post — each occurrence is
+  managed individually for now (see above).
 - **Social listening beyond owned accounts** (keyword/hashtag/competitor
   monitoring). Everything today is scoped to the tenant's own connected
   accounts' mentions/comments/reviews.
@@ -114,8 +162,8 @@ the Marketing Hub's later phases — not a full Playwright pass.
   approval board).
 
 Each of these is a real, separable piece of work — not something that
-belongs bolted on quietly under a time-boxed round. Picking this
-round's three (approval workflow, AI hashtags, AI inbox triage) was a
-deliberate call: highest value-to-effort ratio against what the market
-actually ships, with zero new external dependencies and zero risk to a
-tenant who doesn't opt in.
+belongs bolted on quietly under a time-boxed round. Picking this round's
+items (approval workflow, AI hashtags, AI inbox triage, recurring posts)
+was a deliberate call: highest value-to-effort ratio against what the
+market actually ships, with zero new external dependencies and zero risk
+to a tenant who doesn't opt in.

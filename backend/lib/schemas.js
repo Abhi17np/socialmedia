@@ -33,13 +33,19 @@ const loginSchema = z.object({
   password: z.string().min(1)
 });
 
+const recurrenceSchema = z.object({
+  freq: z.enum(['daily', 'weekly', 'monthly']),
+  until: z.string().datetime({ offset: true }).or(z.string().datetime())
+}).optional();
+
 const createPostSchema = z.object({
   content: z.string().max(10000).optional().default(''),
   mediaUrls: z.array(z.string().url()).optional().default([]),
   targetPlatforms: z.array(z.string()).min(1),
   targetAccountIds: z.array(z.string().uuid()).min(1),
   scheduledAt: z.string().datetime({ offset: true }).or(z.string().datetime()),
-  idempotencyKey: z.string().min(1).max(200).optional()
+  idempotencyKey: z.string().min(1).max(200).optional(),
+  recurrence: recurrenceSchema
 });
 
 const checkoutSchema = z.object({
