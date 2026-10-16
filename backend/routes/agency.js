@@ -33,7 +33,7 @@ function requireSocialClient(res) {
   return client;
 }
 
-/** Any agency_links row touching this tenant, either side — used by GET /agency/links and to check ownership before approve/revoke. */
+/** Any agency_links row touching this tenant, either side — used by GET /social/agency/links and to check ownership before approve/revoke. */
 async function findLinkForTenant(client, tenantId, linkId) {
   const { data, error } = await client.from('agency_links').select('*').eq('id', linkId)
     .or(`agency_tenant_id.eq.${tenantId},client_tenant_id.eq.${tenantId}`).maybeSingle();
@@ -43,7 +43,7 @@ async function findLinkForTenant(client, tenantId, linkId) {
 
 // admin+ — proposing to share your own tenant's data with another tenant is exactly the kind of
 // action requireRole('admin') already gates for every other irreversible-ish settings change.
-router.post('/agency/links', requireRole('admin'), validate(proposeAgencyLinkSchema), asyncHandler(async (req, res) => {
+router.post('/social/agency/links', requireRole('admin'), validate(proposeAgencyLinkSchema), asyncHandler(async (req, res) => {
   const client = requireSocialClient(res);
   if (!client) return;
   const { agencySlug } = req.body;
@@ -77,7 +77,7 @@ router.post('/agency/links', requireRole('admin'), validate(proposeAgencyLinkSch
   res.status(201).json({ link: data });
 }));
 
-router.get('/agency/links', asyncHandler(async (req, res) => {
+router.get('/social/agency/links', asyncHandler(async (req, res) => {
   const client = requireSocialClient(res);
   if (!client) return;
   const { data, error } = await client.from('agency_links').select('*')
@@ -98,7 +98,7 @@ router.get('/agency/links', asyncHandler(async (req, res) => {
   res.json({ links });
 }));
 
-router.patch('/agency/links/:id/approve', requireRole('admin'), asyncHandler(async (req, res) => {
+router.patch('/social/agency/links/:id/approve', requireRole('admin'), asyncHandler(async (req, res) => {
   const client = requireSocialClient(res);
   if (!client) return;
   const link = await findLinkForTenant(client, req.tenantId, req.params.id);
@@ -114,7 +114,7 @@ router.patch('/agency/links/:id/approve', requireRole('admin'), asyncHandler(asy
   res.json({ link: data });
 }));
 
-router.patch('/agency/links/:id/revoke', requireRole('admin'), asyncHandler(async (req, res) => {
+router.patch('/social/agency/links/:id/revoke', requireRole('admin'), asyncHandler(async (req, res) => {
   const client = requireSocialClient(res);
   if (!client) return;
   const link = await findLinkForTenant(client, req.tenantId, req.params.id);
@@ -150,7 +150,7 @@ async function gatherClientOverview(client, clientTenantId) {
   };
 }
 
-router.get('/agency/overview', asyncHandler(async (req, res) => {
+router.get('/social/agency/overview', asyncHandler(async (req, res) => {
   const client = requireSocialClient(res);
   if (!client) return;
 

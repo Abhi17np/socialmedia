@@ -106,58 +106,58 @@ async function main() {
   if (r.error) throw new Error('crisis_alerts insert failed: ' + JSON.stringify(r.error));
 
   // --- Validation ---
-  let res = await request(app).post('/api/v1/agency/links').set('Authorization', `Bearer ${adminClient}`).send({ agencySlug: 'no-such-slug-' + Date.now() });
+  let res = await request(app).post('/api/v1/social/agency/links').set('Authorization', `Bearer ${adminClient}`).send({ agencySlug: 'no-such-slug-' + Date.now() });
   assert.strictEqual(res.status, 404, JSON.stringify(res.body));
   console.log('✓ proposing a link to an unknown slug 404s rather than a generic 500');
 
-  res = await request(app).post('/api/v1/agency/links').set('Authorization', `Bearer ${adminClient}`).send({ agencySlug: CLIENT_SLUG });
+  res = await request(app).post('/api/v1/social/agency/links').set('Authorization', `Bearer ${adminClient}`).send({ agencySlug: CLIENT_SLUG });
   assert.strictEqual(res.status, 400, JSON.stringify(res.body));
   console.log('✓ a tenant cannot propose itself as its own agency');
 
-  res = await request(app).post('/api/v1/agency/links').set('Authorization', `Bearer ${viewerClient}`).send({ agencySlug: AGENCY_SLUG });
+  res = await request(app).post('/api/v1/social/agency/links').set('Authorization', `Bearer ${viewerClient}`).send({ agencySlug: AGENCY_SLUG });
   assert.strictEqual(res.status, 403);
-  console.log('✓ POST /agency/links is admin+ gated');
+  console.log('✓ POST /social/agency/links is admin+ gated');
 
   // --- A real proposal ---
-  res = await request(app).post('/api/v1/agency/links').set('Authorization', `Bearer ${adminClient}`).send({ agencySlug: AGENCY_SLUG });
+  res = await request(app).post('/api/v1/social/agency/links').set('Authorization', `Bearer ${adminClient}`).send({ agencySlug: AGENCY_SLUG });
   assert.strictEqual(res.status, 201, JSON.stringify(res.body));
   const linkId = res.body.link.id;
   assert.strictEqual(res.body.link.status, 'pending');
   console.log('✓ a valid link proposal is created with status "pending"');
 
-  res = await request(app).post('/api/v1/agency/links').set('Authorization', `Bearer ${adminClient}`).send({ agencySlug: AGENCY_SLUG });
+  res = await request(app).post('/api/v1/social/agency/links').set('Authorization', `Bearer ${adminClient}`).send({ agencySlug: AGENCY_SLUG });
   assert.strictEqual(res.status, 409, JSON.stringify(res.body));
   console.log('✓ proposing the same agency link twice while pending conflicts (409), not a generic 500');
 
   // --- Both sides can see it, correctly directioned ---
-  res = await request(app).get('/api/v1/agency/links').set('Authorization', `Bearer ${adminClient}`);
+  res = await request(app).get('/api/v1/social/agency/links').set('Authorization', `Bearer ${adminClient}`);
   assert.strictEqual(res.body.links.find((l) => l.id === linkId).direction, 'as_client', JSON.stringify(res.body.links));
-  res = await request(app).get('/api/v1/agency/links').set('Authorization', `Bearer ${adminAgency}`);
+  res = await request(app).get('/api/v1/social/agency/links').set('Authorization', `Bearer ${adminAgency}`);
   assert.strictEqual(res.body.links.find((l) => l.id === linkId).direction, 'as_agency', JSON.stringify(res.body.links));
   assert.strictEqual(res.body.links.find((l) => l.id === linkId).otherTenant.slug, CLIENT_SLUG);
-  console.log('✓ GET /agency/links shows the correct direction and other-tenant info for each real side');
+  console.log('✓ GET /social/agency/links shows the correct direction and other-tenant info for each real side');
 
   // --- No data is shared before approval ---
-  res = await request(app).get('/api/v1/agency/overview').set('Authorization', `Bearer ${adminAgency}`);
+  res = await request(app).get('/api/v1/social/agency/overview').set('Authorization', `Bearer ${adminAgency}`);
   assert.strictEqual(res.body.clients.length, 0, JSON.stringify(res.body.clients));
   console.log('✓ the agency overview shows nothing at all while the link is still pending');
 
   // --- Approve is agency-side admin+ only ---
-  res = await request(app).patch(`/api/v1/agency/links/${linkId}/approve`).set('Authorization', `Bearer ${adminClient}`);
+  res = await request(app).patch(`/api/v1/social/agency/links/${linkId}/approve`).set('Authorization', `Bearer ${adminClient}`);
   assert.strictEqual(res.status, 403, JSON.stringify(res.body));
   console.log('✓ the client side cannot approve its own proposal — only the agency side can');
 
-  res = await request(app).patch(`/api/v1/agency/links/${linkId}/approve`).set('Authorization', `Bearer ${memberAgency}`);
+  res = await request(app).patch(`/api/v1/social/agency/links/${linkId}/approve`).set('Authorization', `Bearer ${memberAgency}`);
   assert.strictEqual(res.status, 403, 'a member on the agency side cannot approve either');
-  console.log('✓ PATCH /agency/links/:id/approve is admin+ gated on the agency side');
+  console.log('✓ PATCH /social/agency/links/:id/approve is admin+ gated on the agency side');
 
-  res = await request(app).patch(`/api/v1/agency/links/${linkId}/approve`).set('Authorization', `Bearer ${adminAgency}`);
+  res = await request(app).patch(`/api/v1/social/agency/links/${linkId}/approve`).set('Authorization', `Bearer ${adminAgency}`);
   assert.strictEqual(res.status, 200, JSON.stringify(res.body));
   assert.strictEqual(res.body.link.status, 'active');
   console.log('✓ the agency admin can approve, flipping the link to "active"');
 
   // --- THE REAL END-TO-END AGGREGATE: proves gatherClientOverview() reads real seeded rows ---
-  res = await request(app).get('/api/v1/agency/overview').set('Authorization', `Bearer ${adminAgency}`);
+  res = await request(app).get('/api/v1/social/agency/overview').set('Authorization', `Bearer ${adminAgency}`);
   assert.strictEqual(res.status, 200, JSON.stringify(res.body));
   assert.strictEqual(res.body.clients.length, 1, JSON.stringify(res.body.clients));
   const overview = res.body.clients[0].overview;
@@ -170,26 +170,26 @@ async function main() {
   console.log('✓ the real overview, computed from seeded data, is exactly right: 2 accounts, 2500 followers, 3 open interactions, 1 pending-approval post, 1 open crisis alert');
 
   // --- Tenant isolation: an unrelated tenant sees and can touch none of this ---
-  res = await request(app).get('/api/v1/agency/overview').set('Authorization', `Bearer ${adminOther}`);
+  res = await request(app).get('/api/v1/social/agency/overview').set('Authorization', `Bearer ${adminOther}`);
   assert.strictEqual(res.body.clients.length, 0, 'an unrelated tenant must see no client data at all');
-  res = await request(app).patch(`/api/v1/agency/links/${linkId}/revoke`).set('Authorization', `Bearer ${adminOther}`);
+  res = await request(app).patch(`/api/v1/social/agency/links/${linkId}/revoke`).set('Authorization', `Bearer ${adminOther}`);
   assert.strictEqual(res.status, 404, 'an unrelated tenant cannot even see this link to revoke it');
   console.log('✓ an unrelated third tenant has zero visibility into this link or the client\'s aggregate data');
 
   // --- Revoke, by the client side this time ---
-  res = await request(app).patch(`/api/v1/agency/links/${linkId}/revoke`).set('Authorization', `Bearer ${adminClient}`);
+  res = await request(app).patch(`/api/v1/social/agency/links/${linkId}/revoke`).set('Authorization', `Bearer ${adminClient}`);
   assert.strictEqual(res.status, 200, JSON.stringify(res.body));
   assert.strictEqual(res.body.link.status, 'revoked');
-  res = await request(app).get('/api/v1/agency/overview').set('Authorization', `Bearer ${adminAgency}`);
+  res = await request(app).get('/api/v1/social/agency/overview').set('Authorization', `Bearer ${adminAgency}`);
   assert.strictEqual(res.body.clients.length, 0, 'a revoked link must stop sharing data immediately');
   console.log('✓ the client side can revoke, and sharing stops immediately — the agency overview goes back to empty');
 
-  res = await request(app).patch(`/api/v1/agency/links/${linkId}/revoke`).set('Authorization', `Bearer ${adminClient}`);
+  res = await request(app).patch(`/api/v1/social/agency/links/${linkId}/revoke`).set('Authorization', `Bearer ${adminClient}`);
   assert.strictEqual(res.status, 409, 'revoking an already-revoked link conflicts rather than silently succeeding');
   console.log('✓ revoking an already-revoked link 409s');
 
   // --- Re-proposing after a revoke reuses the same row, not a duplicate ---
-  res = await request(app).post('/api/v1/agency/links').set('Authorization', `Bearer ${adminClient}`).send({ agencySlug: AGENCY_SLUG });
+  res = await request(app).post('/api/v1/social/agency/links').set('Authorization', `Bearer ${adminClient}`).send({ agencySlug: AGENCY_SLUG });
   assert.strictEqual(res.status, 201, JSON.stringify(res.body));
   assert.strictEqual(res.body.link.id, linkId, 'a re-proposal after revoke should reuse the same (agency,client) row, not create a duplicate');
   assert.strictEqual(res.body.link.status, 'pending');
