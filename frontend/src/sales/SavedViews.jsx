@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Bookmark, Plus, X, Columns3 } from 'lucide-react';
 import { Button, IconButton, Input, Modal, Field, Checkbox } from '../ui';
+import { errorMessage } from './format';
 
 /**
  * Per-user saved views (filters + sort + visible columns) for the
@@ -23,7 +24,7 @@ export function useSavedViews(authFetch, SALES_API_BASE, listType) {
       method: 'POST', body: JSON.stringify({ listType, name, filters, sort, visibleColumns })
     });
     const data = await res.json();
-    if (!res.ok) throw new Error(data.error || 'Could not save view.');
+    if (!res.ok) throw new Error(errorMessage(data, 'Could not save view.'));
     setViews((prev) => [...prev, data.view]);
     return data.view;
   };

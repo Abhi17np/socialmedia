@@ -20,6 +20,30 @@ export function moneyByCurrency(amountsByCurrency) {
     .join(' + ');
 }
 
+// middleware/validate.js's 400 response already carries the REAL reason a
+// request was rejected — { error: 'Invalid request body.', issues: [{path,
+// message}] } — but every Sales Hub form used to show only the generic
+// top-level `error` string and silently drop `issues`, so a user who left
+// a required field blank saw "Invalid request body." with no idea which
+// field or why. This reads the same response shape every one of those
+// forms already has in hand and surfaces the specific field + reason
+// instead, falling back to the generic string only when the backend
+// didn't send field-level detail at all (e.g. a 500, or a hand-rolled
+// `res.status(400).json({error})` elsewhere that has no `issues`).
+function humanizeFieldPath(path) {
+  if (!path) return 'Value';
+  const last = path.split('.').pop();
+  const spaced = last.replace(/([a-z0-9])([A-Z])/g, '$1 $2').toLowerCase();
+  return spaced.replace(/^./, (c) => c.toUpperCase());
+}
+
+export function errorMessage(data, fallback) {
+  if (Array.isArray(data?.issues) && data.issues.length > 0) {
+    return data.issues.map((i) => `${humanizeFieldPath(i.path)}: ${i.message}`).join('; ');
+  }
+  return data?.error || fallback;
+}
+
 // A GET /export route needs the Authorization header authFetch adds —
 // a plain <a href> or window.open() can't carry that, so the file has
 // to come back as a blob through authFetch and get "clicked" via a

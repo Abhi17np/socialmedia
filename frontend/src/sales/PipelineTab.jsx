@@ -9,7 +9,7 @@ import {
   Button, IconButton, Select, Input, Field, Checkbox,
   Banner, Modal, Drawer, EmptyState, Skeleton, Chip, Pagination
 } from '../ui';
-import { money, moneyByCurrency } from './format';
+import { money, moneyByCurrency, errorMessage } from './format';
 import DealDetailDrawer from './DealDetailDrawer';
 import { useSavedViews, SavedViewsBar, ColumnsMenu } from './SavedViews';
 
@@ -89,7 +89,7 @@ function PipelineTab({ authFetch, SALES_API_BASE, canManage, canAdmin, canDelete
     try {
       const res = await authFetch(`${SALES_API_BASE}/pipelines`, { method: 'POST', body: JSON.stringify({ name: pipelineName }) });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Could not create pipeline.');
+      if (!res.ok) throw new Error(errorMessage(data, 'Could not create pipeline.'));
       setPipelines((prev) => [...(prev || []), data.pipeline]);
       setActivePipelineId(data.pipeline.id);
       setNewPipelineOpen(false);
@@ -106,7 +106,7 @@ function PipelineTab({ authFetch, SALES_API_BASE, canManage, canAdmin, canDelete
         body: JSON.stringify({ name: dealForm.name, pipelineId: activePipelineId, stageId, amount: Number(dealForm.amount) || 0 })
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Could not create deal.');
+      if (!res.ok) throw new Error(errorMessage(data, 'Could not create deal.'));
       setDeals((prev) => [...(prev || []), data.deal]);
       setNewDealOpen(null);
       setDealForm({ name: '', amount: '' });
@@ -121,7 +121,7 @@ function PipelineTab({ authFetch, SALES_API_BASE, canManage, canAdmin, canDelete
       const body = lostReasonValue ? { stageId, lostReason: lostReasonValue } : { stageId };
       const res = await authFetch(`${SALES_API_BASE}/deals/${deal.id}/move`, { method: 'POST', body: JSON.stringify(body) });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Could not move deal.');
+      if (!res.ok) throw new Error(errorMessage(data, 'Could not move deal.'));
       setDeals((prev) => prev.map((d) => (d.id === deal.id ? data.deal : d)));
     } catch (err) {
       setError(err.message);
@@ -392,7 +392,7 @@ function TableView({ pipeline, authFetch, SALES_API_BASE, canManage, onOpenDeal,
       const body = lostReasonValue ? { stageId, lostReason: lostReasonValue } : { stageId };
       const res = await authFetch(`${SALES_API_BASE}/deals/${deal.id}/move`, { method: 'POST', body: JSON.stringify(body) });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Could not move deal.');
+      if (!res.ok) throw new Error(errorMessage(data, 'Could not move deal.'));
       setDeals((prev) => prev.map((d) => (d.id === deal.id ? data.deal : d)));
       onChanged?.();
     } catch (err) {
@@ -533,7 +533,7 @@ function StageEditorDrawer({ open, onClose, authFetch, SALES_API_BASE, pipeline,
     try {
       const res = await authFetch(`${SALES_API_BASE}/stages/${stageId}`, { method: 'PATCH', body: JSON.stringify(patch) });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Could not update stage.');
+      if (!res.ok) throw new Error(errorMessage(data, 'Could not update stage.'));
       const next = stages.map((s) => (s.id === stageId ? data.stage : s));
       setStages(next);
       onStagesChanged(next);
@@ -550,7 +550,7 @@ function StageEditorDrawer({ open, onClose, authFetch, SALES_API_BASE, pipeline,
     try {
       const res = await authFetch(`${SALES_API_BASE}/pipelines/${pipeline.id}/stages`, { method: 'POST', body: JSON.stringify({ name: newStageName.trim(), probability: 0 }) });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Could not create stage.');
+      if (!res.ok) throw new Error(errorMessage(data, 'Could not create stage.'));
       const next = [...stages, data.stage];
       setStages(next);
       onStagesChanged(next);
@@ -567,7 +567,7 @@ function StageEditorDrawer({ open, onClose, authFetch, SALES_API_BASE, pipeline,
     try {
       const res = await authFetch(`${SALES_API_BASE}/stages/${stageId}`, { method: 'DELETE' });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Could not delete stage.');
+      if (!res.ok) throw new Error(errorMessage(data, 'Could not delete stage.'));
       const next = stages.filter((s) => s.id !== stageId);
       setStages(next);
       onStagesChanged(next);
@@ -588,7 +588,7 @@ function StageEditorDrawer({ open, onClose, authFetch, SALES_API_BASE, pipeline,
     try {
       const res = await authFetch(`${SALES_API_BASE}/pipelines/${pipeline.id}/stages/reorder`, { method: 'POST', body: JSON.stringify(body) });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Could not reorder stages.');
+      if (!res.ok) throw new Error(errorMessage(data, 'Could not reorder stages.'));
       const sorted = [...data.stages].sort((a, b) => a.position - b.position);
       setStages(sorted);
       onStagesChanged(sorted);

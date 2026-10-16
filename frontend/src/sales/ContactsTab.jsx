@@ -7,7 +7,7 @@ import {
   Banner, Modal, EmptyState, Skeleton, Chip, Checkbox, Drawer, Avatar, Pagination
 } from '../ui';
 import { useTeamMembers } from './useTeamMembers';
-import { downloadViaAuthFetch } from './format';
+import { downloadViaAuthFetch, errorMessage } from './format';
 import ContactDetailDrawer from './ContactDetailDrawer';
 import { useSavedViews, SavedViewsBar, ColumnsMenu } from './SavedViews';
 import MergeRecordsModal from './MergeRecordsModal';
@@ -88,7 +88,7 @@ function ContactsTab({ authFetch, SALES_API_BASE, canManage, canDelete, openId }
     try {
       const res = await authFetch(`${SALES_API_BASE}/contacts`, { method: 'POST', body: JSON.stringify({ ...form, ownerId: form.ownerId || undefined }) });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Could not create lead.');
+      if (!res.ok) throw new Error(errorMessage(data, 'Could not create lead.'));
       setOpen(false);
       setForm({ displayName: '', phone: '', email: '', ownerId: '' });
       if (page !== 1) setPage(1); else load();
@@ -105,7 +105,7 @@ function ContactsTab({ authFetch, SALES_API_BASE, canManage, canDelete, openId }
         // Someone else changed this lead first — reload the list rather
         // than silently keeping a stale row with an un-applied status.
         if (res.status === 409) { setError(`${data.error} Reloading this lead's current status.`); load(); return; }
-        throw new Error(data.error || 'Could not update lead.');
+        throw new Error(errorMessage(data, 'Could not update lead.'));
       }
       setContacts((prev) => prev.map((c) => (c.id === contact.id ? data.contact : c)));
     } catch (err) {
@@ -132,7 +132,7 @@ function ContactsTab({ authFetch, SALES_API_BASE, canManage, canDelete, openId }
     try {
       const res = await authFetch(`${SALES_API_BASE}/contacts/bulk-action`, { method: 'POST', body: JSON.stringify({ ids: [...selected], action, value: value ?? null }) });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Bulk action failed.');
+      if (!res.ok) throw new Error(errorMessage(data, 'Bulk action failed.'));
       setNotice(`${data.updated} lead${data.updated === 1 ? '' : 's'} updated.`);
       setSelected(new Set());
       load();
@@ -155,7 +155,7 @@ function ContactsTab({ authFetch, SALES_API_BASE, canManage, canDelete, openId }
     try {
       const res = await authFetch(`${SALES_API_BASE}/contacts/import`, { method: 'POST', body: formData });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Import failed.');
+      if (!res.ok) throw new Error(errorMessage(data, 'Import failed.'));
       setNotice(`Imported ${data.created} lead${data.created === 1 ? '' : 's'}, skipped ${data.skipped} duplicate${data.skipped === 1 ? '' : 's'}${data.errors.length ? `, ${data.errors.length} row error(s)` : ''}.`);
       load();
     } catch (err) {
@@ -200,7 +200,7 @@ function ContactsTab({ authFetch, SALES_API_BASE, canManage, canDelete, openId }
               <Button size="sm" icon={Copy} onClick={loadDuplicates}>Find duplicates</Button>
               <Button size="sm" icon={Download} onClick={exportCsv}>Export</Button>
               {canManage && <Button size="sm" icon={Upload} onClick={() => fileInputRef.current?.click()}>Import</Button>}
-              {canManage && <Button size="sm" variant="primary" icon={Plus} onClick={() => setOpen(true)}>New lead</Button>}
+              {canManage && <Button size="sm" variant="primary" icon={Plus} onClick={() => { setError(null); setOpen(true); }}>New lead</Button>}
               <input ref={fileInputRef} type="file" accept=".csv" hidden onChange={(e) => e.target.files[0] && importCsv(e.target.files[0])} />
             </div>
           }
@@ -263,6 +263,7 @@ function ContactsTab({ authFetch, SALES_API_BASE, canManage, canDelete, openId }
 
       <Modal open={open} onClose={() => setOpen(false)} title="New lead" footer={<><Button onClick={() => setOpen(false)}>Cancel</Button><Button variant="primary" onClick={create} disabled={!form.displayName.trim()}>Create</Button></>}>
         <div className="flex flex-col gap-3">
+          {error && <Banner tone="danger">{error}</Banner>}
           <Field label="Name"><Input value={form.displayName} onChange={(e) => setForm({ ...form, displayName: e.target.value })} autoFocus /></Field>
           <Field label="Phone"><Input value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} /></Field>
           <Field label="Email"><Input type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} /></Field>

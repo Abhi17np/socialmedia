@@ -6,6 +6,7 @@ import {
   Button, IconButton, Panel, PanelHeader, Table, Th, Td, Input, Textarea, Select, Field,
   Banner, Modal, Drawer, ConfirmDialog, EmptyState, Skeleton, Chip
 } from '../ui';
+import { errorMessage } from './format';
 
 const ACTION_LABELS = { create_task: 'Create a task', add_tag: 'Add tag', remove_tag: 'Remove tag' };
 const ENROLLMENT_STATUS_TONE = { active: 'brand', paused: 'neutral', completed: 'success', stopped: 'danger' };
@@ -31,7 +32,7 @@ function SequencesTab({ authFetch, SALES_API_BASE, canAdmin }) {
     try {
       const res = await authFetch(`${SALES_API_BASE}/sequences`, { method: 'POST', body: JSON.stringify(form) });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Could not create sequence.');
+      if (!res.ok) throw new Error(errorMessage(data, 'Could not create sequence.'));
       setSequences((prev) => [{ ...data.sequence, stepCount: 0, activeEnrollmentCount: 0 }, ...(prev || [])]);
       setOpen(false);
       setForm({ name: '', description: '' });
@@ -45,7 +46,7 @@ function SequencesTab({ authFetch, SALES_API_BASE, canAdmin }) {
     try {
       const res = await authFetch(`${SALES_API_BASE}/sequences/${seq.id}`, { method: 'PATCH', body: JSON.stringify({ isActive: !seq.is_active }) });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Could not update sequence.');
+      if (!res.ok) throw new Error(errorMessage(data, 'Could not update sequence.'));
       setSequences((prev) => prev.map((s) => (s.id === seq.id ? { ...s, ...data.sequence } : s)));
     } catch (err) {
       setError(err.message);

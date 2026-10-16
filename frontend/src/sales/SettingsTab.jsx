@@ -6,7 +6,7 @@ import {
   Button, IconButton, Panel, PanelHeader, Table, Th, Td, Input, Select, Field,
   Banner, Modal, Drawer, ConfirmDialog, EmptyState, Skeleton, Chip, FilterPill, Checkbox
 } from '../ui';
-import { money } from './format';
+import { money, errorMessage } from './format';
 import { useTeamMembers } from './useTeamMembers';
 
 const SECTIONS = [
@@ -70,7 +70,7 @@ function CustomFieldsPanel({ authFetch, SALES_API_BASE }) {
       };
       const res = await authFetch(`${SALES_API_BASE}/custom-fields`, { method: 'POST', body: JSON.stringify(body) });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Could not create field.');
+      if (!res.ok) throw new Error(errorMessage(data, 'Could not create field.'));
       setFields((prev) => [...(prev || []), data.field]);
       setOpen(false);
       setForm({ entityType: 'contact', fieldKey: '', label: '', fieldType: 'text', options: '', isRequired: false });
@@ -83,7 +83,7 @@ function CustomFieldsPanel({ authFetch, SALES_API_BASE }) {
     try {
       const res = await authFetch(`${SALES_API_BASE}/custom-fields/${field.id}`, { method: 'DELETE' });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Could not delete field.');
+      if (!res.ok) throw new Error(errorMessage(data, 'Could not delete field.'));
       setFields((prev) => prev.filter((f) => f.id !== field.id));
       setConfirmDelete(null);
     } catch (err) {
@@ -184,7 +184,7 @@ function LeadScoringPanel({ authFetch, SALES_API_BASE }) {
         body: JSON.stringify({ name: form.name, conditionType: form.conditionType, conditionValue: form.conditionValue || undefined, points: Number(form.points) })
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Could not create rule.');
+      if (!res.ok) throw new Error(errorMessage(data, 'Could not create rule.'));
       setRules((prev) => [...(prev || []), data.rule]);
       setOpen(false);
       setForm({ name: '', conditionType: 'has_email', conditionValue: '', points: 10 });
@@ -197,7 +197,7 @@ function LeadScoringPanel({ authFetch, SALES_API_BASE }) {
     try {
       const res = await authFetch(`${SALES_API_BASE}/lead-scoring-rules/${rule.id}`, { method: 'PATCH', body: JSON.stringify({ isActive: !rule.is_active }) });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Could not update rule.');
+      if (!res.ok) throw new Error(errorMessage(data, 'Could not update rule.'));
       setRules((prev) => prev.map((r) => (r.id === rule.id ? data.rule : r)));
     } catch (err) {
       setError(err.message);
@@ -208,7 +208,7 @@ function LeadScoringPanel({ authFetch, SALES_API_BASE }) {
     try {
       const res = await authFetch(`${SALES_API_BASE}/lead-scoring-rules/${rule.id}`, { method: 'DELETE' });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Could not delete rule.');
+      if (!res.ok) throw new Error(errorMessage(data, 'Could not delete rule.'));
       setRules((prev) => prev.filter((r) => r.id !== rule.id));
     } catch (err) {
       setError(err.message);
@@ -288,7 +288,7 @@ function TargetsPanel({ authFetch, SALES_API_BASE }) {
         body: JSON.stringify({ ownerId: form.ownerId || undefined, periodStart: form.periodStart, periodEnd: form.periodEnd, targetAmount: Number(form.targetAmount), currency: form.currency })
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Could not create target.');
+      if (!res.ok) throw new Error(errorMessage(data, 'Could not create target.'));
       setTargets((prev) => [data.target, ...(prev || [])]);
       setOpen(false);
       setForm({ ownerId: '', periodStart: '', periodEnd: '', targetAmount: '', currency: 'INR' });
@@ -301,7 +301,7 @@ function TargetsPanel({ authFetch, SALES_API_BASE }) {
     try {
       const res = await authFetch(`${SALES_API_BASE}/targets/${target.id}`, { method: 'DELETE' });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Could not delete target.');
+      if (!res.ok) throw new Error(errorMessage(data, 'Could not delete target.'));
       setTargets((prev) => prev.filter((t) => t.id !== target.id));
     } catch (err) {
       setError(err.message);
@@ -384,7 +384,7 @@ function AutomationPanel({ authFetch, SALES_API_BASE }) {
         body: JSON.stringify({ name: form.name, triggerType: form.triggerType, actionType: form.actionType, actionConfig })
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Could not create rule.');
+      if (!res.ok) throw new Error(errorMessage(data, 'Could not create rule.'));
       setRules((prev) => [data.rule, ...(prev || [])]);
       setOpen(false);
       setForm({ name: '', triggerType: 'contact_created', actionType: 'add_tag', tag: '', taskSubject: '', ownerId: '' });
@@ -397,7 +397,7 @@ function AutomationPanel({ authFetch, SALES_API_BASE }) {
     try {
       const res = await authFetch(`${SALES_API_BASE}/automation-rules/${rule.id}`, { method: 'PATCH', body: JSON.stringify({ isActive: !rule.is_active }) });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Could not update rule.');
+      if (!res.ok) throw new Error(errorMessage(data, 'Could not update rule.'));
       setRules((prev) => prev.map((r) => (r.id === rule.id ? data.rule : r)));
     } catch (err) {
       setError(err.message);
@@ -539,7 +539,7 @@ function EmailCalendarPanel({ authFetch, SALES_API_BASE }) {
     try {
       const res = await authFetch(`${SALES_API_BASE}/email/connect/${provider}`);
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Could not start the connect flow.');
+      if (!res.ok) throw new Error(errorMessage(data, 'Could not start the connect flow.'));
       window.location.href = data.url; // leaves the app for the provider's real OAuth consent screen
     } catch (err) {
       setBanner({ tone: 'danger', text: err.message });
@@ -551,7 +551,7 @@ function EmailCalendarPanel({ authFetch, SALES_API_BASE }) {
     try {
       const res = await authFetch(`${SALES_API_BASE}/email/${provider}/disconnect`, { method: 'POST' });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Could not disconnect.');
+      if (!res.ok) throw new Error(errorMessage(data, 'Could not disconnect.'));
       setConfirmDisconnect(null);
       load();
     } catch (err) {

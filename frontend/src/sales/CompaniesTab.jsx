@@ -6,7 +6,7 @@ import {
   Button, Panel, PanelHeader, Table, Th, Td, Input, Select, Field,
   Banner, Modal, Drawer, EmptyState, Skeleton, Chip, Checkbox, Pagination, ConfirmDialog
 } from '../ui';
-import { money, downloadViaAuthFetch } from './format';
+import { money, downloadViaAuthFetch, errorMessage } from './format';
 import { useTeamMembers } from './useTeamMembers';
 import { useSavedViews, SavedViewsBar, ColumnsMenu } from './SavedViews';
 import MergeRecordsModal from './MergeRecordsModal';
@@ -85,7 +85,7 @@ function CompaniesTab({ authFetch, SALES_API_BASE, canManage, canDelete, openId 
     try {
       const res = await authFetch(`${SALES_API_BASE}/companies`, { method: 'POST', body: JSON.stringify({ ...form, ownerId: form.ownerId || undefined }) });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Could not create company.');
+      if (!res.ok) throw new Error(errorMessage(data, 'Could not create company.'));
       setOpen(false);
       setForm({ name: '', domain: '', industry: '', ownerId: '' });
       if (page !== 1) setPage(1); else load();
@@ -159,7 +159,7 @@ function CompaniesTab({ authFetch, SALES_API_BASE, canManage, canDelete, openId 
       setBulkActionPending(true);
       const res = await authFetch(`${SALES_API_BASE}/companies/bulk-action`, { method: 'POST', body: JSON.stringify({ ids: [...selected], action, value: value ?? null }) });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Bulk action failed.');
+      if (!res.ok) throw new Error(errorMessage(data, 'Bulk action failed.'));
       setNotice(`${data.updated} compan${data.updated === 1 ? 'y' : 'ies'} updated.`);
       setSelected(new Set());
       setConfirmBulkDelete(false);
@@ -185,7 +185,7 @@ function CompaniesTab({ authFetch, SALES_API_BASE, canManage, canDelete, openId 
     try {
       const res = await authFetch(`${SALES_API_BASE}/companies/import`, { method: 'POST', body: formData });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Import failed.');
+      if (!res.ok) throw new Error(errorMessage(data, 'Import failed.'));
       setNotice(`Imported ${data.created} compan${data.created === 1 ? 'y' : 'ies'}, skipped ${data.skipped} duplicate${data.skipped === 1 ? '' : 's'}${data.errors.length ? `, ${data.errors.length} row error(s)` : ''}.`);
       load();
     } catch (err) {

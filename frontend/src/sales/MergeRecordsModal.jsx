@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { ArrowRight } from 'lucide-react';
 import { Button, Modal, Select, Banner, Chip } from '../ui';
+import { errorMessage } from './format';
 
 const COMPANY_FIELDS = [
   { key: 'name', label: 'Name' }, { key: 'domain', label: 'Domain' }, { key: 'industry', label: 'Industry' },
@@ -54,7 +55,7 @@ function MergeRecordsModal({ entityType, records, authFetch, SALES_API_BASE, onC
         method: 'POST', body: JSON.stringify({ survivorId, loserId, mergedFields })
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Could not merge records.');
+      if (!res.ok) throw new Error(errorMessage(data, 'Could not merge records.'));
       onMerged();
       onClose();
     } catch (err) {

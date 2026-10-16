@@ -8,6 +8,7 @@ import {
 } from 'lucide-react';
 import { API_BASE } from '../apiBase';
 import { atLeast } from '../roleRank';
+import { errorMessage } from './format';
 import { Page, PageBar, PageBody } from '../ui/page';
 import {
   Button, Panel, PanelHeader, Input, Textarea, Select, Field,
@@ -106,7 +107,7 @@ function ActivitiesTab({ authFetch, canManage }) {
     try {
       const res = await authFetch(`${SALES_API_BASE}/activities`, { method: 'POST', body: JSON.stringify(form) });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Could not log activity.');
+      if (!res.ok) throw new Error(errorMessage(data, 'Could not log activity.'));
       setActivities((prev) => [data.activity, ...(prev || [])]);
       setOpen(false);
       setForm({ type: 'call', subject: '', notes: '' });
@@ -119,7 +120,7 @@ function ActivitiesTab({ authFetch, canManage }) {
     try {
       const res = await authFetch(`${SALES_API_BASE}/activities/${activity.id}`, { method: 'PATCH', body: JSON.stringify({ status: activity.status === 'completed' ? 'open' : 'completed' }) });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Could not update activity.');
+      if (!res.ok) throw new Error(errorMessage(data, 'Could not update activity.'));
       setActivities((prev) => prev.map((a) => (a.id === activity.id ? data.activity : a)));
     } catch (err) {
       setError(err.message);
