@@ -50,7 +50,7 @@ async function main() {
 
   let r = await api('/api/v1/sales/companies', { method: 'POST', auth: adminToken, body: { name: 'Acme Corp', industry: 'Software', domain: 'acme.com' } });
   const survivorCompany = r.data.company;
-  r = await api('/api/v1/sales/companies', { method: 'POST', auth: adminToken, body: { name: 'Acme Corporation', phone: '555-1234' } });
+  r = await api('/api/v1/sales/companies', { method: 'POST', auth: adminToken, body: { name: 'Acme Corporation', phone: '555-123-4567' } });
   const loserCompany = r.data.company;
 
   r = await api('/api/v1/sales/contacts', { method: 'POST', auth: adminToken, body: { displayName: 'Jane Doe', companyId: loserCompany.id } });
@@ -68,11 +68,11 @@ async function main() {
 
   r = await api('/api/v1/sales/companies/merge', {
     method: 'POST', auth: adminToken,
-    body: { survivorId: survivorCompany.id, loserId: loserCompany.id, mergedFields: { phone: '555-1234' } }
+    body: { survivorId: survivorCompany.id, loserId: loserCompany.id, mergedFields: { phone: '555-123-4567' } }
   });
   assert.strictEqual(r.status, 200, JSON.stringify(r.data));
   assert.strictEqual(r.data.company.name, 'Acme Corp', 'survivor keeps its own name unless explicitly overridden');
-  assert.strictEqual(r.data.company.phone, '555-1234', 'an explicitly chosen mergedFields value must win');
+  assert.strictEqual(r.data.company.phone, '555-123-4567', 'an explicitly chosen mergedFields value must win');
   console.log('✓ admin merges two companies; survivor keeps its fields except explicit overrides');
 
   r = await api(`/api/v1/sales/companies/${loserCompany.id}`, { auth: adminToken });

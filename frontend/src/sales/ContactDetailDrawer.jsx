@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import { Building2, Phone, Mail, Calendar, StickyNote, CheckSquare, X } from 'lucide-react';
 import { Button, Input, Select, Field, Banner, Drawer, Skeleton, Chip, Avatar } from '../ui';
-import { money } from './format';
+import { money, errorMessage } from './format';
 import { useTeamMembers } from './useTeamMembers';
 
 const ACTIVITY_ICON = { call: Phone, email: Mail, meeting: Calendar, note: StickyNote, task: CheckSquare };
@@ -26,6 +26,7 @@ function ContactDetailDrawer({ contactId, onClose, authFetch, SALES_API_BASE, ca
 
   const load = () => {
     setConflict(null);
+    setError(null);
     authFetch(`${SALES_API_BASE}/contacts/${contactId}`).then((r) => r.json()).then((d) => {
       if (d.error) throw new Error(d.error);
       setData(d);
@@ -42,12 +43,13 @@ function ContactDetailDrawer({ contactId, onClose, authFetch, SALES_API_BASE, ca
   // version is the optimistic-concurrency token this contact was loaded
   // with (migration 023) — a 409 means someone else saved first.
   const saveField = async (patch) => {
+    setError(null); // clear any earlier failed save before trying this one — a fixed field shouldn't still show the old error
     try {
       const res = await authFetch(`${SALES_API_BASE}/contacts/${contactId}`, { method: 'PATCH', body: JSON.stringify({ ...patch, version: data.contact.version }) });
       const result = await res.json();
       if (!res.ok) {
         if (res.status === 409) { setConflict(result); return; }
-        throw new Error(result.error || 'Could not save.');
+        throw new Error(errorMessage(result, 'Could not save.'));
       }
       setData((prev) => ({ ...prev, contact: result.contact }));
       onChanged?.();

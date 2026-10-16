@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import { CheckCircle2, Flame, Phone, Mail, Calendar, StickyNote, CheckSquare } from 'lucide-react';
 import { Panel, PanelHeader, Banner, Skeleton, EmptyState, Chip } from '../ui';
-import { money } from './format';
+import { money, errorMessage } from './format';
 
 const ACTIVITY_ICON = { call: Phone, email: Mail, meeting: Calendar, note: StickyNote, task: CheckSquare };
 
@@ -55,7 +55,7 @@ function WorkspaceTab({ authFetch, SALES_API_BASE }) {
     try {
       const res = await authFetch(`${SALES_API_BASE}/activities/${activity.id}`, { method: 'PATCH', body: JSON.stringify({ status: 'completed' }) });
       const result = await res.json();
-      if (!res.ok) throw new Error(result.error || 'Could not update activity.');
+      if (!res.ok) throw new Error(errorMessage(result, 'Could not update activity.'));
       load();
     } catch (err) {
       setError(err.message);

@@ -16,6 +16,18 @@ const optionalEmail = () => z.preprocess((v) => (v === '' ? undefined : v), z.st
 const optionalUuid = () => z.preprocess((v) => (v === '' ? undefined : v), z.string().uuid().optional());
 const nullableOptionalUuid = () => z.preprocess((v) => (v === '' ? undefined : v), z.string().uuid().nullable().optional());
 
+// Loosely E.164: 10-15 digits after stripping spaces/parens/dashes, an
+// optional leading "+". This is the exact same contacts.phone column
+// WhatsApp Broadcast sends to as the wa_id (migration 012) — a 9-digit
+// typo here doesn't just look wrong in Sales Hub, it silently breaks a
+// WhatsApp send against that contact later. Lenient enough to accept a
+// real international number (with or without a country code) without
+// forcing one specific country's format.
+const PHONE_DIGITS = /^\+?\d{10,15}$/;
+const optionalPhone = () => z.preprocess((v) => (v === '' ? undefined : v), z.string().trim().max(50)
+  .refine((v) => PHONE_DIGITS.test(v.replace(/[\s()-]/g, '')), { message: 'Must be 10-15 digits — an optional + and country code is fine, but this looks incomplete.' })
+  .optional());
+
 // The free-form values a contact/company/deal's custom_fields jsonb
 // column holds — shape is whatever custom_field_definitions describes
 // for that entity_type (migration 016), not something zod can see
@@ -266,7 +278,7 @@ const companySchema = z.object({
   domain: z.string().trim().max(200).optional(),
   industry: z.string().trim().max(100).optional(),
   size: z.enum(['1-10', '11-50', '51-200', '201-500', '500+']).optional(),
-  phone: z.string().trim().max(50).optional(),
+  phone: optionalPhone(),
   address: z.string().trim().max(500).optional(),
   notes: z.string().trim().max(5000).optional(),
   ownerId: optionalUuid(),
@@ -278,7 +290,7 @@ const companySchema = z.object({
 
 const contactSchema = z.object({
   displayName: z.string().trim().min(1).max(200),
-  phone: z.string().trim().max(50).optional(),
+  phone: optionalPhone(),
   email: optionalEmail(),
   companyId: optionalUuid(),
   jobTitle: z.string().trim().max(150).optional(),
@@ -290,7 +302,7 @@ const contactSchema = z.object({
 
 const updateContactSchema = z.object({
   displayName: z.string().trim().min(1).max(200).optional(),
-  phone: z.string().trim().max(50).optional(),
+  phone: optionalPhone(),
   email: optionalEmail(),
   companyId: nullableOptionalUuid(),
   jobTitle: z.string().trim().max(150).optional(),

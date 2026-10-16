@@ -139,7 +139,7 @@ function SequenceDetailDrawer({ sequenceId, onClose, authFetch, SALES_API_BASE, 
         method: 'POST', body: JSON.stringify({ delayDays: Number(stepForm.delayDays) || 0, actionType: stepForm.actionType, actionConfig })
       });
       const result = await res.json();
-      if (!res.ok) throw new Error(result.error || 'Could not add step.');
+      if (!res.ok) throw new Error(errorMessage(result, 'Could not add step.'));
       setData((prev) => ({ ...prev, steps: [...prev.steps, result.step] }));
       setStepForm({ delayDays: 0, actionType: 'create_task', subject: '', tag: '' });
       onChanged?.();
@@ -152,7 +152,7 @@ function SequenceDetailDrawer({ sequenceId, onClose, authFetch, SALES_API_BASE, 
     try {
       const res = await authFetch(`${SALES_API_BASE}/sequence-steps/${step.id}`, { method: 'DELETE' });
       const result = await res.json();
-      if (!res.ok) throw new Error(result.error || 'Could not remove step.');
+      if (!res.ok) throw new Error(errorMessage(result, 'Could not remove step.'));
       setData((prev) => ({ ...prev, steps: prev.steps.filter((s) => s.id !== step.id) }));
       setConfirmDeleteStep(null);
       onChanged?.();
@@ -173,7 +173,7 @@ function SequenceDetailDrawer({ sequenceId, onClose, authFetch, SALES_API_BASE, 
     try {
       const res = await authFetch(`${SALES_API_BASE}/sequences/${sequenceId}/enroll`, { method: 'POST', body: JSON.stringify({ contactId: contact.id }) });
       const result = await res.json();
-      if (!res.ok) throw new Error(result.error || 'Could not enroll contact.');
+      if (!res.ok) throw new Error(errorMessage(result, 'Could not enroll contact.'));
       setEnrollOpen(false);
       setContactQuery('');
       setContactResults([]);
@@ -188,7 +188,7 @@ function SequenceDetailDrawer({ sequenceId, onClose, authFetch, SALES_API_BASE, 
     try {
       const res = await authFetch(`${SALES_API_BASE}/sequence-enrollments/${enrollment.id}`, { method: 'PATCH', body: JSON.stringify({ status }) });
       const result = await res.json();
-      if (!res.ok) throw new Error(result.error || 'Could not update enrollment.');
+      if (!res.ok) throw new Error(errorMessage(result, 'Could not update enrollment.'));
       setEnrollments((prev) => prev.map((e) => (e.id === enrollment.id ? { ...e, ...result.enrollment } : e)));
       onChanged?.();
     } catch (err) {

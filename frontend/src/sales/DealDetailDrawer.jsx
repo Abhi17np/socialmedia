@@ -9,6 +9,7 @@ import {
   Banner, Modal, Drawer, Skeleton, Chip, Avatar, ConfirmDialog
 } from '../ui';
 import { useTeamMembers } from './useTeamMembers';
+import { errorMessage } from './format';
 
 const ACTIVITY_ICON = { call: Phone, email: Mail, meeting: Calendar, note: StickyNote, task: CheckSquare };
 const FORECAST_CATEGORIES = ['pipeline', 'best_case', 'commit', 'omitted'];
@@ -38,6 +39,7 @@ function DealDetailDrawer({ dealId, onClose, authFetch, SALES_API_BASE, canManag
 
   const load = () => {
     setConflict(null);
+    setError(null);
     authFetch(`${SALES_API_BASE}/deals/${dealId}`).then((r) => r.json()).then((d) => {
       if (d.error) throw new Error(d.error);
       setData(d);
@@ -54,12 +56,13 @@ function DealDetailDrawer({ dealId, onClose, authFetch, SALES_API_BASE, canManag
   // version is the optimistic-concurrency token this deal was loaded
   // with (migration 023) — a 409 means someone else saved first.
   const saveField = async (patch) => {
+    setError(null); // clear any earlier failed save before trying this one — a fixed field shouldn't still show the old error
     try {
       const res = await authFetch(`${SALES_API_BASE}/deals/${dealId}`, { method: 'PATCH', body: JSON.stringify({ ...patch, version: data.deal.version }) });
       const result = await res.json();
       if (!res.ok) {
         if (res.status === 409) { setConflict(result); return; }
-        throw new Error(result.error || 'Could not save.');
+        throw new Error(errorMessage(result, 'Could not save.'));
       }
       setData((prev) => ({ ...prev, deal: result.deal }));
       onChanged?.();
@@ -83,10 +86,11 @@ function DealDetailDrawer({ dealId, onClose, authFetch, SALES_API_BASE, canManag
   };
 
   const linkContact = async (contact) => {
+    setError(null);
     try {
       const res = await authFetch(`${SALES_API_BASE}/deals/${dealId}/contacts`, { method: 'POST', body: JSON.stringify({ contactId: contact.id }) });
       const result = await res.json();
-      if (!res.ok) throw new Error(result.error || 'Could not link contact.');
+      if (!res.ok) throw new Error(errorMessage(result, 'Could not link contact.'));
       setAddContactOpen(false);
       setContactQuery('');
       setContactResults([]);
@@ -97,10 +101,11 @@ function DealDetailDrawer({ dealId, onClose, authFetch, SALES_API_BASE, canManag
   };
 
   const unlinkContact = async (contactId) => {
+    setError(null);
     try {
       const res = await authFetch(`${SALES_API_BASE}/deals/${dealId}/contacts/${contactId}`, { method: 'DELETE' });
       const result = await res.json();
-      if (!res.ok) throw new Error(result.error || 'Could not remove contact.');
+      if (!res.ok) throw new Error(errorMessage(result, 'Could not remove contact.'));
       load();
     } catch (err) {
       setError(err.message);
@@ -108,11 +113,12 @@ function DealDetailDrawer({ dealId, onClose, authFetch, SALES_API_BASE, canManag
   };
 
   const moveToStage = async (stageId, reason) => {
+    setError(null);
     try {
       const body = reason ? { stageId, lostReason: reason } : { stageId };
       const res = await authFetch(`${SALES_API_BASE}/deals/${dealId}/move`, { method: 'POST', body: JSON.stringify(body) });
       const result = await res.json();
-      if (!res.ok) throw new Error(result.error || 'Could not move deal.');
+      if (!res.ok) throw new Error(errorMessage(result, 'Could not move deal.'));
       setData((prev) => ({ ...prev, deal: result.deal }));
       onChanged?.();
       load();
@@ -134,9 +140,10 @@ function DealDetailDrawer({ dealId, onClose, authFetch, SALES_API_BASE, canManag
   };
 
   const deleteDeal = async () => {
+    setError(null);
     try {
       const res = await authFetch(`${SALES_API_BASE}/deals/${dealId}`, { method: 'DELETE' });
-      if (!res.ok) { const result = await res.json(); throw new Error(result.error || 'Could not delete deal.'); }
+      if (!res.ok) { const result = await res.json(); throw new Error(errorMessage(result, 'Could not delete deal.')); }
       setConfirmDelete(false);
       onChanged?.();
       onClose();

@@ -124,7 +124,7 @@ function CompaniesTab({ authFetch, SALES_API_BASE, canManage, canDelete, openId 
       const result = await res.json();
       if (!res.ok) {
         if (res.status === 409) { setConflict(result); return; }
-        throw new Error(result.error || 'Could not save.');
+        throw new Error(errorMessage(result, 'Could not save.'));
       }
       setDetail((prev) => ({ ...prev, company: result.company }));
       load();
