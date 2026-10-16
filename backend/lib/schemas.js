@@ -130,6 +130,10 @@ const createDecisionScenarioSchema = z.object({
   lookbackWeeks: z.number().int().min(2).max(26).optional()
 });
 
+const proposeAgencyLinkSchema = z.object({
+  agencySlug: z.string().trim().min(1).max(100)
+});
+
 const createExperimentSchema = z.object({
   name: z.string().trim().min(1).max(200),
   variable: z.enum(['hook', 'caption', 'cta', 'format']),
@@ -725,7 +729,7 @@ module.exports = {
   savedReplySchema, draftPostSchema, whatsappEmbeddedSignupSchema, inboxReplySchema, updateInteractionSchema,
   repurposeSchema, brandMemorySchema, createExperimentSchema, CONFIDENCE_LEVELS,
   createTrackedLinkSchema, updateTrackedLinkSchema, conversionJourneySchema,
-  createTrackedCompetitorSchema, competitorGapsSchema, createDecisionScenarioSchema,
+  createTrackedCompetitorSchema, competitorGapsSchema, createDecisionScenarioSchema, proposeAgencyLinkSchema,
   INTERACTION_STATUSES, INTERACTION_PRIORITIES, changePasswordSchema, forgotPasswordSchema, resetPasswordSchema,
   updateHubsSchema, templateSchema, segmentSchema, segmentMembersSchema, whatsappCampaignSchema,
   companySchema, contactSchema, updateContactSchema, dealSchema, updateDealSchema, moveDealStageSchema, salesActivitySchema,

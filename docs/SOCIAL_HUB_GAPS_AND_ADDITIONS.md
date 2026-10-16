@@ -947,7 +947,115 @@ Suspense issue every prior round also hit).
 
 **Blockers / deployment requirements**: none new.
 
-## 13. What's still deliberately deferred (not silently dropped)
+## 13. Round 11 — Agency Workspace
+
+**The last item in this priority list, same situation as Rounds 9-10**:
+no scope for "Agency Workspace" existed anywhere in this repo.
+Designed from scratch against this app's actual tenant model: every
+tenant is independent (its own billing, its own users, its own data),
+and `users` rows are keyed by `(tenant_id, email)` — the same email can
+already be invited into several tenants today (Team's existing invite
+flow), but each is a fully separate login with its own password_hash
+and its own tenant-scoped JWT; there is no concept of "one identity
+spanning several tenants" to build a switcher on top of without a much
+bigger auth-model change. What's real and buildable without that
+change is narrower but genuinely useful: letting one tenant see an
+aggregate, READ-ONLY rollup of other tenants it manages as their
+agency — the same shape every competitor's "agency/multi-client view"
+actually is — gated by explicit, mutual consent rather than silently
+trusting a slug.
+
+**What was built**: an `agency_links` table (migration 043) with
+`agency_tenant_id`/`client_tenant_id`/`status` ('pending' | 'active' |
+'revoked'); pure authorization logic (`backend/lib/agencyWorkspace.js`:
+`canApprove()`, `canRevoke()`, `linkDirection()`); a CRUD + lifecycle
+route (`backend/routes/agency.js`, including `gatherClientOverview()`);
+no AI involved at all — this feature is pure data aggregation, with
+nothing qualitative to narrate.
+
+**Mutual, explicit consent, not silent trust in a slug**: a client
+proposes a link by the agency's tenant slug (already a public-ish
+identifier, used at signup — see migration 001). Nothing is shared at
+that point; the AGENCY side must separately approve it
+(`canApprove()`: only the agency side, only while still pending) before
+any read of the client's data is possible at all. Either side can
+revoke at any time (`canRevoke()`: either side, any status except
+already-revoked), and revoking takes effect on the very next read — the
+overview route only ever reads `status = 'active'` links, so there is
+no cache or sync delay to close.
+
+**The one deliberate exception to "every query scopes to req.tenantId"
+in this whole app, and it's checked, not assumed**: `GET /agency/
+overview` reads another tenant's data ON PURPOSE, but only for a
+`client_tenant_id` with an `agency_links` row naming `req.tenantId` as
+the agency side AND `status = 'active'` — verified before any such read
+happens, never after. A tenant not party to a given link gets a plain
+404 trying to approve or revoke it (`findLinkForTenant()` only matches
+rows where the requesting tenant is a real party to it) and sees
+nothing in its own overview for a client it has no active link to —
+confirmed directly in the integration test with a genuinely unrelated
+third tenant, not just asserted.
+
+**Never raw content, only aggregate counts** — `gatherClientOverview()`
+reads connected-account count, summed followers (reusing
+`lib/socialMetrics.js`'s `latestFollowerCount()`, Round 10's own
+extraction), open interactions (`mentions`/`inbox_messages` with
+`interaction_status = 'open'`), pending-approval posts
+(`scheduled_posts.status = 'pending_review'`, migration 034's existing
+approval workflow), and open crisis alerts (`crisis_alerts.status =
+'open'`, Round 9). Every number is a `count`/`select` aggregate; no
+query in this file ever selects message text, post content, or contact
+data. A client who wants their agency to actually post or reply on
+their behalf still invites them as a real team member into their own
+tenant (Team's existing flow) — a different, more privileged
+relationship this feature deliberately does not try to replace.
+
+**New endpoints**: `POST /agency/links`, `GET /agency/links`,
+`PATCH /agency/links/:id/{approve,revoke}`, `GET /agency/overview`.
+
+**Files added**: `backend/migrations/043_agency_workspace.sql`;
+`backend/lib/agencyWorkspace.js` (pure, DB/network-free);
+`backend/routes/agency.js`; `backend/test/agencyWorkspace.test.js` (6
+unit tests); `backend/scripts/integration-tests/
+social-agency-workspace.js` (15 assertions against a live
+Postgres+PostgREST stack); `frontend/src/social/AgencyWorkspace.jsx`.
+
+**Files changed**: `backend/lib/schemas.js`
+(`proposeAgencyLinkSchema`); `backend/server.js` (mounts the routes —
+no background sweep, this feature is entirely on-demand/synchronous);
+`frontend/src/social/SocialNav.jsx` (new nav item).
+
+**Tests run**: `npm test`: **210/210** (6 new
+`agencyWorkspace.test.js` cases, zero regressions). Backend `eslint .`
+clean on every changed/added file (5 pre-existing lint errors in
+unrelated, untouched files). Integration (live local
+Postgres+PostgREST): new `social-agency-workspace.js` **15/15** —
+unknown-slug 404, self-link rejection, admin+ role gating on propose,
+duplicate-proposal conflict, correct direction/other-tenant labeling
+on both sides, an EMPTY overview while a link is merely pending, both
+"wrong side" and "wrong role" rejected for approval, a REAL end-to-end
+aggregate computed from seeded `social_accounts`/`analytics_snapshots`/
+`mentions`/`inbox_messages`/`scheduled_posts`/`crisis_alerts` (2
+accounts, 2500 followers, 3 open interactions, 1 pending-approval post,
+1 open crisis alert) — exactly right, not approximately — a genuinely
+unrelated third tenant seeing and touching none of it, immediate loss
+of access on revoke, a 409 on double-revoke, and a re-proposal after
+revoke reusing the same row rather than duplicating it. Full `npm run
+test:integration` (34 scripts) re-run clean, zero regressions
+anywhere. Frontend `eslint .` clean; `next build` compiles (the
+pre-existing layout-level `useSearchParams()`-without-`Suspense` issue
+every prior round's build also hit is confirmed, this round, to live in
+`app/(app)/layout.jsx` itself — unrelated to and untouched by any of
+this work — and to surface on whichever page Next's build-worker
+scheduling happens to reach first, not always `/account`; two
+consecutive builds in this round failed on `/inbox` and then on
+`/marketing`+`/account`, confirming it is pre-existing nondeterministic
+flakiness in a shared layout, not a regression from any page added
+this round).
+
+**Blockers / deployment requirements**: none new.
+
+## 14. What's still deliberately deferred (not silently dropped)
 
 - **Real, personalized best-time-to-post**, specifically. Per-post data
   now exists (likes/comments/shares/views — see Round 3 above), but
@@ -989,6 +1097,14 @@ Suspense issue every prior round also hit).
   lever. It also does not predict whether posting more raises or
   dilutes engagement rate — modeled as unchanged, a stated assumption,
   not a claim this app can back with data. See Round 10 above.
+- **No single login that spans multiple tenants** — Agency Workspace
+  (Round 11) lets a tenant see an aggregate rollup of other tenants it
+  manages, but each tenant is still a fully separate login with its own
+  password; there is no unified "switch workspace" picker across
+  tenants sharing an identity. Building one would need a real auth-model
+  change (today's `users` rows are keyed by `(tenant_id, email)` with an
+  independent password_hash per tenant, by design), not an extension of
+  this round's read-only rollup.
 - **A drag-and-drop visual content calendar editor** beyond the existing
   month-view calendar (which is read/schedule, not a kanban-style
   approval board).

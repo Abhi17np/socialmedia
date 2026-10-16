@@ -260,6 +260,28 @@ analysis against competitors and what shipped in which round, see
 - Every run is persisted (not computed-and-discarded) so a tenant can
   review exactly what was asked and projected later.
 
+## Agency Workspace
+
+- **A tenant can see a read-only aggregate rollup across other tenants
+  it manages as their agency** — connected accounts, total followers,
+  open interactions, pending-approval posts, open crisis alerts — all
+  computed fresh from each client's own real data, never a second copy
+  stored in the agency's tenant.
+- **Mutual, explicit consent only** — a client proposes a link by the
+  agency's tenant slug; the agency must separately approve it before
+  any data is shared at all. Either side can revoke at any time, and
+  revoking stops sharing immediately, not on the next sync.
+- **Never raw content** — no messages, no post text, no contact data
+  crosses this boundary, only counts and sums. This is a deliberate,
+  stated privacy boundary, not an oversight.
+- A tenant not party to a given link can neither see it nor act on it —
+  approving or revoking someone else's link, or reading another
+  tenant's aggregate, 404s/returns nothing, the same tenant-isolation
+  guarantee every other cross-tenant-adjacent feature in this app holds.
+- Re-proposing a link after a revoke reuses the same record rather than
+  accumulating duplicate rows, keeping one clean history per agency/
+  client pair.
+
 ## Billing & Usage
 
 - **Razorpay subscriptions** + real usage metering (`increment_usage` Postgres RPC),
@@ -304,6 +326,12 @@ analysis against competitors and what shipped in which round, see
   numbers to project from. It also doesn't predict whether posting more would raise
   or dilute engagement rate — that's modeled as unchanged, an explicit, stated
   simplifying assumption, not a claim this app can actually back with data.
+- **Agency Workspace shares only aggregate counts, never raw content** — an agency
+  cannot read a client's actual messages, post text, or contacts through this
+  feature, only the 5 rollup numbers; a client who wants an agency to post or reply
+  on their behalf still invites them as a normal team member into their own tenant
+  (the existing Team feature), which is a different, more privileged relationship
+  this feature deliberately does not replace.
 - **No per-post analytics for LinkedIn or Google Business**, and **no per-post reach/
   impressions for any platform** — real, current platform/permission limits, not an
   unbuilt feature (see `docs/SOCIAL_HUB_GAPS_AND_ADDITIONS.md`'s Round 3 for the exact

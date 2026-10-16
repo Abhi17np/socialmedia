@@ -85,6 +85,7 @@ node scripts/integration-tests/social-conversion-journeys.js
 node scripts/integration-tests/social-competitors.js
 node scripts/integration-tests/social-crisis.js
 node scripts/integration-tests/social-decision-simulator.js
+node scripts/integration-tests/social-agency-workspace.js
 node scripts/integration-tests/whatsapp-routes.js
 node scripts/integration-tests/sales-routes.js
 node scripts/integration-tests/sales-stage1.js
