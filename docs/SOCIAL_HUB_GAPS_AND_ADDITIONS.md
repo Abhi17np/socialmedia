@@ -828,7 +828,126 @@ round also hit).
 
 **Blockers / deployment requirements**: none new.
 
-## 12. What's still deliberately deferred (not silently dropped)
+## 12. Round 10 — Marketing Decision Simulator
+
+**Same situation as Round 9**: no scope for "Marketing Decision
+Simulator" existed anywhere in this repo either. Designed from scratch
+against the same constraint that shaped Crisis Intelligence: Global
+Rule 2 (no fake/placeholder data) rules out the most obvious reading of
+"marketing decision simulator" — a general ad-budget/multi-channel
+reallocation tool — because this app tracks no ad spend at all and has
+no connected ad platform. Inventing budget numbers to simulate against
+would be exactly the fabricated-baseline failure mode rule 2 exists to
+prevent. What's left that's honestly simulate-able, with real data this
+app already collects, is narrower but real: projecting the effect of
+posting MORE OR LESS OFTEN on one connected account, using that
+account's own historical posting frequency, engagement rate, and
+follower growth.
+
+**What was built**: a `decision_scenarios` table (migration 042); pure
+projection math (`backend/lib/decisionSimulator.js`:
+`computeFollowerGrowthStats()` — literally `lib/crisisDetection.js`'s
+`computeBaseline()` reused under this feature's own name, since "mean
+and stddev of a historical series" is the same calculation either way —
+and `projectScenario()`); a CRUD route
+(`backend/routes/decisionSimulator.js`, including `gatherBaseline()`,
+the ONLY place real historical rows are read into a baseline); and a
+pull-based AI narrative endpoint (`POST /ai/decision-simulator/
+scenarios/:id/explain`, `lib/ai.js`'s `explainScenario`).
+
+**A deliberately simple, transparent linear model, not a black-box
+forecast** — the same "real statistics, state uncertainty, refuse/flag
+below a floor" discipline as every other quantitative feature in this
+app (Round 5's `evaluateExperiment()`, Round 9's `detectSpike()`),
+applied here to a "what if" projection instead of a go/no-go decision:
+- The requested multiplier is clamped to [0.1, 5] — a linear
+  extrapolation isn't credible far outside an account's own observed
+  range — and the response reports when and to what it was clamped,
+  rather than silently producing a confident-looking number a model
+  this simple can't actually support.
+- Engagement rate is projected UNCHANGED, on purpose: this model takes
+  no position on whether posting more would raise or dilute per-post
+  engagement, and says so as a stated assumption rather than a buried
+  one.
+- Follower growth is scaled by the same multiplier (a stated
+  simplifying assumption: growth scales proportionally with posting
+  activity, not a proven causal claim for any given tenant), with a
+  95% interval built from the REAL historical week-to-week stddev
+  (unscaled) around that estimate — never a fabricated error margin.
+- `confidence` is explicitly `'low'` whenever the growth estimate rests
+  on fewer than 4 weeks of real history — engagement rate and posts/week
+  need no such floor since they're observed facts about the baseline
+  itself, not projections into the future.
+
+**AI is never the source of a number here, only commentary on
+already-final ones** — a position weaker than this app's usual
+evidence-citation discipline (there's no discrete list of "evidence
+items" to validate indices against for a numeric projection, unlike
+Round 8's `analyzeCompetitorGaps()` or Round 9's `summarizeCrisis()`),
+and treated that way in the code's own comments: `explainScenario()` is
+told exactly which numbers it may reference and instructed never to
+state a different one or narrow the stated uncertainty range, but nothing
+algorithmically re-verifies that after the fact the way citation-index
+validation does. The real numbers are always shown directly in the UI
+from the deterministic projection; this narrative is offered as color
+on top, never as their source.
+
+**New endpoints**: `POST`/`GET /social/decision-simulator/scenarios`,
+`GET /social/decision-simulator/scenarios/:id`,
+`DELETE /social/decision-simulator/scenarios/:id`,
+`POST /ai/decision-simulator/scenarios/:id/explain`.
+
+**A real refactor along the way**: `routes/competitors.js`'s own
+`ownEngagementRate()` (Round 8) was moved to
+`backend/lib/socialMetrics.js` as `computeAccountEngagementRate()` (plus
+a new `latestFollowerCount()`) once this round needed the exact same
+calculation for a baseline — rather than keeping a second copy that
+could drift. `routes/competitors.js` itself was updated to call the
+shared version; its own integration test re-run clean (12/12) to
+confirm the refactor changed no behavior.
+
+**Files added**: `backend/migrations/042_decision_simulator.sql`;
+`backend/lib/decisionSimulator.js` (pure, DB/network-free);
+`backend/routes/decisionSimulator.js`;
+`backend/test/decisionSimulator.test.js` (8 unit tests);
+`backend/scripts/integration-tests/social-decision-simulator.js` (11
+assertions against a live Postgres+PostgREST stack, with a fully
+deterministic zero-variance seeded baseline so the projected numbers
+are exactly checkable, not just "roughly right"); `frontend/src/social/
+DecisionSimulator.jsx`.
+
+**Files changed**: `backend/lib/socialMetrics.js`
+(`computeAccountEngagementRate`, `latestFollowerCount` — the refactor
+above); `backend/routes/competitors.js` (uses the shared helper);
+`backend/lib/ai.js` (`explainScenario`); `backend/lib/schemas.js`
+(`createDecisionScenarioSchema`); `backend/routes/ai.js` (the new
+endpoint); `backend/server.js` (mounts the routes — no background sweep
+needed, this feature is entirely on-demand/synchronous);
+`frontend/src/social/SocialNav.jsx` (new nav item).
+
+**Tests run**: `npm test`: **204/204** (8 new
+`decisionSimulator.test.js` cases, zero regressions). Backend `eslint .`
+clean on every changed/added file (5 pre-existing lint errors in
+unrelated, untouched files). Integration (live local
+Postgres+PostgREST): new `social-decision-simulator.js` **11/11** —
+foreign/nonexistent account 404s, schema-level rejection of a
+non-positive multiplier, member+ role gating, an EXACT baseline
+computed from real seeded `scheduled_posts`/`post_analytics`/
+`analytics_snapshots` (2 posts/week, followers=1350, growth mean=50/
+stddev=0 over 7 weeks, engagement=15/1350) and its exactly-doubled
+projection, multiplier clamping (10→5, reported), an account with only
+1 week of growth history honestly flagged "low" confidence, tenant
+isolation, admin+-gated delete with real persistence and idempotent
+404 on a repeat, and the AI endpoint's fail-closed 503. `social-
+competitors.js` re-run as a regression check for the `socialMetrics.js`
+refactor: still **12/12**. Full `npm run test:integration` (33 scripts)
+re-run clean, zero regressions anywhere. Frontend `eslint .` clean;
+`next build` compiles (same pre-existing, unrelated `/account`
+Suspense issue every prior round also hit).
+
+**Blockers / deployment requirements**: none new.
+
+## 13. What's still deliberately deferred (not silently dropped)
 
 - **Real, personalized best-time-to-post**, specifically. Per-post data
   now exists (likes/comments/shares/views — see Round 3 above), but
@@ -863,6 +982,13 @@ round also hit).
   this app can't see won't trigger an alert until it reaches your own
   channels as real inbound volume. See Round 9 above for why this was
   the honest scope, not a smaller version of real social listening.
+- **The Marketing Decision Simulator has no ad-budget/multi-channel
+  allocation lever** — this app tracks no ad spend at all, so there is
+  no real data to simulate a budget reallocation against; posting
+  frequency on one connected account is the one honestly-modelable
+  lever. It also does not predict whether posting more raises or
+  dilutes engagement rate — modeled as unchanged, a stated assumption,
+  not a claim this app can back with data. See Round 10 above.
 - **A drag-and-drop visual content calendar editor** beyond the existing
   month-view calendar (which is read/schedule, not a kanban-style
   approval board).

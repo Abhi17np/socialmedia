@@ -10,7 +10,8 @@ import {
   Megaphone,
   FlaskConical,
   Swords,
-  Siren
+  Siren,
+  Calculator
 } from 'lucide-react';
 import { atLeast } from '../roleRank';
 
@@ -36,6 +37,7 @@ const ITEMS = [
   { href: '/experiments', icon: FlaskConical, label: 'Experiments', minRole: 'viewer' },
   { href: '/competitors', icon: Swords, label: 'Competitors', minRole: 'viewer' },
   { href: '/crisis-alerts', icon: Siren, label: 'Crisis Alerts', minRole: 'viewer' },
+  { href: '/decision-simulator', icon: Calculator, label: 'Decision Simulator', minRole: 'viewer' },
   { href: '/whatsapp', icon: Megaphone, label: 'WhatsApp Broadcast', minRole: 'viewer' }
 ];
 

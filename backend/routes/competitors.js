@@ -16,12 +16,10 @@ const { validate } = require('../middleware/validate');
 const { asyncHandler } = require('../lib/asyncHandler');
 const { recordAudit } = require('../lib/audit');
 const { createTrackedCompetitorSchema } = require('../lib/schemas');
-const { averageEngagementRate } = require('../lib/competitorRadar');
-const { FOLLOWER_METRIC } = require('../lib/socialMetrics');
+const { computeAccountEngagementRate } = require('../lib/socialMetrics');
 const ADAPTERS = require('../social/adapters');
 
 const router = express.Router();
-const OWN_COMPARISON_WINDOW_DAYS = 30;
 
 function requireSocialClient(res) {
   const client = getSocialClient();
@@ -66,29 +64,6 @@ router.get('/social/competitors', asyncHandler(async (req, res) => {
   res.json({ competitors: data });
 }));
 
-/** Sums (likes+comments) from the tenant's own recent post_analytics against viewerAccountId, averaged per post and divided by the account's latest follower count — the exact same formula lib/competitorRadar.js's averageEngagementRate uses for the competitor, so the two numbers are directly comparable. */
-async function ownEngagementRate(client, tenantId, viewerAccountId, platform) {
-  const since = new Date(Date.now() - OWN_COMPARISON_WINDOW_DAYS * 24 * 60 * 60 * 1000).toISOString();
-  const { data: ownPosts } = await scoped(client, tenantId, 'scheduled_posts').select('id').eq('status', 'published').gte('scheduled_at', since).contains('target_account_ids', [viewerAccountId]);
-  const postIds = (ownPosts || []).map((p) => p.id);
-
-  const { data: followerRow } = await client.from('analytics_snapshots').select('value').eq('social_account_id', viewerAccountId)
-    .eq('metric', FOLLOWER_METRIC[platform] || 'followers').order('captured_date', { ascending: false }).limit(1).maybeSingle();
-  const followers = followerRow ? Number(followerRow.value) : 0;
-  if (postIds.length === 0 || !followers) return { rate: 0, postsCompared: 0, followers };
-
-  const { data: analyticsRows } = await client.from('post_analytics').select('scheduled_post_id, metric, value').in('scheduled_post_id', postIds).eq('social_account_id', viewerAccountId);
-  const byPost = new Map();
-  for (const row of analyticsRows || []) {
-    if (!['likes', 'comments'].includes(row.metric)) continue;
-    const current = byPost.get(row.scheduled_post_id) || { likes: 0, comments: 0 };
-    current[row.metric] = Number(row.value) || 0; // post_analytics is itself a time series; this is a reasonable simplification (last-seen per metric, not re-sorted by date here) for a "rough own-side comparator," not the headline number
-    byPost.set(row.scheduled_post_id, current);
-  }
-  const pseudoPosts = [...byPost.values()];
-  return { rate: averageEngagementRate(pseudoPosts, followers), postsCompared: pseudoPosts.length, followers };
-}
-
 router.get('/social/competitors/:id', asyncHandler(async (req, res) => {
   const client = requireSocialClient(res);
   if (!client) return;
@@ -100,7 +75,7 @@ router.get('/social/competitors/:id', asyncHandler(async (req, res) => {
   const latest = {};
   for (const row of snapshotRows || []) latest[row.metric] = Number(row.value); // ordered ascending, so the last write per metric is the latest
 
-  const own = await ownEngagementRate(client, req.tenantId, competitor.viewer_account_id, competitor.platform);
+  const own = await computeAccountEngagementRate(client, req.tenantId, competitor.viewer_account_id, competitor.platform, { windowDays: 30 });
 
   res.json({
     competitor,

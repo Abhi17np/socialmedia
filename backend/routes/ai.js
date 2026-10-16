@@ -13,7 +13,7 @@ const { assertWithinLimit, recordUsage } = require('../lib/entitlements');
 const { validate } = require('../middleware/validate');
 const { requireRole } = require('../middleware/tenant');
 const { draftPostSchema, hashtagSuggestSchema, repurposeSchema, competitorGapsSchema } = require('../lib/schemas');
-const { draftPost, draftReply, suggestHashtags, classifyMessage, repurposeContent, analyzeCompetitorGaps, summarizeCrisis, getAnthropicClient } = require('../lib/ai');
+const { draftPost, draftReply, suggestHashtags, classifyMessage, repurposeContent, analyzeCompetitorGaps, summarizeCrisis, explainScenario, getAnthropicClient } = require('../lib/ai');
 const { getBrandProfile, buildBrandContext, checkBrandViolations } = require('../lib/brandMemory');
 const { findDuplicateWarning, mediaRequirementWarnings } = require('../lib/repurposing');
 const { getUsableAccount } = require('../social/accounts');
@@ -282,6 +282,36 @@ router.post('/crisis-alerts/:id/summarize', async (req, res) => {
 
     await recordUsage(client, req.tenantId, 'aiGenerationsPerMonth');
     res.json({ themes: resolvedThemes, priorityMessages: resolvedPriority, note });
+  } catch (err) {
+    res.status(err.statusCode || 500).json({ error: err.message });
+  }
+});
+
+/**
+ * Marketing Decision Simulator's optional narrative (lib/ai.js's
+ * explainScenario). member+ matches /compose/draft's own bar. Reads an
+ * ALREADY-PERSISTED scenario's baseline/projection columns — the exact
+ * numbers routes/decisionSimulator.js computed and saved — and passes
+ * them through unchanged; this endpoint runs no new math of its own.
+ */
+router.post('/decision-simulator/scenarios/:id/explain', requireRole('member'), async (req, res) => {
+  const client = requireSocialClient(res);
+  if (!client) return;
+  if (!getAnthropicClient()) return res.status(503).json({ error: 'AI Assist is not configured (ANTHROPIC_API_KEY in backend/.env).' });
+
+  try {
+    await assertWithinLimit(client, req.tenantId, 'aiGenerationsPerMonth');
+
+    const { data: scenario, error: scenarioErr } = await scoped(client, req.tenantId, 'decision_scenarios').select('*').eq('id', req.params.id).maybeSingle();
+    if (scenarioErr) return res.status(500).json({ error: scenarioErr.message });
+    if (!scenario) return res.status(404).json({ error: 'Scenario not found.' });
+
+    const { explanation } = await explainScenario({
+      baseline: scenario.baseline, projection: scenario.projection, frequencyMultiplier: scenario.frequency_multiplier
+    });
+
+    await recordUsage(client, req.tenantId, 'aiGenerationsPerMonth');
+    res.json({ explanation });
   } catch (err) {
     res.status(err.statusCode || 500).json({ error: err.message });
   }

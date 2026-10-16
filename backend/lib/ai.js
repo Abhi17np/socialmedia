@@ -319,4 +319,50 @@ async function summarizeCrisis({ messages, brandContext }) {
   }
 }
 
-module.exports = { getAnthropicClient, draftPost, draftReply, suggestHashtags, classifyMessage, repurposeContent, analyzeCompetitorGaps, summarizeCrisis };
+/**
+ * Marketing Decision Simulator's optional narrative — put ALREADY-FINAL,
+ * deterministically-computed numbers (lib/decisionSimulator.js) into
+ * plain English. AI never decides or adjusts the projection itself,
+ * only comments on numbers it's handed; unlike every other grounded AI
+ * feature in this app, there's no discrete list of "evidence items" to
+ * cite and re-validate indices against here — the grounding instead is
+ * that the model is told exactly which numbers it may reference and
+ * instructed not to state any other one, and never to sharpen the
+ * uncertainty this app's own math already reported as a range. This is
+ * weaker grounding than citation-based evidence and is treated that way:
+ * this narrative is offered as color on numbers already shown directly
+ * in the UI, never as the source of the numbers themselves.
+ */
+async function explainScenario({ baseline, projection, frequencyMultiplier }) {
+  const anthropic = getAnthropicClient();
+  if (!anthropic) throw unavailableError();
+
+  const facts = [
+    `Current posting frequency: ${baseline.postsPerWeek.toFixed(1)} posts/week.`,
+    `Current engagement rate: ${(baseline.engagementRate * 100).toFixed(2)}%.`,
+    `Current follower growth: ${baseline.followerGrowthPerWeek.mean.toFixed(1)}/week on average, based on ${baseline.followerGrowthPerWeek.weeksOfData} weeks of history.`,
+    `Requested change: posting frequency × ${frequencyMultiplier}${projection.wasClamped ? ` (clamped to × ${projection.appliedMultiplier} — a simple model like this one isn't credible further outside the observed range)` : ''}.`,
+    `Projected posting frequency: ${projection.postsPerWeek.toFixed(1)} posts/week.`,
+    `Projected engagement rate: unchanged, ${(projection.engagementRate * 100).toFixed(2)}% (this model does not predict whether posting more would raise or dilute it).`,
+    `Projected follower growth: ${projection.followerGrowthPerWeek.mean.toFixed(1)}/week, with a 95% range of ${projection.followerGrowthPerWeek.low.toFixed(1)} to ${projection.followerGrowthPerWeek.high.toFixed(1)}.`,
+    `Confidence: ${projection.confidence}${projection.confidence === 'low' ? ' (fewer than 4 weeks of follower-growth history — treat this range as a rough guide only)' : ''}.`
+  ].join(' ');
+
+  const response = await anthropic.messages.create({
+    model: MODEL,
+    max_tokens: 512,
+    output_config: { effort: 'low' },
+    system: [
+      'You explain a marketing posting-frequency projection to a small business owner in plain English, 3-4 sentences.',
+      'You may reference ONLY the numbers given to you below — never state a number, percentage, or range that was not explicitly given.',
+      'Never narrow, sharpen, or drop the stated uncertainty range — if confidence is "low," say so plainly rather than sounding more certain than the numbers support.',
+      'Mention the one or two biggest caveats (the unchanged-engagement-rate assumption, and low confidence if applicable) rather than just repeating the optimistic number.',
+      'No markdown, no bullet points, no preamble — plain prose only.'
+    ].join(' '),
+    messages: [{ role: 'user', content: facts }]
+  });
+  if (response.stop_reason === 'refusal') throw refusedError(response.stop_details);
+  return { explanation: textOf(response) };
+}
+
+module.exports = { getAnthropicClient, draftPost, draftReply, suggestHashtags, classifyMessage, repurposeContent, analyzeCompetitorGaps, summarizeCrisis, explainScenario };

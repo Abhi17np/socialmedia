@@ -122,6 +122,14 @@ const competitorGapsSchema = z.object({
   trackedCompetitorId: z.string().uuid()
 });
 
+const createDecisionScenarioSchema = z.object({
+  socialAccountId: z.string().uuid(),
+  // Clamped again server-side (lib/decisionSimulator.js's MIN/MAX_MULTIPLIER) — this range is just a sane
+  // input bound so a wildly out-of-range number doesn't even reach that clamp logic as a "surprise."
+  frequencyMultiplier: z.number().positive().max(20),
+  lookbackWeeks: z.number().int().min(2).max(26).optional()
+});
+
 const createExperimentSchema = z.object({
   name: z.string().trim().min(1).max(200),
   variable: z.enum(['hook', 'caption', 'cta', 'format']),
@@ -717,7 +725,7 @@ module.exports = {
   savedReplySchema, draftPostSchema, whatsappEmbeddedSignupSchema, inboxReplySchema, updateInteractionSchema,
   repurposeSchema, brandMemorySchema, createExperimentSchema, CONFIDENCE_LEVELS,
   createTrackedLinkSchema, updateTrackedLinkSchema, conversionJourneySchema,
-  createTrackedCompetitorSchema, competitorGapsSchema,
+  createTrackedCompetitorSchema, competitorGapsSchema, createDecisionScenarioSchema,
   INTERACTION_STATUSES, INTERACTION_PRIORITIES, changePasswordSchema, forgotPasswordSchema, resetPasswordSchema,
   updateHubsSchema, templateSchema, segmentSchema, segmentMembersSchema, whatsappCampaignSchema,
   companySchema, contactSchema, updateContactSchema, dealSchema, updateDealSchema, moveDealStageSchema, salesActivitySchema,

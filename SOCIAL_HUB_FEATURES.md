@@ -229,6 +229,37 @@ analysis against competitors and what shipped in which round, see
 - **Acknowledge (member+) / resolve (admin+) lifecycle**, audit-logged,
   surfaced as a banner on the Social Hub Dashboard when an alert is open.
 
+## Marketing Decision Simulator
+
+- **One real, owned lever: posting frequency on a connected account** —
+  deliberately not a general ad-budget/multi-channel allocator, since
+  this app tracks no ad spend at all; a "reallocate budget" simulator
+  would have to invent numbers it doesn't have. "What if I post N× as
+  often?" is the one decision with real historical data behind it.
+- **Every baseline number comes from the tenant's own real history**,
+  gathered fresh server-side on every run — current posts/week,
+  current engagement rate (the same audience-normalized formula
+  Competitor Opportunity Radar uses), and real week-over-week follower
+  growth. There is no way to supply a baseline from the client.
+- **A simple, transparent linear model, not a black-box forecast** — the
+  requested multiplier is clamped to a credible range (reported back
+  when it was clamped), engagement rate is projected unchanged (an
+  explicitly stated assumption, not a hidden one), and follower growth
+  scales proportionally with the same real historical variance used to
+  build a 95% interval around it.
+- **Confidence is honestly flagged, not implied by false precision** — a
+  projection built on fewer than 4 weeks of real follower-growth history
+  is marked "low confidence" rather than shown with the same visual
+  weight as one backed by months of data.
+- **An optional, pull-based AI narrative** (same metered,
+  `ANTHROPIC_API_KEY`-gated posture as every other AI Assist feature)
+  puts the already-final numbers into plain English — the model never
+  computes or adjusts a number itself, is told exactly which figures it
+  may reference, and is instructed never to narrow the stated
+  uncertainty range.
+- Every run is persisted (not computed-and-discarded) so a tenant can
+  review exactly what was asked and projected later.
+
 ## Billing & Usage
 
 - **Razorpay subscriptions** + real usage metering (`increment_usage` Postgres RPC),
@@ -267,6 +298,12 @@ analysis against competitors and what shipped in which round, see
   until it actually reaches your own channels as real inbound volume. This is the
   same "official APIs/own accounts only" boundary Competitor Opportunity Radar and
   the rest of this app respect — not a smaller version of real social listening.
+- **The Marketing Decision Simulator only projects posting frequency, never ad
+  spend or budget allocation** — this app has no connected ad platform and tracks
+  no spend data at all, so a budget-reallocation simulator would have no real
+  numbers to project from. It also doesn't predict whether posting more would raise
+  or dilute engagement rate — that's modeled as unchanged, an explicit, stated
+  simplifying assumption, not a claim this app can actually back with data.
 - **No per-post analytics for LinkedIn or Google Business**, and **no per-post reach/
   impressions for any platform** — real, current platform/permission limits, not an
   unbuilt feature (see `docs/SOCIAL_HUB_GAPS_AND_ADDITIONS.md`'s Round 3 for the exact
